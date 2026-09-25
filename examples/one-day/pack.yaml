@@ -1,0 +1,17 @@
+# The smallest pack worth reading: one day, two places, two people, one alert.
+# Copy the folder, change the content, load it. Nothing here needs the shell to be changed.
+
+pack:
+  id: one-day
+  name: One day
+  language: en
+  timezone: Europe/Lisbon
+  content: content.yaml
+
+conventions:
+  alert_prefixes: [warn, alert]
+  hidden_prefixes: [source]
+
+ui:
+  today: Today
+  back: Back

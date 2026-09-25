@@ -1,0 +1,69 @@
+people:
+  - {id: rita,  name: Rita,  adult: true}
+  - {id: tomas, name: Tomas, adult: false}
+
+days:
+  - date: 2026-04-11
+    title: The tile museum and the late ferry
+    who: [rita, tomas]
+    blocks:
+      - ["", "Nothing before 10:00. The ferry back is the only fixed hour."]
+      - ["10:30", "Walk up through Graca. Shade on the left side of the street.",
+         {type: walking}]
+      - ["11:15", "Museu Nacional do Azulejo, start on the top floor and come down.",
+         {type: visit, place: azulejo, guide: tomas, until: "13:00"}]
+      - ["13:15", "Lunch in the museum cloister. It is the cheap one, not the famous one.",
+         {type: meal}]
+      - ["18:40", "Ferry from Cais do Sodre. Last one that connects is 19:10, do not wait for it.",
+         {type: transfer, place: cais_do_sodre, locked: true}]
+
+places:
+  azulejo:
+    name: Museu Nacional do Azulejo
+    kind: museum
+    at: {lat: 38.7248, lon: -9.1139, radius_m: 120}
+    safe: true
+    verified: 2026-03-02
+    during:
+      type: visit
+      hours: "10:00 to 18:00, closed on Mondays"
+      toilets: "Ground floor, past the shop"
+      warn_bags: "Backpacks go in the lockers, 1 EUR coin, returned"
+    points:
+      - id: panorama
+        name: The great Lisbon panorama
+        what: "Twenty three metres of the city as it looked before the earthquake."
+        why: "It is the only picture of the streets that are gone."
+        for_kids: "Find the boat with three masts. There are four of them."
+      - id: cloister
+        name: The small cloister
+        what: "Manueline arches, and the quietest bench in the building."
+        for_kids: "Count the lions. They are all different on purpose."
+  cais_do_sodre:
+    name: Cais do Sodre ferry terminal
+    kind: ferry terminal
+    at: {lat: 38.7062, lon: -9.1449, radius_m: 200}
+    parking:
+      where: "Ribeira das Naus, on the water side"
+      price: "[to confirm]"
+      verified: 2026-03-02
+
+alerts:
+  - id: ferry_last_connection
+    severity: high
+    at: 2026-04-11T18:40
+    notify_from: 2026-04-11T17:30
+    title: "The 19:10 ferry does not connect"
+    detail: "It arrives after the last bus on the other side. The 18:40 is the one that gets you home."
+    action: "Leave the museum cafe by 18:10"
+
+sheets:
+  bookings:
+    - id: azulejo
+      what: "Museum, one adult one child"
+      code: "MNA-20418"
+      when: 2026-04-11T11:15
+  phrases:
+    portuguese:
+      - {there: "Dois bilhetes, por favor", here: "Two tickets, please"}
+      - {there: "Onde fica a casa de banho?", here: "Where is the toilet?"}
