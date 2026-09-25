@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://deskpress.dev/schema/theme.schema.json",
+  "title": "deskpress theme",
+  "description": "A theme is data: 23 semantic color tokens per theme, and no component ever branches on a theme name. One theme per person is normal here, not an edge case. Every theme is measured by the validator: the 13 contrast pairs must clear 4.5:1, because this app gets read outdoors with one hand.",
+  "type": "object",
+  "required": ["themes"],
+  "additionalProperties": false,
+  "properties": {
+    "default": { "type": "string", "description": "Theme id used when nobody has been chosen yet." },
+    "themes": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+      "additionalProperties": { "$ref": "#/$defs/theme" }
+    },
+    "type": { "$ref": "#/$defs/type_scale" },
+    "spacing": { "$ref": "#/$defs/number_tokens" },
+    "radius": { "$ref": "#/$defs/number_tokens" },
+    "border": { "$ref": "#/$defs/number_tokens" },
+    "touch": { "$ref": "#/$defs/number_tokens" }
+  },
+  "$defs": {
+    "color": {
+      "type": "string",
+      "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+      "description": "Hex, 6 or 8 digits. No named colors and no gradients: every token is measured."
+    },
+    "theme": {
+      "type": "object",
+      "required": ["name", "mode", "colors"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "description": "What a person sees on the handoff screen. Any language." },
+        "mode": { "enum": ["light", "dark"] },
+        "kid": { "type": "boolean", "description": "Kid mode is an attribute of the screen, not a theme. This only marks a theme as intended for a kid: larger type, thicker borders, cards become kid boxes." },
+        "colors": { "$ref": "#/$defs/colors" },
+        "shadow": {
+          "description": "Only kid components have a shadow, and it is hard, with no blur.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "colors": {
+      "type": "object",
+      "description": "All 23 tokens, in every theme. A missing token is an error, not a default: the component that needed it would have rendered invisible.",
+      "required": [
+        "paper", "ink", "ink-muted",
+        "card", "card-line", "line", "rule", "soft",
+        "alert",
+        "action-bg", "action-ink",
+        "highlight-bg", "highlight-ink", "highlight-line", "highlight-text",
+        "chip-bg", "chip-ink",
+        "bar-bg", "bar-ink", "bar-muted",
+        "missing-fill", "missing-border", "missing-text"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "paper": { "$ref": "#/$defs/color", "description": "The screen. All contrast is measured against this." },
+        "ink": { "$ref": "#/$defs/color", "description": "Text and main borders on paper." },
+        "ink-muted": { "$ref": "#/$defs/color", "description": "Labels and secondary text. Never carries new information at 17px and up." },
+        "card": { "$ref": "#/$defs/color", "description": "Card fill: the accent at 8% over paper." },
+        "card-line": { "$ref": "#/$defs/color", "description": "Card border, the accent at 55%." },
+        "line": { "$ref": "#/$defs/color", "description": "Structural border, 2px." },
+        "rule": { "$ref": "#/$defs/color", "description": "The 1px separator between rows of a list." },
+        "soft": { "$ref": "#/$defs/color", "description": "Quiet fill for a control at rest." },
+        "alert": { "$ref": "#/$defs/color", "description": "The alert component, and nothing else." },
+        "action-bg": { "$ref": "#/$defs/color", "description": "The main button, 64px tall." },
+        "action-ink": { "$ref": "#/$defs/color" },
+        "highlight-bg": { "$ref": "#/$defs/color", "description": "The accent at 20%: the block being answered right now." },
+        "highlight-ink": { "$ref": "#/$defs/color" },
+        "highlight-line": { "$ref": "#/$defs/color" },
+        "highlight-text": { "$ref": "#/$defs/color", "description": "Secondary text inside a highlight. Measured against highlight-bg, not paper." },
+        "chip-bg": { "$ref": "#/$defs/color", "description": "The 40px profile chip. Inverted against the bar it sits in." },
+        "chip-ink": { "$ref": "#/$defs/color" },
+        "bar-bg": { "$ref": "#/$defs/color", "description": "Top and bottom bars, in full color." },
+        "bar-ink": { "$ref": "#/$defs/color" },
+        "bar-muted": { "$ref": "#/$defs/color" },
+        "missing-fill": { "$ref": "#/$defs/color", "description": "The striped hole where a fact nobody confirmed would go." },
+        "missing-border": { "$ref": "#/$defs/color" },
+        "missing-text": { "$ref": "#/$defs/color" }
+      }
+    },
+    "type_scale": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "size": { "type": "string" },
+          "line": { "type": ["number", "string"] },
+          "weight": { "type": ["number", "string"] },
+          "tracking": { "type": "string" },
+          "family": { "type": "string" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "number_tokens": {
+      "type": "object",
+      "additionalProperties": { "type": ["string", "number"] }
+    }
+  },
+  "x-contrast-pairs": {
+    "description": "The 13 pairs the validator measures at 4.5:1. Foreground first.",
+    "pairs": [
+      ["ink", "paper"],
+      ["ink-muted", "paper"],
+      ["ink", "card"],
+      ["ink-muted", "card"],
+      ["action-ink", "action-bg"],
+      ["highlight-ink", "highlight-bg"],
+      ["highlight-text", "highlight-bg"],
+      ["chip-ink", "chip-bg"],
+      ["bar-ink", "bar-bg"],
+      ["bar-muted", "bar-bg"],
+      ["alert", "paper"],
+      ["alert", "card"],
+      ["missing-text", "missing-fill"]
+    ]
+  }
+}

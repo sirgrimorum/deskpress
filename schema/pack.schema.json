@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://deskpress.dev/schema/pack.schema.json",
+  "title": "deskpress pack manifest",
+  "description": "pack.yaml: what this app is called and where its parts are. Values may be in any language; keys are canonical English.",
+  "type": "object",
+  "required": ["pack"],
+  "additionalProperties": false,
+  "properties": {
+    "pack": {
+      "type": "object",
+      "required": ["id", "name", "language", "timezone", "content"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Stable slug. Calendar event ids derive from it, so changing it orphans every synced event."
+        },
+        "name": { "type": "string", "minLength": 1, "description": "What the app calls itself once this pack is loaded." },
+        "language": { "type": "string", "pattern": "^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$", "description": "BCP 47. Picks the shell's own labels." },
+        "timezone": { "type": "string", "pattern": "^[A-Za-z_]+/[A-Za-z_+-]+(/[A-Za-z_+-]+)?$|^UTC$", "description": "IANA name. The moment is computed in this zone." },
+        "content": {
+          "description": "One content file, or several merged in order.",
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          ]
+        },
+        "theme": { "type": "string", "description": "Theme file. Without it the shell uses its default theme." },
+        "files": { "type": "string", "description": "Base directory for every file reference in the content." },
+        "version": { "type": ["string", "number"], "description": "The author's own version marker. The shell only displays it." }
+      }
+    },
+    "conventions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "alert_prefixes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": ["warn", "alert"],
+          "description": "Unknown keys starting with one of these render as an Alert instead of a Card."
+        },
+        "hidden_prefixes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Unknown keys starting with one of these never reach a screen: provenance, notes to yourself."
+        }
+      }
+    },
+    "keymap": {
+      "type": "object",
+      "description": "Canonical key -> the name this pack uses for it, grouped by where that key appears. Applied once, in the loader, so nothing downstream knows a pack might be in another language. Under root, a value may be a dotted path: days: itinerario.dias.",
+      "additionalProperties": false,
+      "properties": {
+        "root": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 },
+          "propertyNames": { "enum": ["days", "places", "people", "alerts", "documents", "sheets"] }
+        },
+        "day": { "$ref": "#/$defs/rename" },
+        "block": { "$ref": "#/$defs/rename" },
+        "option": { "$ref": "#/$defs/rename" },
+        "decision": { "$ref": "#/$defs/rename" },
+        "place": { "$ref": "#/$defs/rename" },
+        "point": { "$ref": "#/$defs/rename" },
+        "parking": { "$ref": "#/$defs/rename" },
+        "person": { "$ref": "#/$defs/rename" },
+        "alert": { "$ref": "#/$defs/rename" },
+        "document": { "$ref": "#/$defs/rename" },
+        "values": {
+          "type": "object",
+          "description": "The two enums are structure, not prose, so a pack that writes them in its own language declares them here.",
+          "additionalProperties": false,
+          "properties": {
+            "severity": { "$ref": "#/$defs/rename" },
+            "type": { "$ref": "#/$defs/rename" }
+          }
+        }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "description": "Overrides for the shell's own labels. Anything not listed falls back to pack.language.",
+      "additionalProperties": { "type": "string" },
+      "properties": {
+        "today": { "type": "string" },
+        "back": { "type": "string" },
+        "next": { "type": "string" },
+        "now": { "type": "string" },
+        "open_map": { "type": "string" },
+        "choose": { "type": "string" },
+        "recommended": { "type": "string" },
+        "to_confirm": { "type": "string" },
+        "whose_phone": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "rename": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    }
+  }
+}
