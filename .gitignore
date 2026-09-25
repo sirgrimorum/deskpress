@@ -1,0 +1,22 @@
+# Content packs. A pack is someone's own data: names, bookings, addresses, documents.
+# The shell is open source; what you print with it is yours and stays out of git.
+/content/
+
+# Dependencies and builds
+node_modules/
+dist/
+build/
+.gradle/
+*.apk
+*.aab
+local.properties
+.env
+.env.*
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+.idea/
+.vscode/
