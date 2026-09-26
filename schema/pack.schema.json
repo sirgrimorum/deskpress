@@ -21,10 +21,11 @@
         "language": { "type": "string", "pattern": "^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$", "description": "BCP 47. Picks the shell's own labels." },
         "timezone": { "type": "string", "pattern": "^[A-Za-z_]+/[A-Za-z_+-]+(/[A-Za-z_+-]+)?$|^UTC$", "description": "IANA name. The moment is computed in this zone." },
         "content": {
-          "description": "One content file, or several merged in order.",
+          "description": "One content file, several merged in order, or a map from root key to the file that holds it. The map roots each file under the key that names it, which is the only form where two files cannot collide.",
           "oneOf": [
             { "type": "string" },
-            { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+            { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            { "type": "object", "minProperties": 1, "additionalProperties": { "type": "string", "minLength": 1 } }
           ]
         },
         "theme": { "type": "string", "description": "Theme file. Without it the shell uses its default theme." },

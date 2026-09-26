@@ -31,7 +31,7 @@ pack:
   name: Mi ruta               # what the app calls itself once this pack is loaded
   language: es                # BCP 47. Picks the shell's own handful of labels
   timezone: Europe/Lisbon     # IANA. The moment is computed in this zone
-  content: content.yaml       # one file, or a list of files merged in order
+  content: content.yaml       # one file, a list merged in order, or a root to file map
   theme: theme.yaml           # optional. Without it the shell uses its default theme
   files: files/               # optional. Base for every file reference
 
@@ -55,6 +55,21 @@ ui:                           # optional. overrides the shell's own labels
   next: Lo que sigue
   open_map: Abrir en el mapa
 ```
+
+**`content` takes three forms.** One file name. A list of file names, merged in order, which is
+refused when two of them define the same root key, because the second one would quietly win. Or a
+map from root key to the file that holds it, which is the form to use once a pack is split: each
+file is rooted under the key that names it, so two files cannot collide.
+
+```yaml
+pack:
+  content:
+    days: days.yaml           # days.yaml holds the list itself, with no "days:" line above it
+    places: places.yaml
+```
+
+Those keys go through `keymap.root` like any other, so a pack that calls its days something else
+names them that way here too.
 
 ## days
 

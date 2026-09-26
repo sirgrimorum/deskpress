@@ -7,7 +7,7 @@
 //
 // Errors block the load: the app will not pretend. Warnings load and show a line.
 
-import { parse, YamlError } from './yaml.mjs';
+import { parse } from './yaml.mjs';
 
 const TYPES = ['visit', 'train', 'driving', 'walking', 'meal', 'event', 'flight', 'parking',
   'lodging', 'night', 'morning', 'transfer', 'free'];
@@ -303,17 +303,23 @@ export function validatePack({ manifest, content, theme } = {}) {
   // The documents.
   if (documents !== undefined) {
     if (!Array.isArray(documents)) r.error('documents', 'has to be a list');
-    else documents.forEach((d, i) => {
-      const at = `documents[${i}]`;
-      if (!isMap(d)) { r.error(at, 'has to be a mapping'); return; }
-      if (!d.id) r.error(at, 'a document needs an id');
-      if (!read(d, 'document', 'title')) r.error(at, 'a document needs a title');
-      if (!read(d, 'document', 'file')) r.error(at, 'a document needs a file: it is the thing somebody at a counter is asking for');
-      const owner = str(read(d, 'document', 'for'));
-      if (owner && personIds.size && !personIds.has(owner)) r.error(`${at}.for`, `${JSON.stringify(owner)} is not one of the people in this pack`);
-      const fields = read(d, 'document', 'fields');
-      if (fields !== undefined && !isMap(fields)) r.error(`${at}.fields`, 'has to be a mapping of label to value');
-    });
+    else {
+      const docIds = new Set();
+      documents.forEach((d, i) => {
+        const at = `documents[${i}]`;
+        if (!isMap(d)) { r.error(at, 'has to be a mapping'); return; }
+        if (!d.id) r.error(at, 'a document needs an id');
+        else if (!ID.test(String(d.id))) r.error(`${at}.id`, `${JSON.stringify(d.id)} is not an id: lowercase letters, digits and underscores`);
+        else if (docIds.has(d.id)) r.error(`${at}.id`, `${JSON.stringify(d.id)} is used twice`);
+        else docIds.add(d.id);
+        if (!read(d, 'document', 'title')) r.error(at, 'a document needs a title');
+        if (!read(d, 'document', 'file')) r.error(at, 'a document needs a file: it is the thing somebody at a counter is asking for');
+        const owner = str(read(d, 'document', 'for'));
+        if (owner && personIds.size && !personIds.has(owner)) r.error(`${at}.for`, `${JSON.stringify(owner)} is not one of the people in this pack`);
+        const fields = read(d, 'document', 'fields');
+        if (fields !== undefined && !isMap(fields)) r.error(`${at}.fields`, 'has to be a mapping of label to value');
+      });
+    }
   }
 
   // 7. The theme.
@@ -412,7 +418,8 @@ function checkBlocks(r, at, blocks, ctx) {
 function checkType(r, at, value, map) {
   const canon = canonValue(map, 'type', value);
   if (TYPES.includes(canon)) return;
-  const near = TYPES.find((t) => t.startsWith(String(canon).slice(0, 3)));
+  const stem = String(canon).slice(0, 3);
+  const near = stem ? TYPES.find((t) => t.startsWith(stem)) : undefined;
   r.error(at, `${JSON.stringify(value)} is not one of the thirteen types${near ? `. Did you mean ${near}?` : `: ${TYPES.join(', ')}`}`);
 }
 
@@ -529,33 +536,69 @@ async function main(argv) {
     console.error('usage: node tools/validate.mjs <pack directory or pack.yaml>');
     return 2;
   }
-  const dir = statSync(target).isDirectory() ? target : dirname(target);
-  const manifestPath = statSync(target).isDirectory() ? join(dir, 'pack.yaml') : target;
+  let stat;
+  try {
+    stat = statSync(target);
+  } catch {
+    console.error(`no pack at ${target}. Point me at a pack folder or at its pack.yaml`);
+    return 2;
+  }
+  const dir = stat.isDirectory() ? target : dirname(target);
+  const manifestPath = stat.isDirectory() ? join(dir, 'pack.yaml') : target;
 
   const readYaml = (path) => {
     try {
       return { value: parse(readFileSync(path, 'utf8')) };
     } catch (e) {
-      if (e instanceof YamlError) return { error: `${path}: ${e.message}` };
       return { error: `${path}: ${e.message}` };
     }
+  };
+
+  // A pack is a folder. A path that climbs out of it is a mistake at best, and the app will be
+  // loading packs that came from somewhere else.
+  const insidePack = (file) => {
+    const p = String(file).replace(/\\/g, '/');
+    return !p.startsWith('/') && !/^[A-Za-z]:/.test(p) && !p.split('/').includes('..');
+  };
+  const load = (file, where) => {
+    if (!insidePack(file)) {
+      return { error: `${where}: ${JSON.stringify(String(file))} leaves the pack folder. Every file a pack names lives inside it` };
+    }
+    return readYaml(join(dir, String(file)));
   };
 
   const manifest = readYaml(manifestPath);
   if (manifest.error) { console.error(manifest.error); return 1; }
   const head = (manifest.value && manifest.value.pack) || {};
 
+  // content is one file, a list of files, or a mapping of root key to file. The mapping roots each
+  // file under the key that names it, which is the only form where two files cannot collide.
   let content = {};
-  const files = Array.isArray(head.content) ? head.content : [head.content].filter(Boolean);
-  for (const file of files) {
-    const loaded = readYaml(join(dir, file));
-    if (loaded.error) { console.error(loaded.error); return 1; }
-    content = { ...content, ...(loaded.value || {}) };
+  if (isMap(head.content)) {
+    for (const [root, file] of Object.entries(head.content)) {
+      const loaded = load(file, `pack.content.${root}`);
+      if (loaded.error) { console.error(loaded.error); return 1; }
+      content[root] = loaded.value;
+    }
+  } else {
+    const files = Array.isArray(head.content) ? head.content : [head.content].filter(Boolean);
+    for (const file of files) {
+      const loaded = load(file, 'pack.content');
+      if (loaded.error) { console.error(loaded.error); return 1; }
+      const value = loaded.value || {};
+      for (const key of Object.keys(value)) {
+        if (key in content) {
+          console.error(`${file}: ${JSON.stringify(key)} is already defined in an earlier content file, and the second one would quietly win. Split the pack by key, or name the root in the manifest: content: {${key}: ${file}}`);
+          return 1;
+        }
+      }
+      content = { ...content, ...value };
+    }
   }
 
   let theme;
   if (head.theme) {
-    const loaded = readYaml(join(dir, head.theme));
+    const loaded = load(head.theme, 'pack.theme');
     if (loaded.error) { console.error(loaded.error); return 1; }
     theme = loaded.value;
   }
