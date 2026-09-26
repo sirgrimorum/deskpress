@@ -10,7 +10,7 @@
 // A flow collection may wrap onto the following lines, which is what a long block wants.
 //
 // Not supported, and the reader says so instead of guessing: tabs for indentation, anchors and
-// aliases, multiple documents, and tags.
+// aliases, more than one document in a file, and tags. A pack is one document per file.
 
 export class YamlError extends Error {
   constructor(message, line) {
@@ -27,6 +27,7 @@ const NUMBER = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/;
 export function parse(text) {
   const raw = String(text).replace(/^﻿/, '').replace(/\r\n?/g, '\n').split('\n');
   const doc = new Reader(raw);
+  doc.openDocument();
   doc.skipBlanks();
   if (doc.eof()) return null;
   const value = doc.node(0);
@@ -44,13 +45,30 @@ class Reader {
   eof() { return this.i >= this.lines.length; }
   lineNo() { return this.i + 1; }
 
+  // A single leading "---" opens this document. Any later one starts a second, which is an error.
+  openDocument() {
+    while (this.i < this.lines.length) {
+      const trimmed = this.lines[this.i].trim();
+      if (trimmed === '' || trimmed.startsWith('#')) { this.i++; continue; }
+      if (trimmed === '---') this.i++;
+      return;
+    }
+  }
+
   skipBlanks() {
     while (this.i < this.lines.length) {
       const line = this.lines[this.i];
       const trimmed = line.trim();
       if (trimmed === '' || trimmed.startsWith('#')) { this.i++; continue; }
-      if (trimmed === '---') { this.i++; continue; }
-      if (trimmed === '...') { this.i = this.lines.length; continue; }
+      if (trimmed === '---') {
+        throw new YamlError('a second document starts here. A pack is one document per file, and merging two of them would lose keys quietly', this.lineNo());
+      }
+      if (trimmed === '...') {
+        const more = this.lines.slice(this.i + 1).some((l) => l.trim() !== '' && !l.trim().startsWith('#'));
+        if (more) throw new YamlError('the document ends here, but the file keeps going', this.lineNo());
+        this.i = this.lines.length;
+        continue;
+      }
       if (/^\s*\t/.test(line)) {
         throw new YamlError('tab used for indentation. YAML needs spaces', this.lineNo());
       }
@@ -114,7 +132,7 @@ class Reader {
       if (isSeqEntry(text)) break;
       const split = splitKey(text);
       if (!split) throw new YamlError(`expected "key: value", found ${JSON.stringify(text)}`, this.lineNo());
-      const key = unquote(split.key);
+      const key = checkKey(unquote(split.key, this.lineNo()), this.lineNo());
       if (Object.prototype.hasOwnProperty.call(out, key)) {
         throw new YamlError(`duplicate key ${JSON.stringify(key)}`, this.lineNo());
       }
@@ -221,6 +239,15 @@ function isQuoteStart(text, i) {
   return prev === undefined || /[\s,[{:]/.test(prev);
 }
 
+// Assigning "__proto__" with brackets runs the prototype setter, so the key would vanish instead
+// of rendering as a card like every other unknown key.
+function checkKey(key, line) {
+  if (key === '__proto__') {
+    throw new YamlError('"__proto__" cannot be a key: it would disappear instead of rendering', line);
+  }
+  return key;
+}
+
 function isSeqEntry(text) {
   return text === '-' || /^-\s/.test(text);
 }
@@ -278,9 +305,13 @@ function stripComment(text) {
   return text;
 }
 
-function unquote(text) {
+function unquote(text, line) {
   if (text.length > 1 && text[0] === '"' && text[text.length - 1] === '"') {
-    return JSON.parse(text);
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new YamlError(`${text} has an escape this reader does not know. Inside double quotes a backslash starts \n, \t, \\" or \\`, line);
+    }
   }
   if (text.length > 1 && text[0] === "'" && text[text.length - 1] === "'") {
     return text.slice(1, -1).replace(/''/g, "'");
@@ -292,7 +323,8 @@ function scalar(text, line) {
   const t = stripComment(text).trim();
   if (t.startsWith('[') || t.startsWith('{')) return flow(t, line);
   if (t[0] === '"' || t[0] === "'") {
-    try { return unquote(t); } catch { throw new YamlError('unterminated quoted string', line); }
+    if (t.length < 2 || t[t.length - 1] !== t[0]) throw new YamlError('unterminated quoted string', line);
+    return unquote(t, line);
   }
   if (NULL.has(t)) return null;
   if (TRUE.has(t)) return true;
@@ -344,7 +376,7 @@ function flowMap(c) {
     skipSpace(c);
     if (c.i >= c.s.length) throw new YamlError('a flow mapping was never closed with "}"', c.line);
     if (c.s[c.i] === '}') { c.i++; return out; }
-    const key = unquote(flowPlain(c, true).trim());
+    const key = checkKey(unquote(flowPlain(c, true).trim(), c.line), c.line);
     skipSpace(c);
     if (c.s[c.i] === ',' || c.s[c.i] === '}') {
       // YAML allows a key with no value here. It is almost always an unquoted value with a comma
