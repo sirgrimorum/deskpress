@@ -33,6 +33,10 @@ flowchart LR
 - A **view** draws that object. It decides **how** it looks. No business logic in a view, not one
   pixel measurement in the reader. This split is what keeps the app cheap.
 - The **validator** is the same code on the desk and in the app: `tools/validate.mjs`.
+- **The checks are two commands, and there is nothing to install.** `node --test` from the repo
+  root runs the parser and validator tests; `node tools/validate.mjs <pack>` validates a pack. Run
+  both before you hand anything over. A directory argument to `node --test` does not work
+  everywhere, so run it from the root with no argument.
 - Two **tools** touch the OS and nothing else does: location (geofences, save a coordinate) and
   calendar sync (write timed blocks with stable ids).
 
@@ -48,6 +52,7 @@ flowchart LR
 | `examples/one-day/` | a complete public example pack, invented on purpose. The only pack in git |
 | `tools/yaml.mjs` | the YAML reader: a subset, no dependencies, checked against PyYAML |
 | `tools/validate.mjs` | the validator |
+| `tools/*.test.mjs` | the tests, on `node:test`. `node --test` from the repo root |
 | `content/` | **git ignored**: real packs. See `content/README.md` |
 
 ## Rules of the house
