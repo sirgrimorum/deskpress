@@ -64,7 +64,8 @@ only way out of any screen is Today.
 | [docs/architecture.md](docs/architecture.md) | the shell: reader, views, theme engine, tools, validator |
 | [docs/pack-format.md](docs/pack-format.md) | every key the shell knows, and the rule for the keys it does not |
 | [docs/authoring.md](docs/authoring.md) | how to write a pack, by hand or with an LLM |
-| [schema/](schema/) | the machine readable schema that the validator and the app both use |
+| [schema/](schema/) | the machine readable contract, for an editor or an LLM. The validator carries the same rules in code |
+| [tools/](tools/) | the YAML reader, the validator, and their tests. `node --test` from the repo root runs them |
 | [examples/one-day/](examples/one-day/) | a whole pack, small enough to read in a minute, and it validates with no warnings |
 | [skills/write-a-deskpress-pack/](skills/write-a-deskpress-pack/) | the skill an LLM loads before writing somebody's pack |
 

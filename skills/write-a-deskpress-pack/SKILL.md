@@ -82,8 +82,19 @@ also walk around": that is a block.
   title: Coast or the mountain
   fixed:  [["08:30", "Pick up the car."], ["20:00", "Dinner, all four."]]
   options:
-    - {id: coast, name: The coast, recommended: true, why: "three driving days follow", blocks: [...]}
-    - {id: mountain, name: The mountain, cost: "74 EUR", blocks: [...]}
+    - id: coast
+      name: The coast
+      recommended: true
+      why: "three driving days follow"
+      blocks:
+        - ["10:00", "Down the coast road. Stop where it looks worth stopping.", {type: driving}]
+        - ["13:30", "Lunch on the beach side, the one with the shade.", {type: meal}]
+    - id: mountain
+      name: The mountain
+      cost: "74 EUR"
+      blocks:
+        - ["09:45", "Rack railway up. Buy the return at the bottom.", {type: transfer}]
+        - ["12:30", "Lunch at the top, the self service one.", {type: meal}]
   decision: {when: 2026-10-01, at: "21:00", decides: [2026-10-12]}
 ```
 
