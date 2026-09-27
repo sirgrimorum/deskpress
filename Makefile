@@ -110,7 +110,9 @@ e2e: bindings $(MAESTRO) ## Install the debug app and run the regression flows o
 
 emulator: ## Start the emulator AVD (AVD=name to pick another) and wait until it boots
 	nohup "$(ANDROID_HOME)/emulator/emulator" -avd $(AVD) > /dev/null 2>&1 &
-	"$(ADB)" wait-for-device shell 'while [ "$$(getprop sys.boot_completed)" != 1 ]; do sleep 1; done'
+	@# wait-for-device returns while the emulator is still offline, so poll the boot flag
+	@until [ "$$("$(ADB)" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; do \
+		sleep 2; done
 
 android: bindings ## Run the app's tests and build the APK
 	$(GRADLE) testDebugUnitTest assembleDebug
