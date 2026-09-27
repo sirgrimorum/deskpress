@@ -1,0 +1,13 @@
+# Whose phone it is: a child picked, the rules show what the block proposes to them.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T11:30"
+- tapOn: 'Whose phone is it\?'
+- assertVisible: "Rita"
+- tapOn: "Tomas"
+- assertVisible: "Count the lions.*"
+- tapOn: "Go"
+- assertVisible: "Now · visit"

@@ -1,0 +1,12 @@
+# Today opens the whole day, each block with its state, and Back returns.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T11:30"
+- tapOn: "Today"
+- assertVisible: "Walk up through Graca.*"
+- assertVisible: "Ferry from Cais do Sodre.*"
+- tapOn: "Back"
+- assertVisible: "Now · visit"

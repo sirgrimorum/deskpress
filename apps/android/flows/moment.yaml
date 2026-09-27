@@ -1,11 +1,12 @@
-# Inside a block: the block, what comes next, and the way to its place.
+# Inside a block: its answer, what the place says, and what comes next.
 appId: dev.deskpress.app
 ---
 - launchApp:
     clearState: true
     arguments:
       now: "2026-04-11T11:30"
+- assertVisible: "Now · visit"
 - assertVisible: "11:15"
+- assertVisible: "10:00 to 18:00, closed on Mondays"
 - assertVisible: "Next, 13:15: .*"
-- assertVisible: "Warm for April.*"
-- assertVisible: "About the place"
+- assertVisible: "Point by point"

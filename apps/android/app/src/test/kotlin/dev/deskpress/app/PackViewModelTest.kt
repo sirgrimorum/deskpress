@@ -38,7 +38,7 @@ class PackViewModelTest {
         runCurrent()
         assertEquals(PackState.Failed("pack.yaml: no such file"), model.state.value)
         // With no pack there is nothing to act on.
-        model.act("see_place", Value.Null)
+        model.act("points", Value.Null)
         runCurrent()
         assertEquals(PackState.Failed("pack.yaml: no such file"), model.state.value)
     }
@@ -49,11 +49,11 @@ class PackViewModelTest {
         runCurrent()
         val state = model.state.value as PackState.Showing
         assertEquals(0, state.warnings)
-        assertEquals("today", model.screen)
+        assertEquals("morning", model.screen)
         assertEquals("2026-04-11T10:30", state.view.watch.until)
         advanceTimeBy(89.minutes)
         runCurrent()
-        assertEquals("today", model.screen)
+        assertEquals("morning", model.screen)
         advanceTimeBy(1.minutes)
         runCurrent()
         assertEquals("moment", model.screen)
@@ -63,11 +63,23 @@ class PackViewModelTest {
     fun aTapOpensTheScreenItNamesAndBackReturns() = runTest {
         val model = model({ example }, "2026-04-11T11:30")
         runCurrent()
-        model.act("see_place", Value.Null)
+        model.act("points", Value.Null)
         runCurrent()
-        assertEquals("place", model.screen)
+        assertEquals("sheet", model.screen)
         model.act("back", Value.Null)
         runCurrent()
         assertEquals("moment", model.screen)
+    }
+
+    @Test
+    fun whoHoldsThePhoneIsKeptAndTheRulesDecideAgain() = runTest {
+        val model = model({ example }, "2026-04-11T11:30")
+        runCurrent()
+        model.act("relay", Value.Null)
+        runCurrent()
+        assertEquals("relay", model.screen)
+        model.act("hold", Value.Text("tomas"))
+        runCurrent()
+        assertEquals("suggestion", model.screen)
     }
 }

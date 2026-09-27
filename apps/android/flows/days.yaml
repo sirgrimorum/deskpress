@@ -1,10 +1,10 @@
-# Before the day: the list of days.
+# Before the trip: the list of days.
 appId: dev.deskpress.app
 ---
 - launchApp:
     clearState: true
     arguments:
       now: "2026-04-10T09:00"
-- assertVisible: "The days"
+- assertVisible: "The days of this trip"
 - assertVisible: "The tile museum and the late ferry"
 - assertVisible: "2026-04-11"

@@ -1,0 +1,15 @@
+# A child holding the phone through a block that is not theirs: one thing, give it back.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T10:40"
+- tapOn: 'Whose phone is it\?'
+- tapOn: "Tomas"
+- assertVisible: "Time is up"
+# The caption says it too; the button is the second one.
+- tapOn:
+    text: "Give the phone back"
+    index: 1
+- assertVisible: "Rita"
