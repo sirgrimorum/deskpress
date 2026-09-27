@@ -40,6 +40,7 @@ pack:
   content: content.yaml       # one file, a list merged in order, or a root to file map
   theme: theme.yaml           # optional. Without it the shell uses its default theme
   files: files/               # optional. Base for every file reference
+  extends: travel             # optional. Starts from a bundled template (docs/templates.md)
 
 conventions:                  # optional, all of it
   alert_prefixes: [warn, alert]   # keys starting with these render as an Alert, not a Card
@@ -81,7 +82,9 @@ names them that way here too.
 
 Draft. The rest of `pack.yaml` says how the app behaves: which modules read the content, which
 screen shows when, and what can happen on each screen. A pack may also start from a template with
-`pack.extends: travel` and only override what differs.
+`pack.extends: travel` and only override what differs: `modules`, `derive`, `screens` and `ui`
+merge by key, the pack's entry winning; the pack's `rules` are tried before the template's; any
+other section replaces the template's. See [templates.md](templates.md).
 
 ```yaml
 modules:                      # shared logic the pack opts into. Empty reads its own root
@@ -147,13 +150,17 @@ with canonical keys, whatever the pack calls them.
 
 | module | names | what they hold |
 | --- | --- | --- |
-| `timeline` | `day`, `block`, `next` | today's day with its blocks in force and its `choice`; the last block whose time has come, until its `until`; the first one still to come. A block is `{time, text, ...its map}` |
+| `timeline` | `day`, `block`, `next`, `days`, `tomorrow` | today's day with its blocks in force, its `choice` and `started` (a timed block has begun); the last block whose time has come, until its `until`; the first one still to come; every day; the day after today, with `first`, its first timed block. A block is `{time, text, state, ...its map}` |
 | `choices` | `decision` | the first decision due and unanswered, else the first one due, else the next one coming: `{date, title, options, recommended, choice, due, answered}` plus the decision's own keys. Due from `when` at `at` until its day is over |
-| `people` | `holder`, `people` | the person holding the phone, and everyone |
+| `people` | `holder`, `people` | the person holding the phone (the host's, else the one stored as `holder`), and everyone |
 | `places` | `place`, `here` | where the current block happens, and the first place whose region the device is inside. Both carry their `id` |
 | `alerts` | `alerts` | the ones showing now, most severe first: from `notify_from` (else the start of their day) to the end of their day |
 | `documents` | `documents` | all of them |
 | `climate` | `weather` | the weather for today at `place`, else `here` |
+
+A block's `state` is `note` (no time), `now`, `past`, `locked`, or `next` (still to come), for
+the agenda. A block's `type` comes out canonical through `keymap.values.type`, and a place's
+`during`, `parking` and `points` through their keymap contexts.
 
 A day with options runs its `fixed` blocks and the chosen option's, in time order. The choice in
 force is the one stored as `choice.<date>`, else the recommended one, else the first.
@@ -185,27 +192,28 @@ Effects:
 | `{do: module.action}` | the same, in mapping form, so it can take an `if` |
 
 Any mapping effect takes `if: expr` and is skipped when it is false. `$arg` is the value the
-component sent: a `Button` sends its `value` prop. After the effects run, the rules decide again
+component sent: any component with an `on_tap` sends its `value` prop. After the effects run, the rules decide again
 with the stored facts, so a `store` can move the app to another screen.
 
 ### Components
 
-The closed set a layout can use. Every prop takes an expression; colors, sizes and fonts come from
-the theme and cannot be set here.
+The closed set a layout can use. Every prop takes an expression, and a YAML list is taken as it
+is written, like `skip: [time, text]`; colors, sizes and fonts come from the theme and cannot be
+set here.
 
 | component | what it draws |
 | --- | --- |
 | `BigValue` | the answer, at the top, large |
 | `Label` | a line of small text |
 | `Card` | a titled box with a body; `kid: true` in kid mode becomes a kid box |
-| `Row` | label and value on one line |
+| `Row` | label and value on one line; `state` (a block's `now`, `past`, ...) tints it |
 | `PhraseRow` | a phrase, its translation and a hint |
 | `Alert` | a warning, by severity |
 | `Chip` | a small tag |
 | `Button` | an action |
 | `Segmented` | a choice between a few items |
 | `Missing` | a fact nobody confirmed, drawn as a striped hole |
-| `Auto` | expands any value by the unknown key rule: cards, alerts, rows |
+| `Auto` | expands a mapping by the unknown key rule, one node per key; `skip: [keys]` leaves some out |
 | `Screen` | the frame: title, back link, the way to the first screen |
 
 A component is a one-key mapping, `Kind: {props}`. A prop is an expression; a text with `{` in it
@@ -278,7 +286,7 @@ The third element is what turns a line of text into a real moment:
 
 | key | what it does | if missing |
 | --- | --- | --- |
-| `type` | picks which cards the travel moment screen builds | guessed from the text, and if that fails the moment is time plus text |
+| `type` | picks the answer the travel moment screen puts first | the moment is time plus text |
 | `place` | id in `places`, where `during` and `parking` come from | the screen keeps the block's own text |
 | `for` | person ids this block belongs to | everyone |
 | `guide` | who is offered the chance to present this moment | nobody, and the kid screen does not appear |
@@ -290,7 +298,9 @@ The third element is what turns a line of text into a real moment:
 
 `visit`, `train`, `driving`, `walking`, `meal`, `event`, `flight`, `parking`, `lodging`, `night`,
 `morning`, `transfer`, `free`. Thirteen values, not fourteen. They belong to the
-travel template: each one decides which cards its moment screen assembles and nothing else. Adding
+travel template: each one decides the answer its moment screen puts first (a drive its duration,
+a flight its boarding time, a parking its price) and nothing else; the rest of the screen comes
+from the block's own keys, in the pack's order. Adding
 a type is a change to the template, so prefer an existing one plus your own free keys.
 
 ### A day with options
@@ -475,8 +485,9 @@ sheets:
 
 ## Path references
 
-A value that looks like `bookings.azulejo` and resolves inside the pack is a reference; the
-reader resolves it before any view sees it. If it does not resolve, it is text and shows as text.
+A value that looks like `bookings.azulejo` and resolves inside the content is a reference; a
+Card, Missing or Alert shows what it points to. If it does not resolve, or it points at another
+reference, it is text and shows as text.
 The pattern is `^[a-z_][a-z0-9_]*(\.[a-z0-9_]+)+$`.
 
 Resolution walks three shapes, because packs use all three:
@@ -487,15 +498,17 @@ Resolution walks three shapes, because packs use all three:
 
 ## The unknown key rule, exactly
 
-Given a key the shell does not know, inside `during`, `parking`, a place, a day or a sheet:
+Given a key the shell does not know, inside a mapping an `Auto` component expands:
 
 1. If it starts with one of `conventions.hidden_prefixes`, it does not render at all.
-2. If it starts with one of `conventions.alert_prefixes` (`warn`, `alert` by default), it renders as
-   an Alert.
-3. If its name ends in `__YYYY_MM_DD`, it renders only on that date, as an Alert. Use this for the
+2. If its name ends in `__YYYY_MM_DD`, it renders only on that date, as an Alert. Use this for the
    note that matters on one day and is noise on the other twelve.
-4. Otherwise it renders as a Card whose label is the key with underscores turned into spaces, and
-   whose body is the value. A list becomes rows; a map becomes a small sheet.
+3. If it starts with one of `conventions.alert_prefixes` (`warn`, `alert` by default), it renders as
+   an Alert.
+4. Otherwise it renders as a Card whose title is the key with underscores turned into spaces, and
+   whose body is the value: a list one line per item, a mapping one `key: value` line per key it
+   shows. A Card with nothing in it is dropped.
 
-`[to confirm]` anywhere in a value renders as a striped hole with the words inside. A missing price
-shows as missing on purpose: an invented one is worse than a hole.
+A text containing `[` + `ui.to_confirm` + `]`, `[to confirm]` in English, renders as a striped hole
+with the words inside. A missing price shows as missing on purpose: an invented one is worse than a
+hole.

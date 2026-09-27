@@ -36,7 +36,9 @@ days:
       - ["13:30", "Lunch, the place with the blue awning."]
 ```
 
-That loads and it works. Everything else is enrichment, and you can add it later without touching
+That loads and shows the outline: the pack's name and its days. For a trip, add
+`extends: travel` under `pack:` and it becomes the travel app: the moment, the agenda, the night
+before, the phone handed to a child. See [templates.md](templates.md). Everything else is enrichment, and you can add it later without touching
 what already runs.
 
 ## Then add, in this order

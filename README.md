@@ -47,8 +47,10 @@ make run                                 # build the app, install it on a device
 make e2e                                 # the device regression flows
 ```
 
-The app follows the example day: the list of days before it, the plan, the block happening now,
-and its place a tap away. See the [roadmap](docs/roadmap.md).
+The example pack is only content: `extends: travel` gives it the travel template's screens. The
+app follows its day: the list of days before it, the morning, the block happening now with what
+its place says, the agenda, the night, and the phone handed to a child and back. See the
+[roadmap](docs/roadmap.md).
 
 ## Where to read next
 
@@ -56,6 +58,7 @@ and its place a tap away. See the [roadmap](docs/roadmap.md).
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | the engine, the two machines, the host, in diagrams |
 | [docs/pack-format.md](docs/pack-format.md) | every key a pack can use |
+| [docs/templates.md](docs/templates.md) | the definitions a pack extends, like `travel` |
 | [docs/authoring.md](docs/authoring.md) | how to write a pack, by hand or with an LLM |
 | [docs/glossary.md](docs/glossary.md) | the product's own words and the technical terms, in one line each |
 | [docs/decisions/](docs/decisions/) | why things are the way they are |

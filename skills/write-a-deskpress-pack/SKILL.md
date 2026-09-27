@@ -23,20 +23,22 @@ A fact with no moment was never going to be read. Leave it out.
 
 1. **Read every note first.** All of it, before writing a line of YAML. The shape of the pack comes
    out of the notes, not out of the schema.
-2. **List the days.** One entry per date, with a title that says what that day is. A day is the
+2. **Pick the template.** A trip is `extends: travel` under `pack:`, and the pack needs no
+   `rules` or `screens`. Write `ui` labels only for a language other than English.
+3. **List the days.** One entry per date, with a title that says what that day is. A day is the
    spine; everything else hangs off it.
-3. **Write the blocks.** Time, text, in the order they happen. Keep the person's own words: the
+4. **Write the blocks.** Time, text, in the order they happen. Keep the person's own words: the
    shell never parses prose, so there is nothing to gain by smoothing it out, and plenty to lose.
-4. **Add places** for anywhere that needs something on arrival, and attach them with `place:`.
-5. **Add coordinates** where being there changes the answer: `at: {lat, lon, radius_m}`. Only for
+5. **Add places** for anywhere that needs something on arrival, and attach them with `place:`.
+6. **Add coordinates** where being there changes the answer: `at: {lat, lon, radius_m}`. Only for
    places you have real coordinates for.
-6. **Add alerts**, four or five, not twenty. See the budget rule below.
-7. **Add documents** for the files somebody might be asked to show.
-8. **Add climate** when the weather changes the plan: what each place is usually like that month,
+7. **Add alerts**, four or five, not twenty. See the budget rule below.
+8. **Add documents** for the files somebody might be asked to show.
+9. **Add climate** when the weather changes the plan: what each place is usually like that month,
    and a date only when you know better. Leave out what you do not know; a forecast can sync later.
-9. **Put everything else under its own top level key.** Bookings, phrases, budget, packing, contacts.
+10. **Put everything else under its own top level key.** Bookings, phrases, budget, packing, contacts.
    They become sheets with no shell support needed.
-10. **Run the validator** and fix what it reports: `deskpress validate <pack>` (from a deskpress checkout, `cargo install --path crates/cli` puts it on the PATH). Errors block the
+11. **Run the validator** and fix what it reports: `deskpress validate <pack>` (from a deskpress checkout, `cargo install --path crates/cli` puts it on the PATH). Errors block the
    load. Warnings are the honest backlog.
 
 ## Never invent a fact

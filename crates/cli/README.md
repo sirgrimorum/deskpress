@@ -15,7 +15,7 @@ it a value; a value is YAML. For example:
 
 ```sh
 deskpress screen examples/one-day --at 2026-04-11T11:30
-deskpress act examples/one-day --at 2026-04-11T11:30 see_place back
+deskpress act examples/one-day --at 2026-04-11T11:30 points back
 ```
 
 `run(args, out, err)` returns the exit code and takes its streams, so every path is a unit test.

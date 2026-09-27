@@ -30,6 +30,7 @@
         },
         "theme": { "type": "string", "description": "Theme file. Without it the shell uses its default theme." },
         "files": { "type": "string", "description": "Base directory for every file reference in the content." },
+        "extends": { "enum": ["travel"], "description": "A template bundled with the engine. Its definition is the start, and this manifest overrides it: modules, derive, screens and ui by key, rules before the template's, anything else replaced." },
         "version": { "type": ["string", "number"], "description": "The author's own version marker. The shell only displays it." }
       }
     },

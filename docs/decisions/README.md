@@ -19,3 +19,4 @@ history.
 | [0011](0011-android-host-and-make.md) | the Android host, the ffi crate, one Makefile, Maestro flows | accepted |
 | [0012](0012-data-sources-and-sync.md) | a module's data comes from the pack, a sync, or both; the climate module | accepted |
 | [0013](0013-call-only-on-change.md) | the engine is called only when its answer can change; each tree says when | accepted |
+| [0014](0014-travel-template.md) | a pack extends a bundled template; the travel template is the first | accepted |

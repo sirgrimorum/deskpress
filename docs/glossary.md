@@ -40,7 +40,7 @@ entry is the short answer; the linked document has the rest.
 | **outline** | the screen of a pack with no `rules`: its name, then one row per day |
 | **params** | the values `open` passed to the screen it pushed. Empty on a screen the rules picked |
 | **pack** | a folder that describes an app: `pack.yaml`, `content.yaml`, optional `theme.yaml` and files. The shell loads it and becomes that app |
-| **path reference** | a value like `bookings.azulejo` that points somewhere else in the pack and is resolved at load |
+| **path reference** | a value like `bookings.azulejo` that points somewhere else in the content; a card shows what it points to |
 | **renderer** | the part of the host that draws a screen tree. Knows components and tokens, nothing about packs |
 | **rule** | one line of the main machine: a `when` and a `screen`. The first true one wins |
 | **screen** | one view of the app, defined in the pack with its `state`, `actions` and `layout` |
@@ -50,13 +50,13 @@ entry is the short answer; the linked document has the rest.
 | **secret** | a key a sync needs, named in the pack and typed on the device. Kept in the keystore, never in the pack |
 | **shell** | the engine plus a host: everything that is the same for every pack |
 | **stored fact** | a value the app saved on the device, like a decision. It is an input, so it can change the screen |
-| **template** | a public starting definition, like `travel`, that a pack extends and only overrides where it differs |
+| **template** | a definition bundled with the engine, like `travel`, that a pack names in `pack.extends` and only overrides where it differs. See `docs/templates.md` |
 | **theme** | the design system as data, in `theme.yaml`: color, type, spacing and radius tokens |
 | **token** | one named value of the theme. Components read tokens and never a theme's name |
 | **sync** | fetching a module's data from a source the pack names, on a button or automatically every so often |
 | **tool** | a device capability the engine can ask the host for: map, calendar, geofence, fingerprint |
 | **tree version** | the number of the screen tree's shape. A renderer refuses a newer one instead of half drawing it |
-| **unknown key rule** | a key the shell does not know becomes a card labelled with that key. Enriching a pack never breaks it |
+| **unknown key rule** | a key the shell does not know becomes a card labelled with that key, or an alert by its prefix or date. `Auto` applies it. Enriching a pack never breaks it |
 | **validate** | load a pack and list its errors and warnings. `deskpress validate <pack>` on the desk, `load` in the app |
 | **warning** | something worth fixing that does not stop the pack from loading, like a place with no coordinates |
 | **watch** | what comes with each tree to say what would change it: the next instant (`until`) and the geofences that matter. The host calls the engine again only then |

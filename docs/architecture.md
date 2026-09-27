@@ -43,7 +43,7 @@ Three calls:
 
 | call | when | what it does |
 | --- | --- | --- |
-| `load(files)` | once per pack | parse YAML, apply the keymap, validate everything, compile expressions. Returns errors and warnings, or a loaded pack |
+| `load(files)` | once per pack | parse YAML, merge the template it `extends` ([templates.md](templates.md)), apply the keymap, validate everything, compile expressions. Returns errors and warnings, or a loaded pack |
 | `screen(world)` | only when an input changes or `watch.until` is reached | run the modules, the derived values and the rules; build the screen tree and its `watch` |
 | `dispatch(world, action, arg)` | on a tap | run the action's effects; return the new tree and its `watch`, a store patch and tool commands for the host |
 
@@ -126,7 +126,7 @@ The contract between engine and renderer. Plain data, versioned, and the same on
   "screen": "moment",
   "nodes": [
     { "kind": "BigValue", "props": { "text": "11:15", "caption": "Tile museum, top floor first" }, "on": {} },
-    { "kind": "Button", "props": { "label": "About the place" }, "on": { "tap": "see_place" } }
+    { "kind": "Button", "props": { "label": "Point by point" }, "on": { "tap": "points" } }
   ]
 }
 ```

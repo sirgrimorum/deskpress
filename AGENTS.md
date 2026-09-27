@@ -15,7 +15,7 @@ three YAML parts, loads it into the installed app, and the app becomes the app i
 | content | `content.yaml` | the data the app shows |
 | theme | `theme.yaml` | the design system: tokens for color, type, spacing, radius |
 
-The first real pack is a private family travel guide; `templates/travel` (phase 4) is its public
+The first real pack is a private family travel guide; `templates/travel` is its public
 definition. The owner's plan with dates is in `private/`, which is git ignored.
 
 ## How the pieces fit
@@ -50,6 +50,9 @@ flowchart LR
   never evaluated as code. A bad expression is a load error with key path and column.
 - **Screens compose** from a closed, themed component set. `Auto` renders any key it does not know
   as a labelled card.
+- **Templates** (`templates/<name>/pack.yaml`, bundled into the engine) are definitions a pack
+  starts from with `pack.extends`. `travel` is the first: a travel pack brings only content, a
+  theme and what it changes. See `docs/templates.md` and decision 0014.
 - **The screen tree** is the versioned contract between engine and renderer (`TREE_VERSION` in
   the engine): typed values across UniFFI, JSON on the desk. A renderer knows components and
   tokens, never packs.
@@ -102,11 +105,11 @@ SDK in the Makefile, Gradle in its wrapper, the app's libraries in
 | `crates/ffi` | the UniFFI bindings and their bindgen, the only crate that depends on UniFFI |
 | `apps/android` | the host: a ViewModel and the Compose renderer. See its README |
 | `Makefile` | every development task; `make check` is the one that must pass |
-| `templates/` | phase 4+: public definitions to start from, like `travel` |
+| `templates/` | definitions a pack extends, bundled into the engine: `travel` |
 | `examples/one-day/` | a complete public example pack, invented on purpose |
 | `skills/write-a-deskpress-pack/` | what an LLM loads to write a pack; becomes a plugin |
 | `schema/` | machine readable JSON schema for the content and theme |
-| `docs/` | `architecture.md`, `pack-format.md`, `authoring.md`, `glossary.md`, `roadmap.md`, `decisions/` |
+| `docs/` | `architecture.md`, `pack-format.md`, `templates.md`, `authoring.md`, `glossary.md`, `roadmap.md`, `decisions/` |
 | `content/` | **git ignored**: real packs. See `content/README.md` |
 | `private/` | **git ignored**: the owner's plans, journal, PR drafts |
 
