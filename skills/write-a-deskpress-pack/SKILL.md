@@ -32,9 +32,11 @@ A fact with no moment was never going to be read. Leave it out.
    places you have real coordinates for.
 6. **Add alerts**, four or five, not twenty. See the budget rule below.
 7. **Add documents** for the files somebody might be asked to show.
-8. **Put everything else under its own top level key.** Bookings, phrases, budget, packing, contacts.
+8. **Add climate** when the weather changes the plan: what each place is usually like that month,
+   and a date only when you know better. Leave out what you do not know; a forecast can sync later.
+9. **Put everything else under its own top level key.** Bookings, phrases, budget, packing, contacts.
    They become sheets with no shell support needed.
-9. **Run the validator** and fix what it reports: `deskpress validate <pack>` (from a deskpress checkout, `cargo install --path crates/cli` puts it on the PATH). Errors block the
+10. **Run the validator** and fix what it reports: `deskpress validate <pack>` (from a deskpress checkout, `cargo install --path crates/cli` puts it on the PATH). Errors block the
    load. Warnings are the honest backlog.
 
 ## Never invent a fact

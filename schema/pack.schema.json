@@ -58,7 +58,7 @@
         "root": {
           "type": "object",
           "additionalProperties": { "type": "string", "minLength": 1 },
-          "propertyNames": { "enum": ["days", "places", "people", "alerts", "documents", "sheets"] }
+          "propertyNames": { "enum": ["days", "places", "people", "alerts", "documents", "climate", "sheets"] }
         },
         "day": { "$ref": "#/$defs/rename" },
         "block": { "$ref": "#/$defs/rename" },

@@ -17,3 +17,4 @@ history.
 | [0009](0009-documentation.md) | who each document is for, and what stays private | accepted |
 | [0010](0010-rust-core-uniffi.md) | a Rust core loaded natively through UniFFI; Cargo for the repo | accepted |
 | [0011](0011-android-host-and-make.md) | the Android host, the ffi crate, one Makefile, Maestro flows | accepted |
+| [0012](0012-data-sources-and-sync.md) | a module's data comes from the pack, a sync, or both; the climate module | accepted |

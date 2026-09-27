@@ -13,7 +13,8 @@ flowchart TD
 
 This page has two halves. **The definition** (modules, rules, screens, expressions) is new and is a
 draft until the engine that runs it lands; it follows decisions 0002 to 0005. **The content** (days,
-places, people, alerts, documents, sheets) is what the first modules read, and is stable.
+places, people, alerts, documents, sheets) is what the first modules read, and is stable, except
+`climate`, which is new.
 
 Two rules before the keys.
 
@@ -112,6 +113,30 @@ screens:                      # each screen is its own machine
       - Segmented: {items: day.options, on_tap: pick}
       - Button: {label: ui.confirm, on_tap: confirm}
 ```
+
+### Where a module's data comes from
+
+A module reads the pack's content (`from`), a source it syncs (`sync`), or both. Synced data wins
+where it covers and the pack fills the rest; a failed sync keeps the last good data and its age.
+
+```yaml
+modules:
+  climate:
+    from: climate
+    sync: {trigger: button, request: {url: "https://api.example.org/forecast"}}
+```
+
+| mode | `from` | `sync.trigger` |
+| --- | --- | --- |
+| on the pack | yes | none |
+| pack, plus a sync button | yes | `button` |
+| sync button only | none | `button` |
+| pack, plus auto sync | yes | `auto`, with `every: 6h` |
+| auto sync only | none | `auto`, with `every` |
+
+A module with neither is a load error. The person approves the hosts once, and a `secret` is
+only a name: its value is typed on the device. The request and reply mapping are a draft until
+the first sync source lands; see [decision 0012](decisions/0012-data-sources-and-sync.md).
 
 ### Rules
 
@@ -367,6 +392,32 @@ documents:
 
 The shell renders one card per document, groups them by `for`, opens the file full screen at maximum
 brightness, and never needs the network to do it.
+
+## climate
+
+Draft, read by the `climate` module. The weather a place usually has, and any day you know better.
+
+```yaml
+climate:
+  units: metric                      # metric | imperial
+  entries:
+    - {place: lisbon, month: 4, high: 20, low: 12, rain: 35, sunrise: "06:55", sunset: "20:10",
+       summary: "Spring; showers pass quickly"}
+    - {place: lisbon, date: 2026-04-11, high: 23, summary: "Warm for April"}
+```
+
+| key | what it is |
+| --- | --- |
+| `place` | id in `places`. Missing: the whole pack |
+| `month` or `date` | a month (1 to 12), or a day. A date beats a month |
+| `high`, `low` | temperatures, in the pack's units |
+| `rain` | chance of rain, in % |
+| `sunrise`, `sunset` | `HH:MM`, local time |
+| `summary` | one line a person reads |
+
+The most specific entry wins, and a key it lacks falls through to the next match. The module
+exposes the result for the current day and place as `weather.high`, `weather.low`, `weather.rain`,
+`weather.sunrise`, `weather.sunset`, `weather.summary` and `weather.as_of`.
 
 ## sheets
 

@@ -2,7 +2,7 @@
 
 A pack describes an app. The **engine** turns the pack and the state of the world into a **screen
 tree**. A **renderer** draws that tree with the pack's theme. Nothing else is involved: no server, no
-account, no network.
+account, and no network unless the pack asks for a sync.
 
 ```mermaid
 flowchart LR
@@ -74,7 +74,9 @@ The details, and why, are in [decision 0002](decisions/0002-main-machine-and-scr
 
 Shared, tested domain logic that a pack opts into: `timeline` (which day, which block), `places`
 (which place, geofences), `people` (who holds the phone), `choices` (stored decisions), `alerts`,
-`documents`. Each exposes names to expressions and may ask the host for tools. See
+`documents`, `climate` (the weather here, today). Each exposes names to expressions and may ask the host for tools. A module mixes
+two inputs: its data, which the pack says where to take from (the pack, a sync, or both), and the
+world, which the host pushes in and the module's code decides which parts it reads. See
 [decision 0004](decisions/0004-modules-and-derive.md).
 
 ### Expressions
@@ -136,5 +138,10 @@ the tools: open a map, sync a calendar, watch geofences, unlock with a fingerpri
 
 ## Offline first
 
-The pack is a file on the device. The engine and the validator are local. The only thing that can
-reach the network is opening a map, and without signal that button shows the address as text.
+The pack is a file on the device. The engine and the validator are local. With no `sync` in the
+pack, the only thing that can reach the network is opening a map, and without signal that button
+shows the address as text.
+
+A module can also sync its data, if the pack says so: by button or automatically, over the pack's
+own data or instead of it. The person approves the hosts once, a failed sync keeps the last good
+data with its age, and no secret lives in the pack. See [decision 0012](decisions/0012-data-sources-and-sync.md).
