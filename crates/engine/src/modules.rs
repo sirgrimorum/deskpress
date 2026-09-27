@@ -3,9 +3,10 @@
 
 use std::cmp::Reverse;
 
+use crate::clock::next_day;
 use crate::engine::World;
 use crate::validate::{Keymap, SEVERITIES};
-use crate::value::{Map, Value, text};
+use crate::value::{Map, Value, text, truthy};
 
 /// One run of the modules over one world.
 pub(crate) struct Run<'a> {
@@ -110,7 +111,7 @@ impl<'a> Run<'a> {
         Value::List(kept.iter().map(|o| Value::Map(self.canon(o, "option"))).collect())
     }
 
-    /// `[time, text, meta]` as `{time, text, ...meta}`.
+    /// `[time, text, meta]` as `{time, text, ...meta}`, its type in the canonical word.
     fn block(&self, block: &Value) -> Map {
         let parts = list(Some(block));
         let mut m = Map(vec![
@@ -120,7 +121,31 @@ impl<'a> Run<'a> {
         if let Some(meta) = parts.get(2) {
             m.0.extend(self.canon(meta, "block").0);
         }
+        if let Some(kind) = m.get("type") {
+            let kind = self.keymap.value("type", Some(kind));
+            m.set("type", Value::String(kind));
+        }
         m
+    }
+
+    /// A block of today with its `state` for the agenda: a note has no time, `now` is the current
+    /// block, `past` one whose time has come, and one to come is `locked` or `next`.
+    fn stated(&self, block: &Value, current: &Value) -> Value {
+        let mut m = block.as_map().cloned().unwrap_or_default();
+        let time = text(m.get("time"));
+        let state = if time.is_empty() {
+            "note"
+        } else if block == current {
+            "now"
+        } else if time.as_str() <= self.time {
+            "past"
+        } else if truthy(m.get("locked")) {
+            "locked"
+        } else {
+            "next"
+        };
+        m.set("state", Value::String(state.to_owned()));
+        Value::Map(m)
     }
 
     /// A day with canonical keys, its blocks in force as mappings, its options and its choice.
@@ -149,13 +174,15 @@ impl<'a> Run<'a> {
         (m, blocks)
     }
 
-    /// `day` is today; `block` the last one whose time has come, until its `until`; `next` the
-    /// first one still to come.
+    /// `day` is today, `started` once a block's time has come; `block` the last one whose time
+    /// has come, until its `until`; `next` the first one still to come. `days` is every day and
+    /// `tomorrow` the day after this one, with its `first` timed block.
     fn timeline(&mut self, data: Option<&Value>) {
         let days = list(data);
         let (mut day, mut block, mut next) = (Value::Null, Value::Null, Value::Null);
         if let Some(today) = days.iter().find(|d| self.date_of(d) == self.date) {
-            let (map, timed) = self.day(days, today);
+            let (mut map, timed) = self.day(days, today);
+            let started = timed.iter().any(|b| text(b.get("time")).as_str() <= self.time);
             let mut current = None;
             for b in timed {
                 if text(b.get("time")).as_str() <= self.time {
@@ -174,11 +201,24 @@ impl<'a> Run<'a> {
                     block = Value::Map(b);
                 }
             }
+            let blocks = list(map.get("blocks")).iter().map(|b| self.stated(b, &block)).collect();
+            map.set("blocks", Value::List(blocks));
+            map.set("started", Value::Bool(started));
             day = Value::Map(map);
         }
+        let date = next_day(self.date);
+        let tomorrow = days.iter().find(|d| self.date_of(d) == date);
+        let tomorrow = tomorrow.map_or(Value::Null, |t| {
+            let (mut map, timed) = self.day(days, t);
+            map.set("first", timed.into_iter().next().map_or(Value::Null, Value::Map));
+            Value::Map(map)
+        });
+        let all = days.iter().map(|d| Value::Map(self.canon(d, "day"))).collect();
         self.set("day", day);
         self.set("block", block);
         self.set("next", next);
+        self.set("days", Value::List(all));
+        self.set("tomorrow", tomorrow);
     }
 
     /// The decision to show: the first one due and unanswered, else the first one due, else the
@@ -232,10 +272,13 @@ impl<'a> Run<'a> {
         self.set("decision", decision);
     }
 
-    /// `holder` is the person holding the phone, `people` everyone.
+    /// `holder` is the person holding the phone: the one the host says, else the one stored as
+    /// `holder` by a relay. `people` is everyone.
     fn people(&mut self, data: Option<&Value>) {
         let people: Vec<Map> = list(data).iter().map(|p| self.canon(p, "person")).collect();
-        let holder = people.iter().find(|p| text(p.get("id")) == self.world.holder);
+        let stored = text(self.world.store.get("holder"));
+        let id = if self.world.holder.is_empty() { &stored } else { &self.world.holder };
+        let holder = people.iter().find(|p| text(p.get("id")) == *id);
         let holder = holder.cloned().map_or(Value::Null, Value::Map);
         self.set("holder", holder);
         self.set("people", Value::List(people.into_iter().map(Value::Map).collect()));
@@ -248,6 +291,17 @@ impl<'a> Run<'a> {
         let find = |id: &str| {
             let place = places?.get(id)?;
             let mut m = self.canon(place, "place");
+            for kind in ["during", "parking"] {
+                if let Some(v) = m.get(kind).map(|v| self.keymap.canon(v, kind)) {
+                    m.set(kind, v);
+                }
+            }
+            let points = m.get("points").and_then(Value::as_list);
+            let points: Option<Vec<Value>> =
+                points.map(|l| l.iter().map(|p| self.keymap.canon(p, "point")).collect());
+            if let Some(points) = points {
+                m.set("points", Value::List(points));
+            }
             m.set("id", Value::String(id.to_owned()));
             Some(Value::Map(m))
         };
@@ -508,7 +562,9 @@ mod tests {
     fn a_block_is_a_mapping_whatever_shape_it_came_in() {
         let out = timeline("2026-04-15T08:00", &[]);
         assert_eq!(out.at("block"), r#"{"time": "07:30", "text": "x"}"#);
-        assert!(out.at("day.blocks").contains(r#"{"time": "07:00", "text": null}"#));
+        assert!(
+            out.at("day.blocks").contains(r#"{"time": "07:00", "text": null, "state": "past"}"#)
+        );
     }
 
     #[test]
@@ -522,6 +578,34 @@ mod tests {
             strs(r#""2026-04-11""#, r#""Hola""#)
         );
         assert_eq!(out.at("block.place"), r#""p""#);
+    }
+
+    #[test]
+    fn today_has_its_blocks_stated_and_tomorrow_its_first_hour() {
+        let out = timeline("2026-04-11T11:30", &[]);
+        assert_eq!(out.each("day.blocks", "state"), "note past now locked");
+        assert_eq!(out.at("day.started"), "true");
+        assert_eq!(out.at("tomorrow.first.text"), r#""Car""#);
+        let days = out.scope.get("days").and_then(Value::as_list).unwrap();
+        let dates: Vec<String> = days.iter().map(|d| text(d.get("date"))).collect();
+        assert_eq!(dates, ["2026-04-11", "2026-04-12", "2026-04-13", "2026-04-14", "2026-04-15"]);
+        let out = timeline("2026-04-11T09:00", &[]);
+        assert_eq!(out.each("day.blocks", "state"), "note next next locked");
+        assert_eq!(out.at("day.started"), "false");
+        let out = timeline("2026-04-13T09:00", &[]);
+        assert_eq!(
+            pair(out.at("tomorrow.first"), out.at("tomorrow.title")),
+            strs("null", r#""Early question""#)
+        );
+        assert_eq!(timeline("2026-04-15T09:00", &[]).at("tomorrow"), "null");
+    }
+
+    #[test]
+    fn a_block_type_comes_out_as_the_canonical_word() {
+        let manifest = "keymap: {values: {type: {visit: visita}}}";
+        let content = "days: [{date: 2026-04-11, blocks: [['10:00', x, {type: visita}], ['11:00', y, {type: meal}]]}]";
+        let out = run("timeline", manifest, content, &world("2026-04-11T10:00", &[]), "");
+        assert_eq!(out.each("day.blocks", "type"), "visit meal");
     }
 
     #[test]
@@ -589,6 +673,13 @@ mod tests {
         let mut nobody = world("2026-04-11T10:00", &[]);
         nobody.holder = "ana".into();
         assert_eq!(run("people", "", content, &nobody, "").at("holder"), "null");
+        // With no holder from the host, the one a relay stored holds the phone.
+        let mut relayed = world("2026-04-11T10:00", &[("holder", "tomas")]);
+        relayed.holder = String::new();
+        assert_eq!(run("people", "", content, &relayed, "").at("holder"), r#"{"id": "tomas"}"#);
+        // The host's holder wins over a stored one.
+        let both = world("2026-04-11T10:00", &[("holder", "tomas")]);
+        assert_eq!(run("people", keymap, content, &both, "").at("holder"), out.at("holder"));
     }
 
     #[test]
@@ -602,6 +693,16 @@ mod tests {
         );
         assert_eq!(out.at("here"), r#"{"name": "Ferry", "id": "cais"}"#);
         assert_eq!(out.regions, ["azulejo"]);
+        let keymap =
+            "keymap: {during: {hours: horario}, parking: {price: precio}, point: {name: nombre}}";
+        let nested = "places:
+  p: {during: {horario: x}, parking: {precio: y}, points: [{nombre: z}], at: 1}
+";
+        let out = run("places", keymap, nested, &w, "block: {place: p}");
+        assert_eq!(
+            out.at("place"),
+            r#"{"during": {"hours": "x"}, "parking": {"price": "y"}, "points": [{"name": "z"}], "at": 1, "id": "p"}"#
+        );
         let out = run("places", "", content, &w, "block: {place: odd}");
         assert_eq!(out.at("place"), r#"{"id": "odd"}"#);
         let out = run("places", "", "", &w, "");

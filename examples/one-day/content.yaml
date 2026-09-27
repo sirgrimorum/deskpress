@@ -9,9 +9,10 @@ days:
     blocks:
       - ["", "Nothing before 10:00. The ferry back is the only fixed hour."]
       - ["10:30", "Walk up through Graca. Shade on the left side of the street.",
-         {type: walking}]
+         {type: walking, duration: 40 min}]
       - ["11:15", "Museu Nacional do Azulejo, start on the top floor and come down.",
-         {type: visit, place: azulejo, guide: tomas, until: "13:00"}]
+         {type: visit, place: azulejo, guide: tomas, until: "13:00", ticket: sheets.bookings.azulejo,
+          source_note: "Opening hours checked on the museum site"}]
       - ["13:15", "Lunch in the museum cloister. It is the cheap one, not the famous one.",
          {type: meal}]
       - ["18:40", "Ferry from Cais do Sodre. Last one that connects is 19:10, do not wait for it.",

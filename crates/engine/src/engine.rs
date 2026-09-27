@@ -5,7 +5,7 @@ use crate::clock::{next_day, next_minute};
 use crate::define::{Definition, Does, Rule, define, fill};
 use crate::modules::Run;
 use crate::pack::Pack;
-use crate::tree::{Tree, build, outline};
+use crate::tree::{Conventions, Tree, build, outline};
 use crate::validate::patterns::{is_real_date, is_stamp};
 use crate::validate::{Finding, Keymap, validate};
 use crate::value::{Map, Value, quote, truthy};
@@ -191,7 +191,7 @@ impl Engine {
             Some(screen) => {
                 let mut scope = d.scope;
                 enter(&mut scope, top);
-                build(&top.screen, screen, &mut scope)
+                build(&top.screen, screen, &mut scope, &Conventions::of(&self.pack.manifest))
             }
         };
         View { tree, watch: d.watch }

@@ -6,6 +6,7 @@ pub mod engine;
 pub mod expr;
 mod modules;
 pub mod pack;
+mod template;
 pub mod tree;
 pub mod validate;
 pub mod value;

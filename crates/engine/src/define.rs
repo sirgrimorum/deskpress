@@ -13,7 +13,7 @@ use crate::value::{Value, quote, text};
 /// The modules in the order they run, the content root each reads unless told otherwise, and the
 /// names it exposes. A module reads the names the ones before it exposed.
 pub const MODULES: [(&str, &str, &[&str]); 7] = [
-    ("timeline", "days", &["day", "block", "next"]),
+    ("timeline", "days", &["day", "block", "next", "days", "tomorrow"]),
     ("choices", "days", &["decision"]),
     ("people", "people", &["holder", "people"]),
     ("places", "places", &["place", "here"]),

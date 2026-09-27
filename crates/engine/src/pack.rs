@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 
+use crate::template;
 use crate::value::{Map, Value, quote, text, truthy};
 use crate::yaml;
 
@@ -23,13 +24,14 @@ impl Pack {
     }
 }
 
-/// Reads a pack whose manifest is `manifest`. `read` takes a path relative to the pack folder and
+/// Reads a pack whose manifest is `file`. `read` takes a path relative to the pack folder and
 /// returns the file's text; every error comes back as one line naming the file.
 pub fn load(
-    manifest: &str,
+    file: &str,
     mut read: impl FnMut(&str) -> Result<String, String>,
 ) -> Result<Pack, String> {
-    let manifest = parse(manifest, &mut read)?;
+    let manifest = parse(file, &mut read)?;
+    let manifest = template::extend(manifest).map_err(|e| format!("{file}: {e}"))?;
     let head = manifest.get("pack");
     let field = |key| head.and_then(|h| h.get(key));
 
@@ -145,6 +147,16 @@ mod tests {
         let broken = folder(&[("pack.yaml", "a: 1\na: 2")]);
         let e = load("pack.yaml", broken).unwrap_err();
         assert!(e.starts_with("pack.yaml: line 2: "), "{e}");
+    }
+
+    #[test]
+    fn a_manifest_is_read_over_the_template_it_extends() {
+        let unknown = folder(&[("pack.yaml", "pack: {extends: blog}")]);
+        let e = load("pack.yaml", unknown).unwrap_err();
+        assert_eq!(e, "pack.yaml: pack.extends: \"blog\" is not a template: travel");
+        let travel = folder(&[("pack.yaml", "pack: {extends: travel}")]);
+        let pack = load("pack.yaml", travel).unwrap();
+        assert!(pack.manifest.get("screens").is_some());
     }
 
     #[test]

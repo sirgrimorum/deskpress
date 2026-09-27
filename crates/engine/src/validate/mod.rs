@@ -836,6 +836,7 @@ mod tests {
     #[test]
     fn the_example_pack_loads_with_no_errors_and_no_warnings() {
         let manifest = yaml(include_str!("../../../../examples/one-day/pack.yaml"));
+        let manifest = crate::template::extend(manifest).unwrap();
         let content = yaml(include_str!("../../../../examples/one-day/content.yaml"));
         assert_eq!(said(&validate(&manifest, &content, None)), "");
     }
@@ -1030,6 +1031,28 @@ days:
             "days:\n  - {date: 2026-04-11, title: x, blocks: [['10:00', 'x', {place: azulejo}]]}",
             "this pack has no places, so \"azulejo\" points at nothing",
         );
+    }
+
+    #[test]
+    fn a_typed_block_without_its_answer_is_warned() {
+        let content = "days:
+  - date: 2026-04-11
+    title: x
+    blocks:
+      - ['09:00', 'x', {type: driving}]
+      - ['10:00', 'x', {type: flight, boarding: ''}]
+      - ['11:00', 'x', {type: walking, duration: 20 min}]
+      - ['12:00', 'x', {type: visit}]
+";
+        let s = said(&with("", content, None));
+        let at = "days.2026-04-11.blocks";
+        for needle in [
+            format!("{at}[0].duration: a driving block with no duration shows its start time"),
+            format!("{at}[1].boarding: a flight block with no boarding"),
+        ] {
+            assert!(s.contains(&needle), "wanted {needle:?} in:\n{s}");
+        }
+        assert!(!s.contains("[2]") && !s.contains("[3]"), "{s}");
     }
 
     #[test]

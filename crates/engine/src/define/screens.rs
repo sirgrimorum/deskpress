@@ -435,6 +435,8 @@ impl Definer {
                     Value::String(s) if s.contains('{') => {
                         self.template(&here, s).map(Prop::Template)
                     }
+                    // A list is taken as it is written, like `skip: [time, text]`.
+                    Value::List(_) => Some(Prop::Expr(Expr::Literal(v.clone()))),
                     _ => self.expr(&here, v).map(Prop::Expr),
                 };
                 ok &= prop.is_some();

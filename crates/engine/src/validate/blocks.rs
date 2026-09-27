@@ -2,11 +2,21 @@
 
 use super::Checker;
 use super::patterns::{dated_key, is_time, to_confirm};
-use crate::value::{Map, Value, quote, show, text};
+use crate::value::{Map, Value, quote, show, text, truthy};
 
 pub const TYPES: [&str; 13] = [
     "visit", "train", "driving", "walking", "meal", "event", "flight", "parking", "lodging",
     "night", "morning", "transfer", "free",
+];
+
+/// The key a type's answer comes from, the big value at the top of a moment. Parking is not here:
+/// its answer is the place's price, or free.
+const ANSWERS: [(&str, &str); 5] = [
+    ("driving", "duration"),
+    ("walking", "duration"),
+    ("flight", "boarding"),
+    ("lodging", "check_in"),
+    ("free", "until"),
 ];
 
 impl Checker<'_> {
@@ -79,6 +89,15 @@ impl Checker<'_> {
         let read = |key: &str| keymap.field(meta, "block", key);
         if let Some(kind) = read("type") {
             self.block_type(&format!("{bat}.type"), kind);
+            let canon = self.keymap.value("type", Some(kind));
+            if let Some((_, key)) = ANSWERS.iter().find(|(t, _)| *t == canon)
+                && !truthy(read(key))
+            {
+                let message = format!(
+                    "a {canon} block with no {key} shows its start time where the {key} would be"
+                );
+                self.r.warn(format!("{bat}.{key}"), message);
+            }
         }
         let place = text(read("place"));
         if !place.is_empty() && self.places.is_empty() {

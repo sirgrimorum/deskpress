@@ -1,0 +1,169 @@
+# The travel template. A pack with `extends: travel` in its head gets all of this, and brings its
+# content, its theme and whatever it changes: a ui label, a derive, a screen, a rule of its own.
+# The six views of the design are screens here: moment, sheet, agenda, suggestion, complete and
+# relay, with morning, night and days as moments of their own. See docs/templates.md.
+
+# The words the screens say. A pack in another language replaces them by key.
+ui:
+  today: Today
+  back: Back
+  days: The days
+  now: Now
+  next: Next
+  nothing_more: Nothing more today
+  tonight: Tonight
+  tomorrow: Tomorrow
+  see_day: See the day
+  points: Point by point
+  ticket: The ticket
+  parking: Parking
+  free: Free
+  alerts: Alerts
+  whose_phone: Whose phone is it?
+  for_you: For you
+  go: Go
+  time_up: Time is up
+  give_back: Give the phone back
+  to_confirm: to confirm
+
+modules:
+  timeline:
+  choices:
+  people:
+  places:
+  alerts:
+  documents:
+  climate:
+
+derive:
+  kid: holder and holder.adult == false
+  # The current block names the person holding the phone.
+  mine: block and holder and (block.guide == holder.id or block.for == holder.id)
+  night: "day and not next and now.time >= '21:00'"
+  # The answer at the top of a moment: the time, unless the type has a better one.
+  hero: >-
+    (block.type == 'driving' and block.duration)
+    or (block.type == 'walking' and block.duration)
+    or (block.type == 'flight' and block.boarding)
+    or (block.type == 'parking' and (place.parking.price or ui.free))
+    or (block.type == 'lodging' and block.check_in)
+    or (block.type == 'free' and block.until)
+    or block.time
+
+# First true when wins. A pack's own rules are tried before these.
+rules:
+  - {when: not day, screen: days}
+  - {when: mine, screen: suggestion}
+  - {when: kid and block, screen: complete}
+  - {when: night, screen: night}
+  - {when: not day.started, screen: morning}
+  - {when: block, screen: moment}
+  - {screen: agenda}
+
+screens:
+  # What happens now: the block, its place, what to know, and what comes next.
+  moment:
+    actions:
+      agenda: [{open: agenda}]
+      relay: [{open: relay}]
+      points: [{open: sheet, with: {title: place.name, rows: place.points or place.during.points}}]
+      ticket: [{open: sheet, with: {title: ui.ticket, value: block.ticket or place.during.ticket}}]
+    layout:
+      - Screen: {title: day.title, today: ui.today, on_today: agenda}
+      - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
+      - Label: {if: block.type, text: "{ui.now} · {block.type}"}
+      - Chip: {if: "not empty(people)", text: holder.name or ui.whose_phone, on_tap: relay}
+      - BigValue: {text: hero, caption: block.text}
+      - Label: {if: weather.summary, text: weather.summary}
+      - Card: {if: "block.type == 'driving'", title: ui.parking, text: place.parking}
+      - Auto: {if: "block.type == 'parking'", value: place.parking, skip: [price]}
+      - Auto: {value: place.during, skip: [type, ticket, points]}
+      - Auto: {value: block, skip: [time, text, type, place, until, locked, guide, for, duration, boarding, check_in, ticket, state]}
+      - Alert: {each: alerts, if: "item.severity == 'high'", severity: item.severity, title: item.title, text: item.action or item.detail}
+      - Button: {if: place.points or place.during.points, label: ui.points, on_tap: points}
+      - Button: {if: block.ticket or place.during.ticket, label: ui.ticket, on_tap: ticket}
+      - Label: {if: next, text: "{ui.next}, {next.time}: {next.text}"}
+      - Label: {if: not next, text: ui.nothing_more}
+
+  # Before the first block: the day ahead and the first hour of it.
+  morning:
+    actions:
+      agenda: [{open: agenda}]
+      relay: [{open: relay}]
+    layout:
+      - Screen: {title: day.title, today: ui.today, on_today: agenda}
+      - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
+      - Chip: {if: "not empty(people)", text: holder.name or ui.whose_phone, on_tap: relay}
+      - BigValue: {if: next, text: next.time, caption: next.text}
+      - Label: {if: weather, text: "{weather.summary}, {weather.low} to {weather.high}"}
+      - Auto: {value: day, skip: [date, title, blocks, fixed, options, choice, started, decision]}
+      - Alert: {each: alerts, if: "item.severity == 'high'", severity: item.severity, title: item.title, text: item.action or item.detail}
+      - Button: {label: ui.see_day, on_tap: agenda}
+
+  # After the last block of the day, from nine: tomorrow's first hour and what to have ready.
+  night:
+    actions:
+      agenda: [{open: agenda}]
+    layout:
+      - Screen: {title: ui.tonight, today: ui.today, on_today: agenda}
+      - BigValue: {if: tomorrow.first, text: tomorrow.first.time, caption: tomorrow.first.text}
+      - Label: {if: tomorrow, text: "{ui.tomorrow}: {tomorrow.title}"}
+      - Label: {if: not tomorrow, text: ui.nothing_more}
+      - Auto: {value: tomorrow, skip: [date, title, blocks, fixed, options, choice, first, decision]}
+
+  # The whole day at a glance, each block with its state. The way out of every screen.
+  agenda:
+    actions:
+      back: [back]
+      alerts: [{open: sheet, with: {title: ui.alerts, rows: alerts}}]
+    layout:
+      - Screen: {title: day.title, back: ui.back, on_back: back}
+      - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
+      - Label: {if: weather, text: "{weather.summary}, {weather.low} to {weather.high}"}
+      - Row: {each: day.blocks, text: item.text, caption: item.time, state: item.state}
+      - Row: {each: alerts, if: "item.severity == 'medium'", text: item.title, caption: item.action, state: "'note'"}
+      - Button: {if: "not empty(alerts)", label: ui.alerts, on_tap: alerts}
+
+  # A day that is not in the pack: every day there is.
+  days:
+    layout:
+      - Screen: {title: ui.days}
+      - Row: {each: days, text: item.title, caption: item.date}
+
+  # The detail a moment has no room for. To read, not to act: no main button.
+  sheet:
+    actions:
+      back: [back]
+    layout:
+      - Screen: {title: params.title, back: ui.back, on_back: back}
+      - Card: {text: params.value}
+      - Row: {each: params.rows, text: item.name or item.title, caption: item.what or item.action}
+
+  # What the current block proposes to the person holding the phone.
+  suggestion:
+    actions:
+      go: [{open: moment}]
+    layout:
+      - Screen: {title: day.title}
+      - Chip: {text: holder.name}
+      - BigValue: {text: block.time, caption: block.text}
+      - Card: {title: ui.for_you, text: block.suggestion}
+      - Row: {each: place.points or place.during.points, text: item.name, caption: item.for_kids or item.what}
+      - Button: {label: ui.go, on_tap: go}
+
+  # One thing and no way out: a child holds the phone through a block that is not theirs.
+  complete:
+    actions:
+      relay: [{open: relay}]
+    layout:
+      - BigValue: {text: ui.time_up, caption: ui.give_back}
+      - Button: {label: ui.give_back, on_tap: relay}
+
+  # Who holds the phone. The choice is stored, and the rules decide again.
+  relay:
+    actions:
+      hold: [{store: holder, value: $arg}, home]
+      back: [back]
+    layout:
+      - Screen: {title: ui.whose_phone, back: ui.back, on_back: back}
+      - Chip: {each: people, text: item.name, value: item.id, on_tap: hold}
