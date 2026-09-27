@@ -56,6 +56,7 @@ entry is the short answer; the linked document has the rest.
 | **unknown key rule** | a key the shell does not know becomes a card labelled with that key. Enriching a pack never breaks it |
 | **validate** | load a pack and list its errors and warnings. `deskpress validate <pack>` on the desk, `load` in the app |
 | **warning** | something worth fixing that does not stop the pack from loading, like a place with no coordinates |
+| **watch** | what comes with each tree to say what would change it: the next instant (`until`) and the geofences that matter. The host calls the engine again only then |
 | **world** | what the host pushes in on each call, as opposed to a module's data: the clock, location, the holder and the stored facts |
 | **write back** | a theme edit in the app is saved to the loaded theme file, keeping its comments and order |
 

@@ -44,8 +44,8 @@ Three calls:
 | call | when | what it does |
 | --- | --- | --- |
 | `load(files)` | once per pack | parse YAML, apply the keymap, validate everything, compile expressions. Returns errors and warnings, or a loaded pack |
-| `screen(world)` | on every event | run the modules, the derived values and the rules; build the screen tree |
-| `dispatch(action)` | on a tap | run the action's effects; return the new tree, a store patch and tool commands for the host |
+| `screen(world)` | only when an input changes or `watch.until` is reached | run the modules, the derived values and the rules; build the screen tree and its `watch` |
+| `dispatch(action)` | on a tap | run the action's effects; return the new tree and its `watch`, a store patch and tool commands for the host |
 
 ```mermaid
 sequenceDiagram
@@ -54,12 +54,18 @@ sequenceDiagram
   H->>E: load(pack files)
   E-->>H: errors and warnings, or ok
   H->>E: screen(clock, location, holder, stored facts)
-  E-->>H: screen tree
+  E-->>H: screen tree + watch(until, regions)
+  H->>H: draw, set one timer, register the regions
+  Note over H: nothing changes: no call
   H->>E: dispatch(confirm)
-  E-->>H: tree + store patch + commands
+  E-->>H: tree + watch + store patch + commands
   H->>H: persist patch, run commands
-  H->>E: screen(new world)
+  H->>E: screen(new world) when the timer fires or a region is crossed
 ```
+
+Same world, same tree: the host never calls the engine to find out that nothing changed. The
+`watch` says what would change the answer (the next instant, the geofences that matter), so the
+host waits on one timer instead of polling. See [decision 0013](decisions/0013-call-only-on-change.md).
 
 ### Two machines
 
@@ -118,6 +124,9 @@ The contract between engine and renderer. Plain data, versioned, and the same on
   ]
 }
 ```
+
+Next to the tree, the engine returns `watch: {until, regions}` for the host, not the renderer. The
+renderer keeps the current tree on screen until a different one arrives, so a call never flickers.
 
 A renderer knows the closed set of components and the theme tokens, and nothing about packs.
 
