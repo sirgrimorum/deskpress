@@ -1,163 +1,140 @@
 # Architecture
 
-The whole shell in one sentence: **a screen is a view applied to a moment and a user.**
-
-```
-screen = view(moment, user)
-moment = (day, time) + place
-user   = who is holding the phone + theme + mode
-```
-
-Everything below is the machinery that makes that sentence true, and the reason the app stays small.
+A pack describes an app. The **engine** turns the pack and the state of the world into a **screen
+tree**. A **renderer** draws that tree with the pack's theme. Nothing else is involved: no server, no
+account, no network.
 
 ```mermaid
 flowchart LR
-  pack["pack (yaml)"] --> loader["loader"] --> validator["validator"] --> store["store, on the device"]
-  store --> reader["reader"] --> view["view"] --> screen["screen"]
-  inputs[/"clock, location, who holds the phone"/] --> reader
-  reader --- tools["tools: location, calendar"]
+  subgraph pack["pack (files)"]
+    def["pack.yaml: rules, screens, modules"]
+    content["content.yaml: the data"]
+    theme["theme.yaml: the design system"]
+  end
+  subgraph engine["engine (Rust, pure)"]
+    load["load + validate"] --> world["modules + derive"] --> rules["rules pick a screen"] --> build["screen machine builds the tree"]
+  end
+  subgraph host["host (Android, Kotlin)"]
+    sensors[/"clock, location, holder"/]
+    store[("stored facts")]
+    renderer["Compose renderer"]
+    tools["tools: map, calendar, geofence, biometric"]
+  end
+  pack --> load
+  sensors --> world
+  store --> world
+  build -->|"screen tree"| renderer
+  renderer -->|"action"| build
+  build -->|"store patch, tool commands"| store
+  build --> tools
 ```
 
-## The loader
+## The engine
 
-Reads the pack from a file the person picked, parses the YAML, applies the manifest's `keymap` so
-every key is canonical from that point on, resolves path references, and hands a plain tree to the
-validator. It runs once per load, not per screen.
+One Rust crate, standard library only. It never reads a clock, a file or a sensor: the host passes
+everything in. That is what lets the same code run on a desk, in the app, and in an LLM plugin, and
+what makes every behaviour a table test.
 
-Two things it does that matter later:
+On the phone it is a native library: UniFFI generates the Kotlin types, so the host calls it like
+any Kotlin API and gets a typed screen tree back. On the desk the `deskpress` binary prints the
+same tree as JSON. See [decision 0010](decisions/0010-rust-core-uniffi.md).
 
-- **Keymap first, everything else after.** No other part of the shell knows that a pack might use
-  `dias` instead of `days`. The keymap is applied in the loader and nowhere else.
-- **References resolved eagerly.** `bookings.azulejo` becomes the record it points at before
-  any reader or view sees it. A reference that does not resolve stays as its own text, so a typo
-  degrades into a visible string instead of a crash.
+Three calls:
 
-## The validator
+| call | when | what it does |
+| --- | --- | --- |
+| `load(files)` | once per pack | parse YAML, apply the keymap, validate everything, compile expressions. Returns errors and warnings, or a loaded pack |
+| `screen(world)` | on every event | run the modules, the derived values and the rules; build the screen tree |
+| `dispatch(action)` | on a tap | run the action's effects; return the new tree, a store patch and tool commands for the host |
 
-`tools/validate.mjs`, plain ES modules with no dependencies, which is the point: **the same file
-runs on a desk with node and inside the app**. A pack that passes on the desk passes on the phone,
-so the person who wrote it never finds out at an airport that it was malformed.
+```mermaid
+sequenceDiagram
+  participant H as host
+  participant E as engine
+  H->>E: load(pack files)
+  E-->>H: errors and warnings, or ok
+  H->>E: screen(clock, location, holder, stored facts)
+  E-->>H: screen tree
+  H->>E: dispatch(confirm)
+  E-->>H: tree + store patch + commands
+  H->>H: persist patch, run commands
+  H->>E: screen(new world)
+```
 
-What it checks, in order, and it reports every failure rather than stopping at the first:
+### Two machines
 
-1. **Skeleton.** The manifest has `id`, `name`, `language`, `timezone`, `content`. The content has
-   `days`. Ids are slugs and unique inside their collection.
-2. **Formats.** Dates are `YYYY-MM-DD` and real. Times are `HH:MM` on a 24 hour clock. Timestamps
-   are `YYYY-MM-DDTHH:MM`. The timezone is an IANA name.
-3. **Block shape.** Every block is a list of two or three elements: a time, a text, and an optional
-   map. A third element that is not a map is the single most common authoring mistake, so its
-   message says exactly that.
-4. **Types.** Every `type` is one of the thirteen. A near miss reports the closest valid value.
-5. **References.** Every `place`, `for`, `guide`, `see` and path reference resolves. Every
-   `requires` names a date that exists and an option id that exists on it.
-6. **Option days.** A day with `options` has at least two, at most one `recommended`, unique ids,
-   and a `decision.when` that falls before the day itself.
-7. **Theme.** All 23 tokens are present in every declared theme, and the 13 contrast pairs clear
-   4.5:1. A theme that fails is not a matter of taste: it is text nobody can read in the sun.
+- **The main machine** is the pack's `rules`: ordered guards, first true wins, the last one has no
+  guard. It answers "which screen, right now". Any change of input re-runs it.
+- **A screen machine** is a screen's `state`, `actions` and `layout`. It answers "what can happen
+  here". An action can `store` a fact, which is an input, so it can move the main machine.
 
-Severity is two levels. **Errors** block the load: the app will not pretend. **Warnings** load and
-show a line on the validator screen: a place with no coordinates, a fact whose `verified` date is
-over a month old, a day with no blocks, a point with no `for_kids` when a kid is declared.
+The details, and why, are in [decision 0002](decisions/0002-main-machine-and-screen-machines.md).
 
-In app, the same code drives a screen: pick the file, see what is wrong in plain words with the key
-path that caused it, fix it, load again.
+### Modules
 
-## The reader
+Shared, tested domain logic that a pack opts into: `timeline` (which day, which block), `places`
+(which place, geofences), `people` (who holds the phone), `choices` (stored decisions), `alerts`,
+`documents`. Each exposes names to expressions and may ask the host for tools. See
+[decision 0004](decisions/0004-modules-and-derive.md).
 
-The reader is the only place in the app that makes a decision. It answers one question, **what
-should be on the screen right now**, and returns one plain object.
+### Expressions
 
-Its inputs are the store, the clock, the current place (from the location tool, or the last known
-one), and who is holding the phone. Its output names a view and carries everything that view needs:
-no lazy lookups, no callbacks back into the store.
+`when: decision.due and not decision.answered`. A small grammar, parsed at load, never evaluated as
+code. A typo is a load error with a path and a column. See [decision 0003](decisions/0003-expression-language.md).
 
-The rules, in the order they run:
+## Patterns
 
-1. If a decision is due and unanswered, the answer is the **suggestion** view. A question the person
-   has to settle outranks anything they were about to read.
-2. If a `critical` alert is live for this moment, it rides along at the top. It does not replace the
-   screen; it sits above the answer.
-3. Find the current block: the last block whose time has passed, on today's day entry, in the pack's
-   timezone. On an option day, from `fixed` plus the chosen option, or the recommended one if
-   nothing was chosen.
-4. If that block names a place, and the location tool disagrees about which place we are at, prefer
-   the geofence. The phone knows where it is better than the plan does.
-5. If the block is `locked` and its time has passed while we are somewhere else, the answer is the
-   **blocker** view: one thing has gone wrong and it is the only thing on the screen.
-6. Otherwise the answer is the **moment** view, built from the block, its place's `during`, and its
-   unknown keys.
+Not MVVM: the logic is not in the app's view models, it is in the engine and the pack.
 
-What the reader never does: measure anything, know a color, know a font size, or decide what a card
-looks like. That is the split the whole codebase rests on, and it is what keeps the app cheap to
-change.
+| pattern | where | why |
+| --- | --- | --- |
+| functional core, imperative shell | the engine is pure; the host does all I/O | every behaviour is a table test, the same on phone, desk and plugin |
+| unidirectional data flow (Elm, MVI) | world → `screen` → tree; tap → `dispatch` → tree | one source of truth; Compose redraws whatever tree it gets |
+| reducer with effects as data (like TCA) | `dispatch` returns a store patch and tool commands; the host runs them | the engine describes side effects, never performs them |
+| two level state machines (statecharts) | `rules` pick the screen; each screen has `state` + `actions` | "which screen now" is a pure function of the inputs; both levels are readable YAML |
+| data driven UI, on the device | the engine emits a tree of known components | the renderer knows components and tokens, never packs |
+| interpreter | the expression grammar, parsed at load | a pack is data, never code |
+| ports and adapters | modules behind one interface; host tools behind commands | new domain logic or a new platform without touching the core |
+| design tokens | the theme is data; components read tokens | theme editing and write back work without code |
 
-## The six views
+On Android there is one thin view model: it holds the engine, turns device events into calls
+and exposes the current tree to Compose. It holds no business logic.
 
-A view draws one object. It has no business logic, and it does not fetch.
+## The screen tree
 
-| view | the question it answers |
-| --- | --- |
-| `moment` | what is happening now |
-| `sheet` | the detail behind it: a list, a table, a document |
-| `agenda` | the shape of the day, and the only way back |
-| `suggestion` | a decision that is due, with its options side by side |
-| `blocker` | one thing has gone wrong, and here is what to do |
-| `handoff` | who is holding the phone |
+The contract between engine and renderer. Plain data, versioned, and the same on every platform.
 
-Forty four screens drawn on paper collapsed into these six, because what repeats in a life repeats
-on a screen. A seventh view means something was misread: look for the moment whose data is
-different, not for a new layout.
+```json
+{
+  "version": 1,
+  "screen": "moment",
+  "theme": "rita-light",
+  "kid": false,
+  "nodes": [
+    { "type": "BigValue", "props": { "text": "11:15", "caption": "Tile museum, top floor first" } },
+    { "type": "Button", "props": { "label": "Open in map" }, "on": { "tap": "open_map" } }
+  ]
+}
+```
 
-## Twelve components
+A renderer knows the closed set of components and the theme tokens, and nothing about packs.
 
-`Screen`, `Button`, `Card`, `Label`, `BigValue`, `Row`, `PhraseRow`, `Alert`, `Chip`, `Segmented`,
-`Missing`, `KidBox`.
+## The theme
 
-Rules that are worth more than the list:
+Data: named tokens for color, type, spacing and radius, one theme per person and mode if the pack
+wants it. Components read tokens and never branch on a theme name. Contrast is checked at load and
+on every edit: 4.5:1 or refused.
 
-- **One question per screen.** The answer is at the top at 64px, in `BigValue`. Everything else
-  backs it up. Two answers means two moments.
-- **No menu, no home, no loose back button.** The only way out of any screen is Today.
-- **`Missing` is a component on purpose.** A fact nobody has confirmed renders as a striped hole
-  with `[to confirm]` in it. An invented price is worse than a hole.
-- **`KidBox` is `Card` with an attribute**, not a second component and not a second app.
+The app's design system section shows every token and component of the loaded theme, lets you edit
+them, and writes the edit back to the theme file. See [decision 0006](decisions/0006-theme-edits-write-back.md).
 
-## The theme engine
+## The host
 
-A theme is data: 23 semantic tokens, and no component ever branches on a theme name. The reference
-pack declares eight themes, one per person times light and dark, which is normal here rather than
-an edge case: the phone is handed around, and each person gets their own.
+Everything that touches the device lives here, in Kotlin: reading and writing the picked files,
+loading the engine through UniFFI, feeding it the clock and location, persisting stored facts, and
+the tools: open a map, sync a calendar, watch geofences, unlock with a fingerprint.
 
-Kid mode is an attribute on the screen, not a theme and not a mode flag threaded through every
-component: larger type, thicker borders, `Card` becomes `KidBox`, and content is filtered to what
-was written for a kid. The radius stays 28px in both modes, because rounding things more for
-children is decoration, not legibility.
+## Offline first
 
-The validator's contrast check is part of the engine, not an optional lint. Thirteen pairs at 4.5:1,
-measured, because this app gets read outdoors in October sun with one hand.
-
-## The two tools
-
-Everything else in the app is pure. Exactly two pieces touch the OS.
-
-**Location.** Places that declare `at: {lat, lon, radius_m}` become geofences. Three jobs and no
-fourth: tell which place we are actually at when the plan is ambiguous, know whether the current
-place is `safe` so a kid session may start, and remember where the car was left. Geofences are an OS
-API, the coordinates came from the pack, and nothing is reported anywhere. There is no tracking
-because there is nobody to track for.
-
-**Calendar sync.** A tool the person runs, not a service that runs itself. It writes timed blocks
-into a device calendar named after the pack, with event ids derived from `pack.id`, the date and the
-block time, so syncing twice updates instead of duplicating. On option days it writes `fixed` blocks
-only; the chosen option's blocks go in when the choice is made, and the previous option's events are
-removed. That removal is the only thing the app ever deletes from a calendar.
-
-## Offline first, not offline capable
-
-There is no cache to warm and no request to retry, because there was never a request. The pack is a
-file on the device, the validator is local, the themes are local, the geofences are local. The only
-thing that reaches the network is opening a map, and where there is no signal that button shows the
-address as selectable text instead.
-
-This is the constraint that keeps the rest honest: nothing in the architecture above can quietly
-grow a server behind it.
+The pack is a file on the device. The engine and the validator are local. The only thing that can
+reach the network is opening a map, and without signal that button shows the address as text.
