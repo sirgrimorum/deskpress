@@ -34,7 +34,7 @@ A fact with no moment was never going to be read. Leave it out.
 7. **Add documents** for the files somebody might be asked to show.
 8. **Put everything else under its own top level key.** Bookings, phrases, budget, packing, contacts.
    They become sheets with no shell support needed.
-9. **Run the validator** and fix what it reports: `node tools/validate.mjs <pack>`. Errors block the
+9. **Run the validator** and fix what it reports: `deskpress validate <pack>` (from a deskpress checkout, `cargo install --path crates/cli` puts it on the PATH). Errors block the
    load. Warnings are the honest backlog.
 
 ## Never invent a fact
@@ -112,7 +112,7 @@ not. A place with nothing for a kid is not a gap to fill with a made up game.
 
 ## Before you hand it over
 
-- `node tools/validate.mjs <pack>` passes with no errors.
+- `deskpress validate <pack>` passes with no errors.
 - Every `[to confirm]` is deliberate, and you listed them for the person.
 - No fact in the pack is one you made up, including phone numbers, prices and hours.
 - The day you can check is the one that matters: open the moment they would ask about, at the hour

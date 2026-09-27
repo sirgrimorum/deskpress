@@ -1,79 +1,71 @@
 # deskpress
 
-Your own app, printed from one file.
+Your own app, printed from a few files.
 
-deskpress is an offline-first app shell. You write a YAML file that says what you need to know and
-when you need it, load that file into the installed app, and the app becomes that app. No account,
-no server, no store listing, no code. The shell is the press; what you print with it is yours.
+deskpress is an open source, offline-first app that becomes whatever a pack describes. You (or your
+LLM) write the pack in YAML, load it into the installed app, and that is the app now. No account, no
+server, no code.
 
 It exists because the apps that would answer a handful of personal questions are never worth
-building one at a time: a trip, a hospital stay, a move, a season of a sport, a treatment
-schedule, a farm. The work in each of them is the same work, and none of it is the content.
-
-## One question per screen
-
-The idea the whole shell is built on: at any moment there is exactly one live question. What time
-do we leave. Where did we park. Which dose is next. Who is on call. The app answers that one, in
-the first screen, at 64px, before you finish taking the phone out of your pocket.
-
-```
-screen = view(moment, user)
-moment = (day, time) + place
-user   = who is holding the phone + theme + mode
-```
-
-Everything else follows from that. Six views cover every screen, because forty four screens drawn
-on paper turned out to be six views with different data in them. There is no menu and no home: the
-only way out of any screen is Today.
+building one at a time: a trip, a hospital stay, a move, a season of a sport, a treatment schedule.
+The work in each of them is the same work, and none of it is the content.
 
 ## How it works
 
-1. **Write a pack.** One YAML file with your days, your places and your people, plus an optional
-   theme file. Any language: the shell never reads your prose, it only places it. An LLM can write
-   the whole thing from a folder of your own notes, and `skills/write-a-deskpress-pack` is the
-   skill that tells it how.
-2. **Validate it.** `node tools/validate.mjs <pack>` is the same validator that ships inside the
-   app, so a pack that passes on your desk passes on the phone. It checks the skeleton, resolves
-   every reference, and measures the contrast of your theme before you ever see it in the sun.
-3. **Load it.** Open the installed app, point it at the file, and that is the app now. Replacing
-   the file replaces the app. Nothing is compiled and nothing is uploaded.
+```mermaid
+flowchart LR
+  pack["pack: pack.yaml, content.yaml, theme.yaml"] --> load["engine: load + validate"]
+  inputs[/"clock, location, holder, stored facts"/] --> rules
+  load --> rules["rules pick a screen"] --> machine["screen machine builds the tree"]
+  machine -->|"screen tree"| renderer["renderer: Compose"]
+  renderer -->|"action"| machine
+  machine -->|"store patch, tool commands"| host["host: storage and tools"]
+```
 
-## What the shell brings
+A pack has three parts:
 
-- **Six views**: moment, sheet, agenda, suggestion, blocker, handoff. You do not choose one: the
-  clock, the place and the pack choose it.
-- **Twelve components** and a token based theme engine. A theme is data too: declare your colors
-  once and no component branches. One theme per person is normal here, not an edge case.
-- **A kid mode** that is an attribute, not a second app: bigger type, thicker borders, cards that
-  become kid boxes, and content filtered to what was written for them.
-- **Offline first, not offline capable.** The pack lives on the device. There is no request to make
-  and no cache to warm. The only thing that ever reaches the network is opening a map, and when
-  there is no signal that button shows the address as text instead.
-- **Location, on the device.** Places can carry coordinates and a radius. The shell uses them to
-  tell which place you are actually at, to mark a zone as safe for a kid session, and to remember
-  where you left the car. Geofences are an OS API: nothing is reported anywhere.
-- **Calendar sync, on demand.** A tool, not a background service: it writes your timed blocks into
-  a named device calendar with stable ids, so syncing twice updates instead of duplicating.
-- **A validator inside the app**, so loading a file that you or an LLM just wrote tells you what is
-  wrong with it in plain words, instead of showing you a blank screen at the worst moment.
+- **`pack.yaml`**, the definition: which screen shows when (rules), what each screen holds and what
+  you can do on it, and which built-in modules it uses (timeline, places, people, choices, alerts,
+  documents).
+- **`content.yaml`**, the data: your days, places, people, in any language.
+- **`theme.yaml`**, the design system: colors, type, spacing. The app has a section to see and edit
+  it, and the edits are saved back to the file.
+
+The app works like a state machine. The rules read the clock, where you are, who holds the phone and
+what you have decided, and pick the screen. Each screen is a small machine of its own.
+
+## Run it
+
+The engine is Rust, loaded on the phone as a native library. Needs [rustup](https://rustup.rs),
+GNU make, and for the app the Android SDK and Java 17 or newer. `make` lists every task.
+
+```sh
+make setup                               # the Rust targets, cargo tools, SDK parts and Maestro
+make check                               # format, lint, tests with a 100% coverage gate
+make install                             # then: deskpress validate examples/one-day
+make run                                 # build the app, install it on a device and open it
+make e2e                                 # the device regression flows
+```
+
+The app shows the example pack's outline for now; see the [roadmap](docs/roadmap.md).
 
 ## Where to read next
 
 | document | what it covers |
 | --- | --- |
-| [docs/architecture.md](docs/architecture.md) | the shell: reader, views, theme engine, tools, validator |
-| [docs/pack-format.md](docs/pack-format.md) | every key the shell knows, and the rule for the keys it does not |
+| [docs/architecture.md](docs/architecture.md) | the engine, the two machines, the host, in diagrams |
+| [docs/pack-format.md](docs/pack-format.md) | every key a pack can use |
 | [docs/authoring.md](docs/authoring.md) | how to write a pack, by hand or with an LLM |
-| [schema/](schema/) | the machine readable contract, for an editor or an LLM. The validator carries the same rules in code |
-| [tools/](tools/) | the YAML reader, the validator, and their tests. `node --test` from the repo root runs them |
-| [examples/one-day/](examples/one-day/) | a whole pack, small enough to read in a minute, and it validates with no warnings |
-| [skills/write-a-deskpress-pack/](skills/write-a-deskpress-pack/) | the skill an LLM loads before writing somebody's pack |
+| [docs/glossary.md](docs/glossary.md) | the product's own words and the technical terms, in one line each |
+| [docs/decisions/](docs/decisions/) | why things are the way they are |
+| [docs/roadmap.md](docs/roadmap.md) | what is done and what is next |
+| [examples/one-day/](examples/one-day/) | a whole pack, small enough to read in a minute |
+| [skills/write-a-deskpress-pack/](skills/write-a-deskpress-pack/) | the skill an LLM loads before writing a pack |
 
 ## Status
 
-Early. The design system and the data contract are finished and measured against a real pack; the
-Android shell is not written yet. The first pack in use is a private one, thirteen days of family
-travel, and every decision in here came out of it.
+Early. The data contract and the design system are measured against a real pack; the engine is
+being built. The first pack in use is a private one, thirteen days of family travel.
 
 ## License
 

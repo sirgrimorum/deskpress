@@ -61,7 +61,7 @@ A prompt that works:
 
 > Read `skills/write-a-deskpress-pack/SKILL.md`, then read every file in `./notes/`. Build a pack at
 > `./my-pack/`. Ask me about anything you cannot source from my notes instead of inventing it. Run
-> `node tools/validate.mjs ./my-pack` and fix what it reports.
+> `deskpress validate ./my-pack` and fix what it reports.
 
 Three habits make the difference between a pack that reads like yours and one that reads like a
 brochure:
@@ -71,7 +71,7 @@ brochure:
 - **Keep your own words.** The shell never parses prose, so there is no reason to smooth it out. The
   note that says "the market is closed on Sundays, do not promise the kids" is better content than
   any rewrite of it.
-- **Validate before showing anybody.** `node tools/validate.mjs <pack>` costs a second and catches
+- **Validate before showing anybody.** `deskpress validate <pack>` costs a second and catches
   the whole class of mistakes that otherwise surface as a blank screen.
 
 ## Your language
@@ -83,11 +83,12 @@ the file: declare a `keymap` in the manifest and the loader translates once, at 
 
 ```yaml
 keymap:
-  days: dias
-  blocks: bloques
-  places: lugares
-  people: viajeros
+  root: {days: dias, places: lugares, people: viajeros}
+  day: {date: fecha, title: titulo, blocks: bloques}
 ```
+
+Root collections go under `root`, and every other key under the kind of thing it belongs to. The
+full list is in [pack-format.md](pack-format.md).
 
 The shell's own handful of labels (Today, Back, and a few more) follow `pack.language`, and `ui:` in
 the manifest overrides any of them. If your language is not one the shell ships, `ui:` is how you

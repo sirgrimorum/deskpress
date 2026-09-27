@@ -1,14 +1,19 @@
 # Pack format
 
-A pack is a folder. The shell loads it, validates it, and becomes the app it describes.
+A pack is a folder of three parts. The shell loads it, validates it, and becomes the app it
+describes.
 
 ```mermaid
 flowchart TD
-  root["my-pack/"] --> manifest["pack.yaml: the manifest, what this app is called and where its parts are"]
-  root --> content["content.yaml: days, places, people, alerts, documents, sheets"]
-  root --> theme["theme.yaml, optional: colors, fonts, scale"]
+  root["my-pack/"] --> manifest["pack.yaml: the app definition. Name, modules, rules, screens"]
+  root --> content["content.yaml: the data the app shows"]
+  root --> theme["theme.yaml, optional: the design system"]
   root --> files["files/, optional: PDFs and images the content points at"]
 ```
+
+This page has two halves. **The definition** (modules, rules, screens, expressions) is new and is a
+draft until the engine that runs it lands; it follows decisions 0002 to 0005. **The content** (days,
+places, people, alerts, documents, sheets) is what the first modules read, and is stable.
 
 Two rules before the keys.
 
@@ -71,9 +76,124 @@ pack:
 Those keys go through `keymap.root` like any other, so a pack that calls its days something else
 names them that way here too.
 
+## The definition
+
+Draft. The rest of `pack.yaml` says how the app behaves: which modules read the content, which
+screen shows when, and what can happen on each screen. A pack may also start from a template with
+`pack.extends: travel` and only override what differs.
+
+```yaml
+modules:                      # shared logic the pack opts into, pointed at its content
+  timeline: {entries: days, date: date, blocks: blocks}
+  places:   {from: places, geofence: at}
+  people:   {from: people, adult: adult}
+  choices:  {}
+
+derive:                       # further names, in order, each from an expression
+  kid: not holder.adult
+
+rules:                        # the main machine: first true `when` picks the screen
+  - when: decision.due and not decision.answered
+    screen: choose_day
+  - when: block.locked and block.missed
+    screen: blocker
+  - screen: moment            # the last rule has no `when`
+
+screens:                      # each screen is its own machine
+  choose_day:
+    state: {picked: null}     # local, reset when the screen leaves the top
+    actions:
+      pick:    [{set: picked, to: $arg}]
+      confirm:
+        - {if: picked, store: "choice.{day.date}", value: picked}
+        - calendar.sync
+    layout:
+      - BigValue: {text: decision.question}
+      - Segmented: {items: day.options, on_tap: pick}
+      - Button: {label: ui.confirm, on_tap: confirm}
+```
+
+### Rules
+
+An ordered list. Each rule has a `screen` and, except the last, a `when`. The engine re-runs the
+list whenever an input changes. When the chosen screen's name changes, the navigation stack is
+cleared: the situation outranks what the person was reading.
+
+### Screens
+
+| key | what it is |
+| --- | --- |
+| `state` | local values with their starting value. Reset when the screen leaves the top of the stack |
+| `actions` | named lists of effects, run in order |
+| `layout` | a list of components, each bound to expressions and actions |
+
+Effects:
+
+| effect | what it does |
+| --- | --- |
+| `{set: name, to: expr}` | change a local state value |
+| `{store: key, value: expr}` | persist a fact on the device. Stored facts are inputs, so this can change the screen |
+| `{open: screen, with: {name: expr}}` | push a screen, passing values it reads as `params` |
+| `back`, `home` | pop one screen, or clear the stack |
+| `module.action` | a module's action, like `calendar.sync` or `map.open`. May become a host command |
+
+Any effect takes `if: expr` and is skipped when it is false. `$arg` is the value the component sent.
+
+### Components
+
+The closed set a layout can use. Every prop takes an expression; colors, sizes and fonts come from
+the theme and cannot be set here.
+
+| component | what it draws |
+| --- | --- |
+| `BigValue` | the answer, at the top, large |
+| `Label` | a line of small text |
+| `Card` | a titled box with a body; `kid: true` in kid mode becomes a kid box |
+| `Row` | label and value on one line |
+| `PhraseRow` | a phrase, its translation and a hint |
+| `Alert` | a warning, by severity |
+| `Chip` | a small tag |
+| `Button` | an action |
+| `Segmented` | a choice between a few items |
+| `Missing` | a fact nobody confirmed, drawn as a striped hole |
+| `Auto` | expands any value by the unknown key rule: cards, alerts, rows |
+| `Screen` | the frame: title, back link, the way to the first screen |
+
+`each: expr` on any component repeats it once per item, with the item available as `item`.
+`if: expr` hides it when false. The set grows only by shell release; see decision 0005.
+
+### Expressions
+
+Used by `when`, `if`, `derive`, every prop and every effect value. Parsed at load, never run as code.
+
+```
+expr     := or
+or       := and ("or" and)*
+and      := not ("and" not)*
+not      := "not" not | compare
+compare  := value (("==" | "!=" | "<" | "<=" | ">" | ">=" | "in") value)?
+value    := literal | path | call | "(" expr ")"
+path     := name ("." name)*
+call     := name "(" expr ")"
+literal  := number | "'" text "'" | true | false | null
+```
+
+Functions take one argument. `count` is the length of a list, a mapping or a text; `empty` is
+whether that length is zero; `first` and `last` are the ends of a list, and null for anything else.
+A name or key that is not there is null. An expression is at most 128 tokens; past that, split it
+with `derive`.
+
+A text prop may be a template instead: every `{expr}` inside it is replaced by its value, so
+`"{block.time} · {place.name}"` is text, not an expression.
+
+Names an expression can read: what the modules expose, what `derive` defines, the screen's `state`
+and `params`, `content` for the raw data, `ui` for the shell's labels, and `store` for stored facts.
+Anything else is a load error with the path and the column.
+
 ## days
 
-The spine of the pack. One entry per day, and inside it, blocks of time.
+From here on, the content: what the first modules read. `days` is what `timeline` reads, `places`
+what `places` reads, and so on. The spine of a travel pack. One entry per day, and inside it, blocks of time.
 
 ```yaml
 days:
@@ -101,7 +221,7 @@ The third element is what turns a line of text into a real moment:
 
 | key | what it does | if missing |
 | --- | --- | --- |
-| `type` | picks which cards the moment view builds | guessed from the text, and if that fails the moment is time plus text |
+| `type` | picks which cards the travel moment screen builds | guessed from the text, and if that fails the moment is time plus text |
 | `place` | id in `places`, where `during` and `parking` come from | the screen keeps the block's own text |
 | `for` | person ids this block belongs to | everyone |
 | `guide` | who is offered the chance to present this moment | nobody, and the kid screen does not appear |
@@ -112,9 +232,9 @@ The third element is what turns a line of text into a real moment:
 ### The thirteen types
 
 `visit`, `train`, `driving`, `walking`, `meal`, `event`, `flight`, `parking`, `lodging`, `night`,
-`morning`, `transfer`, `free`. Thirteen values, not fourteen. Each one decides which cards the
-moment view assembles and nothing else; the view itself never changes. Adding a type is a change to
-the shell, so prefer an existing one plus your own free keys.
+`morning`, `transfer`, `free`. Thirteen values, not fourteen. They belong to the
+travel template: each one decides which cards its moment screen assembles and nothing else. Adding
+a type is a change to the template, so prefer an existing one plus your own free keys.
 
 ### A day with options
 
