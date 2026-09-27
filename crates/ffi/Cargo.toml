@@ -1,0 +1,27 @@
+[package]
+name = "deskpress-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "deskpress_ffi"
+# cdylib is the .so the app loads; lib lets the tests and the bindgen call it.
+crate-type = ["cdylib", "lib"]
+
+[features]
+# Only the bindgen needs it, so a plain build and the coverage run never compile the bindgen.
+cli = ["uniffi/cli"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["cli"]
+
+[dependencies]
+deskpress-engine = { path = "../engine" }
+uniffi = "0.32.2"
+
+[lints]
+workspace = true

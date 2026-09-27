@@ -1,0 +1,8 @@
+# The phase 2 screen: the engine loads the example pack and the app draws its outline.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+- assertVisible: "One day"
+- assertVisible: "The tile museum and the late ferry"
+- assertVisible: "2026-04-11"

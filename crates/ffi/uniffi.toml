@@ -1,0 +1,3 @@
+# Bindgen settings, read in library mode from this crate's folder.
+[bindings.kotlin]
+package_name = "dev.deskpress.engine"
