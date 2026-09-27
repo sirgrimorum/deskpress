@@ -10,6 +10,8 @@ publish = false
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+# MSVC prints "Creating library" for every cdylib; a status line, not a problem
+linker_messages = "allow"
 
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }

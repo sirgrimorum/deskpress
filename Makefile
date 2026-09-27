@@ -89,7 +89,7 @@ install: ## Put the deskpress CLI on PATH
 bindings: ## Build the engine for the app and the desk, and write its Kotlin bindings
 	cargo ndk $(foreach abi,$(ABIS),-t $(abi)) -o $(SRC)/main/jniLibs build --release \
 		-p deskpress-ffi
-	cargo build -p deskpress-ffi
+	cargo build -p deskpress-ffi --features cli
 	cargo run -q -p deskpress-ffi --features cli --bin uniffi-bindgen -- generate --no-format \
 		--library $(SRC)/main/jniLibs/x86_64/libdeskpress_ffi.so --language kotlin \
 		--out-dir $(SRC)/generated/kotlin
