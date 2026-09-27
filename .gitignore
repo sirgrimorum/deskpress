@@ -2,14 +2,23 @@
 # The shell is open source; what you print with it is yours and stays out of git.
 /content/
 
+# The owner's own notes: plans, journal, PR drafts. Public docs live in docs/.
+/private/
+/docs/prs/
+
 # Dependencies and builds
+/target/
 node_modules/
 dist/
 build/
 .gradle/
+.kotlin/
 *.apk
 *.aab
 local.properties
+# Written by `make bindings`
+/apps/android/app/src/main/jniLibs/
+/apps/android/app/src/generated/
 .env
 .env.*
 
