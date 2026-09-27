@@ -109,6 +109,41 @@ impl Expr {
             }
         }
     }
+
+    /// Calls `f` on this expression and every one inside it, outside in.
+    pub fn visit<'a>(&'a self, f: &mut impl FnMut(&'a Expr)) {
+        f(self);
+        match self {
+            Expr::Literal(_) | Expr::Path(_) => {}
+            Expr::Call(_, e) | Expr::Not(e) => e.visit(f),
+            Expr::And(a, b) | Expr::Or(a, b) | Expr::Compare(_, a, b) => {
+                a.visit(f);
+                b.visit(f);
+            }
+        }
+    }
+
+    /// The first name of every path: what the expression needs the scope to have.
+    pub fn roots(&self) -> Vec<&str> {
+        let mut out = Vec::new();
+        self.visit(&mut |e| {
+            if let Expr::Path(path) = e {
+                out.push(path[0].as_str());
+            }
+        });
+        out
+    }
+}
+
+/// The column, counted in characters from 1, where `name` first stands as a whole name in `src`.
+pub fn column_of(src: &str, name: &str) -> usize {
+    let part = |c: char| c.is_alphanumeric() || c == '_' || c == '$' || c == '.';
+    let whole = src.match_indices(name).find(|(i, _)| {
+        let before = src[..*i].chars().next_back();
+        let after = src[i + name.len()..].chars().next();
+        !before.is_some_and(part) && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
+    });
+    whole.map_or(1, |(i, _)| src[..i].chars().count() + 1)
 }
 
 impl Op {
@@ -564,6 +599,22 @@ nothing: ~",
         assert_eq!(eval("empty(days)"), Value::Bool(false));
         // A function of a computed value.
         assert_eq!(eval("count(count(days))"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn the_roots_are_the_first_name_of_every_path() {
+        let e = parse("not count(a.b) and (c or 'x' < d.e) or true").unwrap();
+        assert_eq!(e.roots(), ["a", "c", "d"]);
+        assert!(parse("1 == 2").unwrap().roots().is_empty());
+    }
+
+    #[test]
+    fn a_name_is_found_where_it_stands_whole() {
+        assert_eq!(column_of("place.day or day", "day"), 14);
+        assert_eq!(column_of("days or day", "day"), 9);
+        assert_eq!(column_of("día or x", "x"), 8);
+        assert_eq!(column_of("$day or day", "day"), 9);
+        assert_eq!(column_of("a", "b"), 1);
     }
 
     #[test]

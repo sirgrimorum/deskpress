@@ -57,6 +57,21 @@ impl<'a> Keymap<'a> {
         steps.try_fold(first, |node, step| node.get(step))
     }
 
+    /// `obj` with the pack's own key names turned back into canonical ones, so a module hands
+    /// every pack the same shape. Anything that is not a mapping comes back as it is.
+    pub fn canon(&self, obj: &Value, kind: &str) -> Value {
+        let Some(map) = obj.as_map() else {
+            return obj.clone();
+        };
+        let section = self.section(kind);
+        let named = |key: &str| {
+            let found = section?.iter().find(|(_, r)| matches!(r, Value::String(s) if s == key));
+            found.map(|(canonical, _)| canonical.to_owned())
+        };
+        let keys = map.iter().map(|(k, v)| (named(k).unwrap_or_else(|| k.to_owned()), v.clone()));
+        Value::Map(Map(keys.collect()))
+    }
+
     /// The canonical word for a value of an enumeration, through `keymap.values.<name>`.
     pub fn value(&self, name: &str, value: Option<&Value>) -> String {
         let theirs = text(value);

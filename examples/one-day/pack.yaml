@@ -15,3 +15,53 @@ conventions:
 ui:
   today: Today
   back: Back
+  days: The days
+  place: About the place
+
+# What the pack reads, and what it adds to it.
+modules:
+  timeline:
+  places:
+  alerts:
+  climate:
+
+derive:
+  away: not day
+
+# First true when wins.
+rules:
+  - {when: away, screen: days}
+  - {when: block, screen: moment}
+  - {screen: today}
+
+screens:
+  days:
+    layout:
+      - Screen: {title: ui.days}
+      - Row: {each: content.days, text: item.title, caption: item.date}
+
+  today:
+    layout:
+      - Screen: {title: day.title}
+      - Alert: {each: alerts, severity: item.severity, text: item.title}
+      - Label: {if: weather, text: "{weather.summary}, {weather.low} to {weather.high}"}
+      - Row: {each: day.blocks, text: item.text, caption: item.time}
+
+  moment:
+    actions:
+      see_place: [{open: place, with: {place: place}}]
+    layout:
+      - Screen: {title: day.title}
+      - Alert: {each: alerts, severity: item.severity, text: item.title}
+      - BigValue: {text: block.time, caption: block.text}
+      - Label: {if: weather, text: "{weather.summary}, rain {weather.rain}%"}
+      - Button: {if: place, label: ui.place, on_tap: see_place}
+      - Label: {if: next, text: "Next, {next.time}: {next.text}"}
+
+  place:
+    actions:
+      back: [back]
+    layout:
+      - Screen: {title: params.place.name}
+      - Row: {each: params.place.points, text: item.name, caption: item.what}
+      - Button: {label: ui.back, on_tap: back}

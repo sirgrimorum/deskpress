@@ -27,6 +27,14 @@ impl Map {
     pub fn keys(&self) -> impl Iterator<Item = &str> {
         self.0.iter().map(|(k, _)| k.as_str())
     }
+
+    /// Replaces the value of `key` where it stands, or adds it at the end.
+    pub fn set(&mut self, key: &str, value: Value) {
+        match self.0.iter_mut().find(|(k, _)| k == key) {
+            Some(slot) => slot.1 = value,
+            None => self.0.push((key.to_owned(), value)),
+        }
+    }
 }
 
 impl Value {
@@ -131,6 +139,15 @@ mod tests {
         assert_eq!(m.get("other"), None);
         assert_eq!(m.as_map().unwrap().keys().collect::<Vec<_>>(), ["k"]);
         assert_eq!(Value::List(vec![]).as_list(), Some(&[][..]));
+    }
+
+    #[test]
+    fn setting_a_key_keeps_its_place() {
+        let mut m = Map(vec![("a".into(), s("1")), ("b".into(), s("2"))]);
+        m.set("a", s("3"));
+        m.set("c", s("4"));
+        assert_eq!(m.keys().collect::<Vec<_>>(), ["a", "b", "c"]);
+        assert_eq!(m.get("a"), Some(&s("3")));
     }
 
     #[test]

@@ -84,11 +84,11 @@ screen shows when, and what can happen on each screen. A pack may also start fro
 `pack.extends: travel` and only override what differs.
 
 ```yaml
-modules:                      # shared logic the pack opts into, pointed at its content
-  timeline: {entries: days, date: date, blocks: blocks}
-  places:   {from: places, geofence: at}
-  people:   {from: people, adult: adult}
-  choices:  {}
+modules:                      # shared logic the pack opts into. Empty reads its own root
+  timeline:
+  choices:
+  people:
+  places:   {from: lugares}   # or name the content root it reads
 
 derive:                       # further names, in order, each from an expression
   kid: not holder.adult
@@ -134,21 +134,42 @@ modules:
 | pack, plus auto sync | yes | `auto`, with `every: 6h` |
 | auto sync only | none | `auto`, with `every` |
 
-A module with neither is a load error. The person approves the hosts once, and a `secret` is
-only a name: its value is typed on the device. The request and reply mapping are a draft until
+A module with neither reads the pack under its own root: `timeline` and `choices` read `days`,
+the others the root named like them. Field names come through the `keymap`, never through module
+settings. Until syncing lands (phase 7) a `sync` is a warning and the module reads the pack. The
+person approves the hosts once, and a `secret` is only a name: its value is typed on the device. The request and reply mapping are a draft until
 the first sync source lands; see [decision 0012](decisions/0012-data-sources-and-sync.md).
+
+### What the modules expose
+
+They run in this order, and each reads what the ones before it exposed. Every mapping comes out
+with canonical keys, whatever the pack calls them.
+
+| module | names | what they hold |
+| --- | --- | --- |
+| `timeline` | `day`, `block`, `next` | today's day with its blocks in force and its `choice`; the last block whose time has come, until its `until`; the first one still to come. A block is `{time, text, ...its map}` |
+| `choices` | `decision` | the first decision due and unanswered, else the first one due, else the next one coming: `{date, title, options, recommended, choice, due, answered}` plus the decision's own keys. Due from `when` at `at` until its day is over |
+| `people` | `holder`, `people` | the person holding the phone, and everyone |
+| `places` | `place`, `here` | where the current block happens, and the first place whose region the device is inside. Both carry their `id` |
+| `alerts` | `alerts` | the ones showing now, most severe first: from `notify_from` (else the start of their day) to the end of their day |
+| `documents` | `documents` | all of them |
+| `climate` | `weather` | the weather for today at `place`, else `here` |
+
+A day with options runs its `fixed` blocks and the chosen option's, in time order. The choice in
+force is the one stored as `choice.<date>`, else the recommended one, else the first.
 
 ### Rules
 
 An ordered list. Each rule has a `screen` and, except the last, a `when`. The engine re-runs the
 list whenever an input changes. When the chosen screen's name changes, the navigation stack is
-cleared: the situation outranks what the person was reading.
+cleared: the situation outranks what the person was reading. A pack with no `rules` shows the
+outline: its name, then one row per day.
 
 ### Screens
 
 | key | what it is |
 | --- | --- |
-| `state` | local values with their starting value. Reset when the screen leaves the top of the stack |
+| `state` | local values with their starting value, as literals. Reset when the screen leaves the top of the stack. A name may not hide a name the scope already has |
 | `actions` | named lists of effects, run in order |
 | `layout` | a list of components, each bound to expressions and actions |
 
@@ -156,13 +177,16 @@ Effects:
 
 | effect | what it does |
 | --- | --- |
-| `{set: name, to: expr}` | change a local state value |
-| `{store: key, value: expr}` | persist a fact on the device. Stored facts are inputs, so this can change the screen |
+| `{set: name, to: expr}` | change a local state value of this screen |
+| `{store: key, value: expr}` | persist a fact on the device. The key is a text template, like `seen.{now.date}`. Stored facts are inputs, so this can change the screen |
 | `{open: screen, with: {name: expr}}` | push a screen, passing values it reads as `params` |
 | `back`, `home` | pop one screen, or clear the stack |
-| `module.action` | a module's action, like `calendar.sync` or `map.open`. May become a host command |
+| `module.action` | a module's action, like `calendar.sync` or `map.open`. Goes to the host as a command |
+| `{do: module.action}` | the same, in mapping form, so it can take an `if` |
 
-Any effect takes `if: expr` and is skipped when it is false. `$arg` is the value the component sent.
+Any mapping effect takes `if: expr` and is skipped when it is false. `$arg` is the value the
+component sent: a `Button` sends its `value` prop. After the effects run, the rules decide again
+with the stored facts, so a `store` can move the app to another screen.
 
 ### Components
 
@@ -184,8 +208,12 @@ the theme and cannot be set here.
 | `Auto` | expands any value by the unknown key rule: cards, alerts, rows |
 | `Screen` | the frame: title, back link, the way to the first screen |
 
-`each: expr` on any component repeats it once per item, with the item available as `item`.
-`if: expr` hides it when false. The set grows only by shell release; see decision 0005.
+A component is a one-key mapping, `Kind: {props}`. A prop is an expression; a text with `{` in it
+is a text template, like `"Next, {next.time}"`. `on_<event>: action` names an action of the same screen.
+`params` holds what `open` passed, and is empty on a screen the rules picked.
+
+`each: expr` on any component repeats it once per item, with the item available as `item` in its
+`if` and its props, not in `each` itself. `if: expr` hides it when false. The set grows only by shell release; see decision 0005.
 
 ### Expressions
 
@@ -211,9 +239,13 @@ with `derive`.
 A text prop may be a template instead: every `{expr}` inside it is replaced by its value, so
 `"{block.time} · {place.name}"` is text, not an expression.
 
-Names an expression can read: what the modules expose, what `derive` defines, the screen's `state`
-and `params`, `content` for the raw data, `ui` for the shell's labels, and `store` for stored facts.
-Anything else is a load error with the path and the column.
+Names an expression can read: `now` (`now.date`, `now.time` and `now.stamp`, local to the pack's
+timezone), what the modules expose, what `derive` defines, the screen's `state` and `params`,
+`content` for the raw data, `ui` for the shell's labels, and `store` for stored facts. Anything else
+is a load error with the path and the column.
+
+Comparing the clock with a literal, like `now.time >= '18:00'`, tells the engine when the answer
+can change, so the host sets its timer there ([decision 0013](decisions/0013-call-only-on-change.md)).
 
 ## days
 

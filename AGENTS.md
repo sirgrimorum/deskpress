@@ -32,16 +32,17 @@ flowchart LR
 
 - **The engine** (`crates/engine`) is pure Rust, standard library only. It never reads a clock, a
   file, a sensor or the network; the host passes everything in. Three calls: `load(files)`,
-  `screen(world)`, `dispatch(action)`. On the phone it is a native library reached through UniFFI
+  `screen(world)`, `dispatch(world, action, arg)`. On the phone it is a native library reached through UniFFI
   (`crates/ffi`, phase 2), which generates typed Kotlin, later Swift, bindings. On the desk and in
   the LLM plugin it is the `deskpress` binary (`crates/cli`), which prints trees as JSON.
 - **The main machine** is the pack's `rules`: ordered `when` guards, first true wins, the last rule
   has no guard. Any input change re-evaluates it. It picks a screen name.
 - **A screen machine** is a screen's `state` + `actions` + `layout`. Actions are lists of effects
-  (`set`, `store`, `open`, `back`, `home`, `<module>.<action>`), each with an optional `if:`.
-  `open` pushes onto a nav stack; the stack clears when the rule-selected screen name changes;
-  local state resets when a screen leaves the top of the stack. `store` writes a fact, which is an
-  input, so it can move the main machine.
+  (`set`, `store`, `open`, `back`, `home`, `<module>.<action>` or `do`), each mapping with an
+  optional `if:`. `open` pushes onto a nav stack; the stack clears when the rule-selected screen
+  name changes; local state resets when a screen leaves the top of the stack. `store` writes a
+  fact, which is an input, so it can move the main machine. A module action goes to the host as a
+  command.
 - **Modules** hold shared domain logic a pack opts into: `timeline`, `places`, `people`, `choices`,
   `alerts`, `documents`. Each declares its config schema, the names it exposes, its actions and the
   host tools it needs. `derive` adds named values, in order, from expressions.
@@ -96,8 +97,8 @@ SDK in the Makefile, Gradle in its wrapper, the app's libraries in
 
 | path | what it is |
 | --- | --- |
-| `crates/engine` | yaml, expressions, loader, validator; phase 3+: modules, machines. Std only |
-| `crates/cli` | the `deskpress` binary: `validate`; phase 3+: `screen`, `act` |
+| `crates/engine` | yaml, expressions, loader, validator, definition, modules, the engine: the screen for a world and its watch, screen machines, the nav stack. Std only |
+| `crates/cli` | the `deskpress` binary: `validate`, `screen`, `act` |
 | `crates/ffi` | the UniFFI bindings and their bindgen, the only crate that depends on UniFFI |
 | `apps/android` | the host: a ViewModel and the Compose renderer. See its README |
 | `Makefile` | every development task; `make check` is the one that must pass |
@@ -114,7 +115,7 @@ SDK in the Makefile, Gradle in its wrapper, the app's libraries in
 Not MVVM. Put logic where these patterns say, and nowhere else:
 
 - **Functional core, imperative shell.** All logic in the engine, pure. All I/O in the host.
-- **Unidirectional data flow (Elm, MVI).** `screen(world)` and `dispatch(action)` return a whole
+- **Unidirectional data flow (Elm, MVI).** `screen(world)` and `dispatch(world, action, arg)` return a whole
   tree; the renderer never mutates or decides anything.
 - **Reducer with effects as data (like TCA).** `dispatch` returns a store patch and tool commands.
   The engine never performs an effect; the host performs them and feeds the result back as input.

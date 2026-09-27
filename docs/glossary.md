@@ -13,6 +13,7 @@ entry is the short answer; the linked document has the rest.
 | **block** | one line of a day: a time, a text, and an optional map that makes it a moment |
 | **canonical key** | the English key the shell reads, like `days` or `title`. Values can be in any language |
 | **climate** | the module that answers "what is the weather here, today", from the pack, a sync, or both |
+| **command** | what an action asks the host to do, like `map.open`. The engine names it; the host runs it |
 | **component** | one of the closed set of things a screen can contain: `BigValue`, `Row`, `Button`... It grows only with a shell release |
 | **content** | the pack's data, in `content.yaml`: days, places, people, alerts, documents, sheets |
 | **day** | one entry of `days`: a date, a title, and its blocks. The spine of a travel pack |
@@ -31,11 +32,13 @@ entry is the short answer; the linked document has the rest.
 | **kid mode** | the screens shown when the holder is not an adult |
 | **main machine** | the pack's `rules`: it answers "which screen, right now" |
 | **manifest** | `pack.yaml`: the pack's name, language, timezone, where its content is, and its definition |
-| **module** | shared, tested logic a pack opts into: `timeline`, `places`, `people`, `choices`, `alerts`, `documents` |
+| **module** | shared, tested logic a pack opts into: `timeline`, `choices`, `people`, `places`, `alerts`, `documents`, `climate` |
 | **moment** | the travel screen for the block happening now. Its cards depend on the block's type |
 | **moment type** | one of the thirteen block types (`visit`, `train`, `meal`...). Each picks the cards of its moment |
-| **node** | one component in a screen tree, with its props |
-| **outline** | the phase 2 spike screen: the pack's name, then one row per day |
+| **nav stack** | the screens a user opened, first the one the rules picked. `open` pushes, `back` pops, `home` leaves the first |
+| **node** | one component in a screen tree, with its props and the events it answers |
+| **outline** | the screen of a pack with no `rules`: its name, then one row per day |
+| **params** | the values `open` passed to the screen it pushed. Empty on a screen the rules picked |
 | **pack** | a folder that describes an app: `pack.yaml`, `content.yaml`, optional `theme.yaml` and files. The shell loads it and becomes that app |
 | **path reference** | a value like `bookings.azulejo` that points somewhere else in the pack and is resolved at load |
 | **renderer** | the part of the host that draws a screen tree. Knows components and tokens, nothing about packs |
@@ -57,7 +60,7 @@ entry is the short answer; the linked document has the rest.
 | **validate** | load a pack and list its errors and warnings. `deskpress validate <pack>` on the desk, `load` in the app |
 | **warning** | something worth fixing that does not stop the pack from loading, like a place with no coordinates |
 | **watch** | what comes with each tree to say what would change it: the next instant (`until`) and the geofences that matter. The host calls the engine again only then |
-| **world** | what the host pushes in on each call, as opposed to a module's data: the clock, location, the holder and the stored facts |
+| **world** | what the host pushes in on each call, as opposed to a module's data: the local time in the pack's timezone, the places whose region the device is inside, the holder and the stored facts |
 | **write back** | a theme edit in the app is saved to the loaded theme file, keeping its comments and order |
 
 ## Technical terms

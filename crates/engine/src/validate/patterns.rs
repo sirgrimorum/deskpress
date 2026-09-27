@@ -9,18 +9,18 @@ fn digits(s: &str) -> bool {
 }
 
 /// `[a-z_][a-z0-9_]*`: what a person, option, point or document is called in the data.
-pub(super) fn is_id(s: &str) -> bool {
+pub(crate) fn is_id(s: &str) -> bool {
     s.bytes().next().is_some_and(|b| b.is_ascii_lowercase() || b == b'_')
         && all(s, |b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
 /// Lowercase words of letters and digits joined by single dashes.
-pub(super) fn is_slug(s: &str) -> bool {
+pub(crate) fn is_slug(s: &str) -> bool {
     s.split('-').all(|w| !w.is_empty() && all(w, |b| b.is_ascii_lowercase() || b.is_ascii_digit()))
 }
 
 /// `Area/City`, `Area/Region/City`, or `UTC`.
-pub(super) fn is_timezone(s: &str) -> bool {
+pub(crate) fn is_timezone(s: &str) -> bool {
     let parts: Vec<&str> = s.split('/').collect();
     let word = |w: &str, extra: &[u8]| {
         !w.is_empty() && all(w, |b| b.is_ascii_alphabetic() || b == b'_' || extra.contains(&b))
@@ -32,7 +32,7 @@ pub(super) fn is_timezone(s: &str) -> bool {
 }
 
 /// `es`, `pt-BR`, `zh-Hant-TW`.
-pub(super) fn is_language(s: &str) -> bool {
+pub(crate) fn is_language(s: &str) -> bool {
     let mut parts = s.split('-');
     let first = parts.next().unwrap_or_default();
     (2..=3).contains(&first.len())
@@ -51,23 +51,27 @@ fn date_parts(s: &str) -> Option<(u32, u32, u32)> {
 }
 
 /// `YYYY-MM-DD`, in shape only.
-pub(super) fn is_date(s: &str) -> bool {
+pub(crate) fn is_date(s: &str) -> bool {
     date_parts(s).is_some()
 }
 
 /// `YYYY-MM-DD` and a day the calendar has.
-pub(super) fn is_real_date(s: &str) -> bool {
+pub(crate) fn is_real_date(s: &str) -> bool {
     date_parts(s).is_some_and(|(y, m, d)| real_date(y, m, d))
 }
 
 fn real_date(y: u32, m: u32, d: u32) -> bool {
+    y > 0 && (1..=12).contains(&m) && d >= 1 && d <= days_in_month(y, m)
+}
+
+/// How many days month `m` (1 to 12) of year `y` has.
+pub(crate) fn days_in_month(y: u32, m: u32) -> u32 {
     let leap = (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400);
-    let days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    y > 0 && (1..=12).contains(&m) && d >= 1 && d <= days[m as usize - 1]
+    [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m as usize - 1]
 }
 
 /// `HH:MM` on a 24 hour clock.
-pub(super) fn is_time(s: &str) -> bool {
+pub(crate) fn is_time(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 5
         && s.is_ascii()
@@ -79,19 +83,19 @@ pub(super) fn is_time(s: &str) -> bool {
 }
 
 /// `YYYY-MM-DDTHH:MM`.
-pub(super) fn is_stamp(s: &str) -> bool {
+pub(crate) fn is_stamp(s: &str) -> bool {
     s.split_once('T').is_some_and(|(date, time)| is_date(date) && is_time(time))
 }
 
 /// Text that says it still has to be checked, and renders as a hole until it is.
-pub(super) fn to_confirm(s: &str) -> bool {
+pub(crate) fn to_confirm(s: &str) -> bool {
     let lower = s.to_lowercase();
     lower.contains("[to confirm]") || lower.contains("[por confirmar]")
 }
 
 /// A key like `closed__2026_08_15` shows only on that date. Returns whether the date is real,
 /// or nothing when the key has no date suffix.
-pub(super) fn dated_key(key: &str) -> Option<bool> {
+pub(crate) fn dated_key(key: &str) -> Option<bool> {
     let tail = key.get(key.len().checked_sub(12)?..)?;
     let b = tail.as_bytes();
     if !tail.is_ascii() {

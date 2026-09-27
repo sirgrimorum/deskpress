@@ -3,13 +3,22 @@
 use std::io::Write;
 use std::path::Path;
 
-use deskpress_engine::{pack, validate};
+use deskpress_engine::engine::{Engine, Nav, View, World};
+use deskpress_engine::tree::Tree;
+use deskpress_engine::value::{Map, Value, show};
+use deskpress_engine::{pack, validate, yaml};
 
 pub const USAGE: &str = "usage: deskpress <command>
 
 commands:
-  validate <pack>   check a pack folder, or its pack.yaml, and list every problem
-  version           print the screen tree version";
+  validate <pack>                            check a pack folder, or its pack.yaml, and list every problem
+  screen <pack> --at <time> [world]          print the screen for that moment and its watch, as JSON
+  act <pack> --at <time> [world] <action>... run actions in turn and print where they leave the screen
+  version                                    print the screen tree version
+
+<time> is local to the pack, YYYY-MM-DDTHH:MM. [world] is any of --holder <person id>,
+--inside <place id> and --store <key>=<value>, the last two once per value. An action is a name,
+or name=<value> to send it a value. A value is YAML, like 3, true, b or [a, b].";
 
 /// Runs one command and returns the exit code.
 pub fn run(args: &[String], out: &mut impl Write, err: &mut impl Write) -> u8 {
@@ -18,6 +27,9 @@ pub fn run(args: &[String], out: &mut impl Write, err: &mut impl Write) -> u8 {
             (0, format!("tree {}\n", deskpress_engine::TREE_VERSION), String::new())
         }
         [command, target] if command == "validate" => validate(target),
+        [command, target, rest @ ..] if command == "screen" || command == "act" => {
+            screen(target, rest, command == "act")
+        }
         _ => (2, String::new(), format!("{USAGE}\n")),
     };
     // A closed pipe is not worth a panic.
@@ -26,12 +38,12 @@ pub fn run(args: &[String], out: &mut impl Write, err: &mut impl Write) -> u8 {
         .map_or(1, |()| code)
 }
 
-/// `deskpress validate`: exit 0 when the pack loads, 1 when it does not, 2 when there is no pack.
-fn validate(target: &str) -> (u8, String, String) {
+/// The pack at `target`, a folder or its manifest, or the exit code and message that say why not.
+fn open(target: &str) -> Result<pack::Pack, (u8, String, String)> {
     let Ok(path) = Path::new(target).canonicalize() else {
         let message =
             format!("no pack at {target}. Point me at a pack folder or at its pack.yaml\n");
-        return (2, String::new(), message);
+        return Err((2, String::new(), message));
     };
     let (dir, manifest) = if path.is_dir() {
         (path.as_path(), "pack.yaml".into())
@@ -46,9 +58,14 @@ fn validate(target: &str) -> (u8, String, String) {
         }
         std::fs::read_to_string(real).map_err(|e| e.to_string())
     };
-    let pack = match pack::load(&manifest, read) {
+    pack::load(&manifest, read).map_err(|e| (1, String::new(), format!("{e}\n")))
+}
+
+/// `deskpress validate`: exit 0 when the pack loads, 1 when it does not, 2 when there is no pack.
+fn validate(target: &str) -> (u8, String, String) {
+    let pack = match open(target) {
         Ok(pack) => pack,
-        Err(e) => return (1, String::new(), format!("{e}\n")),
+        Err(e) => return e,
     };
     let report = validate::validate(&pack.manifest, &pack.content, pack.theme.as_ref());
     let mut out = String::new();
@@ -67,6 +84,125 @@ fn validate(target: &str) -> (u8, String, String) {
     let errors = count(report.errors.len(), "error");
     out += &format!("\n{name}: does not load. {errors}, {warnings}.\n");
     (1, out, String::new())
+}
+
+/// `deskpress screen` and `deskpress act`: exit 0 with the JSON, 1 when the pack does not load or
+/// an action is not on the screen, 2 when the arguments are wrong.
+fn screen(target: &str, args: &[String], act: bool) -> (u8, String, String) {
+    let usage = |message: String| (2, String::new(), format!("{message}\n\n{USAGE}\n"));
+    let (mut world, actions) = match world(args) {
+        Ok(parsed) => parsed,
+        Err(message) => return usage(message),
+    };
+    if actions.is_empty() == act {
+        let message = if act { "act needs an action" } else { "screen takes no actions: use act" };
+        return usage(message.to_owned());
+    }
+    let pack = match open(target) {
+        Ok(pack) => pack,
+        Err(e) => return e,
+    };
+    let Ok((engine, _)) = Engine::load(pack) else {
+        return (
+            1,
+            String::new(),
+            format!("the pack does not load: deskpress validate {target}\n"),
+        );
+    };
+    let mut nav = Nav::default();
+    let mut view = match engine.screen(&world, &mut nav) {
+        Ok(view) => view,
+        Err(e) => return (1, String::new(), format!("{e}\n")),
+    };
+    let (mut stored, mut commands) = (Map::default(), Vec::new());
+    for action in actions {
+        let (name, arg) = match action.split_once('=') {
+            Some((name, arg)) => (name, value(arg)),
+            None => (action.as_str(), Value::Null),
+        };
+        let out = match engine.dispatch(&world, &mut nav, name, arg) {
+            Ok(out) => out,
+            Err(e) => return (1, String::new(), format!("{e}\n")),
+        };
+        // The host would persist these, so the next action sees them.
+        for (k, v) in out.store.iter() {
+            world.store.set(k, v.clone());
+            stored.set(k, v.clone());
+        }
+        commands.extend(out.commands.into_iter().map(Value::String));
+        view = out.view;
+    }
+    let effects = act.then(|| {
+        Map(vec![
+            ("store".to_owned(), Value::Map(stored)),
+            ("commands".to_owned(), Value::List(commands)),
+        ])
+    });
+    (0, format!("{}\n", show(Some(&json(view, effects)))), String::new())
+}
+
+/// The world the flags describe, and the arguments left over.
+fn world(args: &[String]) -> Result<(World, Vec<String>), String> {
+    let mut world = World::default();
+    let mut rest = Vec::new();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if !arg.starts_with("--") {
+            rest.push(arg.clone());
+            continue;
+        }
+        let Some(v) = args.next() else {
+            return Err(format!("{arg} needs a value"));
+        };
+        match arg.as_str() {
+            "--at" => world.now.clone_from(v),
+            "--holder" => world.holder.clone_from(v),
+            "--inside" => world.inside.push(v.clone()),
+            "--store" => {
+                let Some((key, v)) = v.split_once('=') else {
+                    return Err(format!("--store takes key=value, not {v}"));
+                };
+                world.store.set(key, value(v));
+            }
+            _ => return Err(format!("{arg} is not an option")),
+        }
+    }
+    if world.now.is_empty() {
+        return Err("--at <time> is needed: the moment to show, YYYY-MM-DDTHH:MM".to_owned());
+    }
+    Ok((world, rest))
+}
+
+/// A value from the command line, read as YAML; what YAML cannot read is taken as text.
+fn value(src: &str) -> Value {
+    let doc = yaml::parse(&format!("v: {src}")).ok();
+    doc.and_then(|d| d.get("v").cloned()).unwrap_or_else(|| Value::String(src.to_owned()))
+}
+
+/// The view as the JSON a renderer would get, with what the actions did after it.
+fn json(view: View, effects: Option<Map>) -> Value {
+    let Tree { version, screen, nodes } = view.tree;
+    let text = |s: String| Value::String(s);
+    let node = |n: deskpress_engine::tree::Node| {
+        let on = n.on.into_iter().map(|(k, v)| (k, text(v)));
+        Value::Map(Map(vec![
+            ("kind".to_owned(), text(n.kind)),
+            ("props".to_owned(), Value::Map(Map(n.props))),
+            ("on".to_owned(), Value::Map(Map(on.collect()))),
+        ]))
+    };
+    let watch = Map(vec![
+        ("until".to_owned(), text(view.watch.until)),
+        ("regions".to_owned(), Value::List(view.watch.regions.into_iter().map(text).collect())),
+    ]);
+    let mut out = Map(vec![
+        ("version".to_owned(), Value::Number(f64::from(version))),
+        ("screen".to_owned(), text(screen)),
+        ("nodes".to_owned(), Value::List(nodes.into_iter().map(node).collect())),
+        ("watch".to_owned(), Value::Map(watch)),
+    ]);
+    out.0.extend(effects.map(|e| e.0).unwrap_or_default());
+    Value::Map(out)
 }
 
 fn count(n: usize, word: &str) -> String {
@@ -345,6 +481,85 @@ Rooted: loads. 0 warnings.
 
     #[test]
     fn version_prints_the_screen_tree_version() {
-        assert_eq!(call(&["version"]), (0, "tree 1\n".to_owned(), String::new()));
+        assert_eq!(call(&["version"]), (0, "tree 2\n".to_owned(), String::new()));
+    }
+
+    const MACHINE: &str = "modules:
+  timeline:
+screens:
+  a:
+    state: {n: null}
+    actions:
+      go: [{set: n, to: $arg}, {store: \"seen.{now.date}\", value: $arg}, map.open]
+    layout:
+      - Label: {text: \"{block.text} {n} {store.x}\", on_tap: go}
+rules:
+  - {screen: a}
+";
+
+    fn machine(name: &str) -> Folder {
+        let pack = manifest(&format!("  name: M\n{MACHINE}"));
+        folder(name, &[("pack.yaml", &pack), ("content.yaml", DAY)])
+    }
+
+    fn at(dir: &Path, command: &str, args: &[&str]) -> (u8, String, String) {
+        let mut all = vec![command, dir.to_str().unwrap()];
+        all.extend(args);
+        call(&all)
+    }
+
+    #[test]
+    fn screen_and_act_refuse_arguments_that_say_no_world() {
+        let dir = machine("args");
+        let cases: [(&str, &[&str], &str); 7] = [
+            ("screen", &[], "--at <time> is needed: the moment to show, YYYY-MM-DDTHH:MM"),
+            ("screen", &["--at"], "--at needs a value"),
+            ("screen", &["--at", "x", "--store", "k"], "--store takes key=value, not k"),
+            ("screen", &["--at", "x", "--when", "y"], "--when is not an option"),
+            ("screen", &["--at", "x", "go"], "screen takes no actions: use act"),
+            ("act", &["--at", "x"], "act needs an action"),
+            ("act", &["go"], "--at <time> is needed: the moment to show, YYYY-MM-DDTHH:MM"),
+        ];
+        for (command, args, message) in cases {
+            let expected = (2, String::new(), format!("{message}\n\n{USAGE}\n"));
+            assert_eq!(at(&dir, command, args), expected, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn screen_needs_a_pack_that_loads_and_a_real_time() {
+        let (code, _, err) = call(&["screen", &temp("none").to_string_lossy(), "--at", "x"]);
+        assert!(code == 2 && err.starts_with("no pack at"), "{err}");
+        let pack = manifest("  name: U\nrules: 3\n");
+        let dir = folder("unloadable", &[("pack.yaml", &pack), ("content.yaml", DAY)]);
+        let message = format!("the pack does not load: deskpress validate {}\n", dir.display());
+        assert_eq!(at(&dir, "screen", &["--at", "x"]), (1, String::new(), message));
+        let message = "\"x\" is not a time: YYYY-MM-DDTHH:MM, in the pack's timezone\n".to_owned();
+        assert_eq!(at(&machine("time"), "act", &["--at", "x", "go"]), (1, String::new(), message));
+    }
+
+    #[test]
+    fn screen_prints_the_tree_and_its_watch_as_json() {
+        let world =
+            ["--at", "2026-04-11T10:30", "--store", "x=1", "--holder", "rita", "--inside", "home"];
+        let (code, out, err) = at(&machine("screen"), "screen", &world);
+        let expected = r#"{"version": 2, "screen": "a", "nodes": [{"kind": "Label", "props": {"text": "x  1"}, "on": {"tap": "go"}}], "watch": {"until": "2026-04-12T00:00", "regions": []}}"#;
+        assert_eq!((code, out.as_str(), err.as_str()), (0, format!("{expected}\n").as_str(), ""));
+    }
+
+    #[test]
+    fn act_runs_actions_in_turn_and_prints_what_they_stored_and_asked_for() {
+        let dir = machine("act");
+        let (code, out, _) =
+            at(&dir, "act", &["--at", "2026-04-11T10:30", "go=[a, b]", "go=hello"]);
+        assert_eq!(code, 0);
+        let tail = r#""props": {"text": "x hello "}, "on": {"tap": "go"}}], "watch": {"until": "2026-04-12T00:00", "regions": []}, "store": {"seen.2026-04-11": "hello"}, "commands": ["map.open", "map.open"]}"#;
+        assert!(out.ends_with(&format!("{tail}\n")), "{out}");
+        // What YAML cannot read goes as text.
+        let (_, out, _) = at(&dir, "act", &["--at", "2026-04-11T10:30", "go={"]);
+        assert!(out.contains(r#""text": "x { ""#), "{out}");
+        let refused = at(&dir, "act", &["--at", "2026-04-11T10:30", "go", "stop"]);
+        let message = "\"stop\" is not an action of the screen \"a\"\n".to_owned();
+        assert_eq!(refused, (1, String::new(), message));
     }
 }

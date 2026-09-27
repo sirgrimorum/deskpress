@@ -45,7 +45,7 @@ Three calls:
 | --- | --- | --- |
 | `load(files)` | once per pack | parse YAML, apply the keymap, validate everything, compile expressions. Returns errors and warnings, or a loaded pack |
 | `screen(world)` | only when an input changes or `watch.until` is reached | run the modules, the derived values and the rules; build the screen tree and its `watch` |
-| `dispatch(action)` | on a tap | run the action's effects; return the new tree and its `watch`, a store patch and tool commands for the host |
+| `dispatch(world, action, arg)` | on a tap | run the action's effects; return the new tree and its `watch`, a store patch and tool commands for the host |
 
 ```mermaid
 sequenceDiagram
@@ -67,12 +67,20 @@ Same world, same tree: the host never calls the engine to find out that nothing 
 `watch` says what would change the answer (the next instant, the geofences that matter), so the
 host waits on one timer instead of polling. See [decision 0013](decisions/0013-call-only-on-change.md).
 
+The world is four things: the local time in the pack's timezone as `YYYY-MM-DDTHH:MM` (the host
+converts, so the engine carries no timezone database), the ids of the places whose region the
+device is inside (never coordinates), who holds the phone, and the stored facts.
+
 ### Two machines
 
 - **The main machine** is the pack's `rules`: ordered guards, first true wins, the last one has no
   guard. It answers "which screen, right now". Any change of input re-runs it.
 - **A screen machine** is a screen's `state`, `actions` and `layout`. It answers "what can happen
   here". An action can `store` a fact, which is an input, so it can move the main machine.
+
+The screens a user opened sit on a nav stack. It starts at the screen the rules picked and is
+reset when the rules pick another; `open` pushes, `back` pops, `home` leaves only the first. The
+loaded pack keeps the stack between calls.
 
 The details, and why, are in [decision 0002](decisions/0002-main-machine-and-screen-machines.md).
 
@@ -114,16 +122,18 @@ The contract between engine and renderer. Plain data, versioned, and the same on
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "screen": "moment",
-  "theme": "rita-light",
-  "kid": false,
   "nodes": [
-    { "type": "BigValue", "props": { "text": "11:15", "caption": "Tile museum, top floor first" } },
-    { "type": "Button", "props": { "label": "Open in map" }, "on": { "tap": "open_map" } }
+    { "kind": "BigValue", "props": { "text": "11:15", "caption": "Tile museum, top floor first" }, "on": {} },
+    { "kind": "Button", "props": { "label": "About the place" }, "on": { "tap": "see_place" } }
   ]
 }
 ```
+
+A prop is any value: text, a number, a list or a mapping. `on` maps an event to an action of the
+screen; the host sends that name back through `dispatch`, with the node's `value` prop as `$arg`.
+Theme and kid mode join the tree when their phases land.
 
 Next to the tree, the engine returns `watch: {until, regions}` for the host, not the renderer. The
 renderer keeps the current tree on screen until a different one arrives, so a call never flickers.

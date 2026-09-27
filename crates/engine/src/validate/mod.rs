@@ -4,7 +4,7 @@
 
 mod blocks;
 mod keymap;
-mod patterns;
+pub(crate) mod patterns;
 mod theme;
 
 use std::collections::{HashMap, HashSet};
@@ -36,11 +36,11 @@ impl Report {
         self.errors.is_empty()
     }
 
-    fn error(&mut self, at: impl Into<String>, message: impl Into<String>) {
+    pub(crate) fn error(&mut self, at: impl Into<String>, message: impl Into<String>) {
         self.errors.push(Finding { at: at.into(), message: message.into() });
     }
 
-    fn warn(&mut self, at: impl Into<String>, message: impl Into<String>) {
+    pub(crate) fn warn(&mut self, at: impl Into<String>, message: impl Into<String>) {
         self.warnings.push(Finding { at: at.into(), message: message.into() });
     }
 
@@ -58,7 +58,7 @@ impl Report {
     }
 }
 
-const SEVERITIES: [&str; 4] = ["critical", "high", "medium", "low"];
+pub(crate) const SEVERITIES: [&str; 4] = ["critical", "high", "medium", "low"];
 /// A key of the manifest head, the test its value has to pass, and what to say when it does not.
 type Shape = (&'static str, fn(&str) -> bool, &'static str);
 
@@ -75,6 +75,9 @@ pub fn validate(manifest: &Value, content: &Value, theme: Option<&Value>) -> Rep
         kids: false,
     };
     c.pack(manifest, content, theme);
+    let (_, defined) = crate::define::define(manifest);
+    c.r.errors.extend(defined.errors);
+    c.r.warnings.extend(defined.warnings);
     c.r
 }
 
@@ -145,6 +148,9 @@ impl Checker<'_> {
         }
         if let Some(documents) = root("documents") {
             self.documents(documents);
+        }
+        if let Some(climate) = root("climate") {
+            self.climate(climate);
         }
         if let Some(theme) = theme.filter(|t| **t != Value::Null) {
             theme::check(&mut self.r, theme);
@@ -620,6 +626,65 @@ impl Checker<'_> {
             self.person(&format!("{at}.for"), &text(read("for")));
             if read("fields").is_some_and(|f| f.as_map().is_none()) {
                 self.r.error(format!("{at}.fields"), "has to be a mapping of label to value");
+            }
+        }
+    }
+
+    fn climate(&mut self, climate: &Value) {
+        let Some(climate) = climate.as_map() else {
+            self.r.error("climate", "has to be a mapping with units and entries");
+            return;
+        };
+        let units = climate.get("units");
+        if units.is_some_and(|u| !["metric", "imperial"].contains(&text(Some(u)).as_str())) {
+            self.r.error("climate.units", format!("{} is not metric or imperial", show(units)));
+        }
+        let Some(entries) = climate.get("entries") else {
+            return;
+        };
+        let Some(entries) = entries.as_list() else {
+            self.r.error("climate.entries", "has to be a list");
+            return;
+        };
+        for (i, e) in entries.iter().enumerate() {
+            let at = format!("climate.entries[{i}]");
+            let Some(e) = e.as_map() else {
+                self.r.error(&at, "has to be a mapping");
+                continue;
+            };
+            let read = |key: &str| self.keymap.field(e, "climate", key);
+            let place = text(read("place"));
+            if !place.is_empty() && !self.places.contains(&place) {
+                let message = format!("{} is not a place in this pack", quote(&place));
+                self.r.error(format!("{at}.place"), message);
+            }
+            let (month, date) = (read("month"), read("date"));
+            if month.is_some() && date.is_some() {
+                self.r.error(&at, "a month or a date, not both: which one would it be?");
+            }
+            let a_month = matches!(month, Some(Value::Number(m)) if m.fract() == 0.0 && (1.0..=12.0).contains(m));
+            if month.is_some() && !a_month {
+                self.r.error(
+                    format!("{at}.month"),
+                    format!("{} is not a month, 1 to 12", show(month)),
+                );
+            }
+            if date.is_some() && !is_real_date(&text(date)) {
+                let message = format!("{} is not a real date, YYYY-MM-DD", show(date));
+                self.r.error(format!("{at}.date"), message);
+            }
+            for key in ["high", "low", "rain"] {
+                let v = read(key);
+                if v.is_some_and(|v| !matches!(v, Value::Number(_))) {
+                    self.r.error(format!("{at}.{key}"), format!("{} is not a number", show(v)));
+                }
+            }
+            for key in ["sunrise", "sunset"] {
+                let v = read(key);
+                if v.is_some() && !is_time(&text(v)) {
+                    let message = format!("{} is not a time, HH:MM", show(v));
+                    self.r.error(format!("{at}.{key}"), message);
+                }
             }
         }
     }
@@ -1198,5 +1263,61 @@ days:
             "days:\n  - {date: 2026-04-11, titulo: x, fixed: [], source_note: '[to confirm]', id: d}",
             None,
         );
+    }
+
+    #[test]
+    fn climate_entries_are_checked_against_their_shape_and_the_places() {
+        let places = "places:\n  lisbon: {name: Lisbon, at: {lat: 38.7, lon: -9.1}}\n";
+        let cases = [
+            ("climate: [x]", "climate: has to be a mapping with units and entries"),
+            ("climate: {units: kelvin}", "climate.units: \"kelvin\" is not metric or imperial"),
+            ("climate: {entries: x}", "climate.entries: has to be a list"),
+            ("climate: {entries: [x]}", "climate.entries[0]: has to be a mapping"),
+            (
+                "climate: {entries: [{place: porto}]}",
+                "climate.entries[0].place: \"porto\" is not a place in this pack",
+            ),
+            (
+                "climate: {entries: [{month: 4, date: 2026-04-11}]}",
+                "climate.entries[0]: a month or a date, not both",
+            ),
+            (
+                "climate: {entries: [{month: 13}]}",
+                "climate.entries[0].month: 13 is not a month, 1 to 12",
+            ),
+            (
+                "climate: {entries: [{month: 4.5}]}",
+                "climate.entries[0].month: 4.5 is not a month, 1 to 12",
+            ),
+            (
+                "climate: {entries: [{month: april}]}",
+                "climate.entries[0].month: \"april\" is not a month, 1 to 12",
+            ),
+            (
+                "climate: {entries: [{date: 2026-02-30}]}",
+                "climate.entries[0].date: \"2026-02-30\" is not a real date",
+            ),
+            (
+                "climate: {entries: [{high: warm}]}",
+                "climate.entries[0].high: \"warm\" is not a number",
+            ),
+            (
+                "climate: {entries: [{sunset: '25:00'}]}",
+                "climate.entries[0].sunset: \"25:00\" is not a time, HH:MM",
+            ),
+        ];
+        for (climate, needle) in cases {
+            says(&day_and(&format!("{places}{climate}")), needle);
+        }
+        let good = "climate:\n  units: imperial\n  entries:\n    - {place: lisbon, month: 4, high: 68, low: 54, rain: 35, sunrise: '06:55', sunset: '20:10', summary: Spring}\n    - {date: 2026-04-11, high: 73}\n";
+        clean("", &day_and(&format!("{places}{good}")), None);
+        clean("", &day_and("climate: {}"), None);
+    }
+
+    #[test]
+    fn the_definition_is_part_of_the_report() {
+        let r = with("modules: {weather: {}, climate: {sync: {}}}\n", &day_and(""), None);
+        assert_eq!(r.errors[0].at, "modules.weather");
+        assert_eq!(r.warnings[0].at, "modules.climate.sync");
     }
 }

@@ -57,6 +57,13 @@ alerts:
     detail: "It arrives after the last bus on the other side. The 18:40 is the one that gets you home."
     action: "Leave the museum cafe by 18:10"
 
+climate:
+  units: metric
+  entries:
+    - {month: 4, high: 20, low: 12, rain: 35, sunrise: "06:55", sunset: "20:10",
+       summary: "Spring; showers pass quickly"}
+    - {place: azulejo, date: 2026-04-11, summary: "Warm for April, and dry inside the museum"}
+
 sheets:
   bookings:
     - id: azulejo
