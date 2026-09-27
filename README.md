@@ -47,7 +47,8 @@ make run                                 # build the app, install it on a device
 make e2e                                 # the device regression flows
 ```
 
-The app shows the example pack's outline for now; see the [roadmap](docs/roadmap.md).
+The app follows the example day: the list of days before it, the plan, the block happening now,
+and its place a tap away. See the [roadmap](docs/roadmap.md).
 
 ## Where to read next
 

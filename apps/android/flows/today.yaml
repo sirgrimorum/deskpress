@@ -1,0 +1,11 @@
+# The day before its first block: the whole plan.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T09:00"
+- assertVisible: "The tile museum and the late ferry"
+- assertVisible: "11:15"
+- assertVisible: "Spring; showers pass quickly, 12 to 20"
+- assertNotVisible: "About the place"

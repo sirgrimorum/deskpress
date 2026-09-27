@@ -1,8 +1,10 @@
-# The phase 2 screen: the engine loads the example pack and the app draws its outline.
+# Before the day: the list of days.
 appId: dev.deskpress.app
 ---
 - launchApp:
     clearState: true
-- assertVisible: "One day"
+    arguments:
+      now: "2026-04-10T09:00"
+- assertVisible: "The days"
 - assertVisible: "The tile museum and the late ferry"
 - assertVisible: "2026-04-11"
