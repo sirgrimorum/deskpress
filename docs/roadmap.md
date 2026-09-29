@@ -19,5 +19,5 @@ phase that is not.
 | 11 | the assistant: questions about the trip answered from the pack, with menus and languages per person where a pack needs them | a person asks in their language and gets the pack's answer |
 | 12 | performance at scale, found in the phase 7 review: calendar writes in one batch, a picked folder listed with one query per directory, the stored facts kept on the Rust side instead of crossing to Kotlin on every call, keys on the screen's list items | a trip of several hundred events syncs in about a second, and a large pack opens and draws as fast as the example |
 | 13 | the authoring plugin: the skill plus the CLI, packaged for LLM hosts | an LLM writes, validates and previews a pack end to end |
-| 14 | the public repo: remote, CI running `make ci` and `make e2e`, branch protection, security (dependency and secret scanning, audit, signed releases), docs site if it earns its place, contribution files | a push to the remote is checked, and a tagged release builds the APK and the CLI |
+| 14 ✓ | the public repo: remote, CI running gate and Android host tests, security audit, Dependabot, contribution files (decision 0024); releases kept out of CI for now | a push to the remote is checked |
 | 15 | web renderer for previews; iOS renderer; store builds | the same fixtures pass on every platform |

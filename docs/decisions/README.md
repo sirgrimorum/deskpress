@@ -29,3 +29,4 @@ history.
 | [0021](0021-calendar.md) | calendar sync: a picked account calendar, a ledger of the app's own events, a plan to confirm | accepted, amended by 0023 |
 | [0022](0022-data-sync.md) | data sync: the engine builds requests and reads replies, the host fetches; climate first | accepted |
 | [0023](0023-drift-review.md) | the drift review of phase 7: what was fixed, what is kept on purpose, the spec's extras as phases | accepted |
+| [0024](0024-public-repo-ci-and-security.md) | the public repo: remote, CI for gate and Android, security audit, community files | accepted |

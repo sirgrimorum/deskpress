@@ -63,6 +63,8 @@ its place says, the agenda, the night, and the phone handed to a child and back.
 | [docs/glossary.md](docs/glossary.md) | the product's own words and the technical terms, in one line each |
 | [docs/decisions/](docs/decisions/) | why things are the way they are |
 | [docs/roadmap.md](docs/roadmap.md) | what is done and what is next |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | how to contribute and development gates |
+| [SECURITY.md](SECURITY.md) | security policy and vulnerability reporting |
 | [examples/one-day/](examples/one-day/) | a whole pack, small enough to read in a minute |
 | [skills/write-a-deskpress-pack/](skills/write-a-deskpress-pack/) | the skill an LLM loads before writing a pack |
 

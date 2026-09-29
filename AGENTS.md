@@ -103,6 +103,7 @@ SDK in the Makefile, Gradle in its wrapper, the app's libraries in
 
 | path | what it is |
 | --- | --- |
+| `.github/` | CI workflows (gate, Android host), security audit, Dependabot, issue and PR templates |
 | `crates/engine` | yaml, expressions, loader, validator, definition, modules, the engine: the screen for a world and its watch, screen machines, the nav stack. Std only |
 | `crates/cli` | the `deskpress` binary: `validate`, `screen`, `act` |
 | `crates/ffi` | the UniFFI bindings and their bindgen, the only crate that depends on UniFFI |
