@@ -82,6 +82,22 @@ pub(crate) fn is_time(s: &str) -> bool {
         && b[3] <= b'5'
 }
 
+/// A path that leaves the pack folder: absolute, on a drive, or climbing out with `..`.
+pub(crate) fn leaves(path: &str) -> bool {
+    let path = path.replace('\\', "/");
+    let b = path.as_bytes();
+    let drive = b.first().is_some_and(u8::is_ascii_alphabetic) && b.get(1) == Some(&b':');
+    path.starts_with('/') || drive || path.split('/').any(|s| s == "..")
+}
+
+/// A number to dial: an optional `+`, then digits that spaces, dashes, dots and brackets may
+/// group. At least three digits, so an emergency number passes.
+pub(crate) fn is_phone(s: &str) -> bool {
+    let rest = s.strip_prefix('+').unwrap_or(s);
+    let grouping = |b: u8| b.is_ascii_digit() || b" -.()".contains(&b);
+    all(rest, grouping) && rest.bytes().filter(u8::is_ascii_digit).count() >= 3
+}
+
 /// `YYYY-MM-DDTHH:MM`.
 pub(crate) fn is_stamp(s: &str) -> bool {
     s.split_once('T').is_some_and(|(date, time)| is_date(date) && is_time(time))

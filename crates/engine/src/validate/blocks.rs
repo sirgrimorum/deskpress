@@ -129,7 +129,9 @@ impl Checker<'_> {
             let message = format!("{} is not a time, HH:MM", quote(&until));
             self.r.error(format!("{bat}.until"), message);
         }
-        if !until.is_empty() && !t.is_empty() && until.as_str() <= t {
+        // An `until` in another zone can read earlier than the block and still be after it.
+        if !until.is_empty() && !t.is_empty() && until.as_str() <= t && read("until_zone").is_none()
+        {
             let message = format!("{until} is not after the block's own time, {t}");
             self.r.error(format!("{bat}.until"), message);
         }

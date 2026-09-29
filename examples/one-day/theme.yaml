@@ -1,0 +1,95 @@
+# The design system of this pack. The app's Design system screen edits this file in place,
+# keeping these comments. Sizes are px, drawn as dp; tracking is em.
+
+default: plain-light
+
+themes:
+  plain-light:
+    name: Plain
+    mode: light
+    colors:
+      paper: "#FFFFFF"
+      ink: "#1B1B1F"
+      ink-muted: "#55555E"
+      card: "#F4F4F7"
+      card-line: "#C6C6CF"
+      line: "#C6C6CF"
+      rule: "#E3E3E9"
+      soft: "#EDEDF2"
+      alert: "#B3261E"
+      action-bg: "#1B1B1F"
+      action-ink: "#FFFFFF"
+      highlight-bg: "#E3E7FB"
+      highlight-ink: "#1B1B1F"
+      highlight-line: "#3A4BA8"
+      highlight-text: "#2E3C94"
+      chip-bg: "#1B1B1F"
+      chip-ink: "#FFFFFF"
+      bar-bg: "#1B1B1F"
+      bar-ink: "#FFFFFF"
+      bar-muted: "#C6C6CF"
+      missing-fill: "#F4F4F7"
+      missing-border: "#85858F"
+      missing-text: "#45454D"
+  plain-dark:
+    name: Plain at night
+    mode: dark
+    colors:
+      paper: "#121216"
+      ink: "#EDEDF2"
+      ink-muted: "#B4B4BE"
+      card: "#1E1E24"
+      card-line: "#4A4A54"
+      line: "#4A4A54"
+      rule: "#2E2E36"
+      soft: "#26262D"
+      alert: "#FFB4AB"
+      action-bg: "#EDEDF2"
+      action-ink: "#121216"
+      highlight-bg: "#2A3263"
+      highlight-ink: "#EDEDF2"
+      highlight-line: "#B9C3FF"
+      highlight-text: "#B9C3FF"
+      chip-bg: "#EDEDF2"
+      chip-ink: "#121216"
+      bar-bg: "#2A2A31"
+      bar-ink: "#FFFFFF"
+      bar-muted: "#C6C6CF"
+      missing-fill: "#1E1E24"
+      missing-border: "#8A8A94"
+      missing-text: "#C6C6CF"
+
+type:
+  hero:
+    size: 56px
+    line: 60px
+    weight: 700
+    tracking: -0.02em
+  title:
+    size: 24px
+    line: 30px
+    weight: 700
+  body:
+    size: 18px
+    line: 26px
+    weight: 400
+  label:
+    size: 13px
+    line: 17px
+    weight: 700
+    tracking: 0.06em
+
+spacing:
+  margin: 16px
+  gap: 12px
+
+radius:
+  card: 16px
+  action: 16px
+
+border:
+  base: 2px
+
+touch:
+  min: 48px
+  action-height: 56px

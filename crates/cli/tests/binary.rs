@@ -18,7 +18,7 @@ fn a_bad_command_exits_two_with_nothing_on_stdout() {
 fn version_exits_zero() {
     let output = deskpress(&["version"]);
     assert_eq!(output.status.code(), Some(0));
-    assert_eq!(output.stdout, b"tree 2\n");
+    assert_eq!(output.stdout, b"tree 4\n");
 }
 
 #[test]

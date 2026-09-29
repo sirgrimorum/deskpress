@@ -1,14 +1,21 @@
 //! The engine a host holds: a pack that loaded, and its definition. For a world it answers which
 //! screen shows and until when that answer holds (decision 0013).
 
-use crate::clock::{next_day, next_minute};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+
+mod sync;
+
+pub use sync::Request;
+
+use crate::clock::{minutes, next_day, next_minute, shift};
 use crate::define::{Definition, Does, Rule, define, fill};
+use crate::expr::Expr;
 use crate::modules::Run;
 use crate::pack::Pack;
 use crate::tree::{Conventions, Tree, build, outline};
 use crate::validate::patterns::{is_real_date, is_stamp};
 use crate::validate::{Finding, Keymap, validate};
-use crate::value::{Map, Value, quote, truthy};
+use crate::value::{Map, Value, quote, text, truthy};
 
 /// Everything outside the pack the answer depends on. The host passes it in; the engine reads no
 /// clock and no sensor.
@@ -18,17 +25,30 @@ pub struct World {
     pub now: String,
     /// The id of the person holding the phone.
     pub holder: String,
-    /// The ids of the places whose region the device is inside.
+    /// The ids of the places whose region the device is inside, the smallest first.
     pub inside: Vec<String>,
+    /// Whether the host knows where the device is. Without it `inside` says nothing.
+    pub located: bool,
     /// The facts stored on the device, by key.
     pub store: Map,
+    /// The local time now in each zone of `Engine::zones`, by zone name.
+    pub zones: Map,
 }
 
 /// What would change the answer: the next instant, and the regions whose crossing matters.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Watch {
     pub until: String,
-    pub regions: Vec<String>,
+    pub regions: Vec<Region>,
+}
+
+/// A place's circle on the map, for the host to watch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Region {
+    pub id: String,
+    pub lat: f64,
+    pub lon: f64,
+    pub radius_m: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -67,7 +87,42 @@ pub struct View {
 pub struct Outcome {
     pub view: View,
     pub store: Map,
-    pub commands: Vec<String>,
+    pub commands: Vec<Command>,
+}
+
+/// A module action for the host to run, like `calendar.sync`, with the values it was given.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Command {
+    pub name: String,
+    pub args: Map,
+}
+
+/// A calendar event for a timed block, in the local time of its zones (decision 0021).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Event {
+    /// The block's `event`, stable while the block keeps its place in its list.
+    pub id: String,
+    pub start: String,
+    pub end: String,
+    /// The zone `start` and `reminder` are local to, and the one `end` is; empty for the pack's.
+    pub zone: String,
+    pub end_zone: String,
+    pub title: String,
+    pub location: String,
+    pub notes: String,
+    /// When to remind, from the `notify_from` of an alert at the block; empty for none.
+    pub reminder: String,
+    /// Changes whenever anything above does.
+    pub fingerprint: String,
+}
+
+/// What a calendar sync would do to the events the host wrote before.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Plan {
+    pub add: Vec<Event>,
+    pub change: Vec<Event>,
+    /// Ids of events written before that the plan no longer has.
+    pub remove: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -80,6 +135,17 @@ pub struct Engine {
 pub const OUTLINE: &str = "outline";
 
 impl Engine {
+    /// The pack's content; empty when it is not a mapping.
+    fn content(&self) -> &Map {
+        static EMPTY: Map = Map(Vec::new());
+        self.pack.content.as_map().unwrap_or(&EMPTY)
+    }
+
+    /// The root a module reads, as the pack names it.
+    fn from(&self, module: &str) -> Option<&str> {
+        self.def.modules.iter().find(|m| m.name == module).and_then(|m| m.from.as_deref())
+    }
+
     /// The engine for a pack and its warnings, or every error that stops it loading.
     pub fn load(pack: Pack) -> Result<(Engine, Vec<Finding>), Vec<Finding>> {
         let report = validate(&pack.manifest, &pack.content, pack.theme.as_ref());
@@ -92,6 +158,27 @@ impl Engine {
 
     pub fn pack(&self) -> &Pack {
         &self.pack
+    }
+
+    /// The zones the plan names besides the pack's own: every `zone` and `until_zone` under the
+    /// days, once each, sorted. The host passes the local time in each as `World::zones`.
+    pub fn zones(&self) -> Vec<String> {
+        fn walk(v: &Value, into: &mut BTreeSet<String>) {
+            match v {
+                Value::Map(m) => m.iter().for_each(|(k, v)| match (k, v) {
+                    ("zone" | "until_zone", Value::String(z)) => _ = into.insert(z.clone()),
+                    _ => walk(v, into),
+                }),
+                Value::List(items) => items.iter().for_each(|v| walk(v, into)),
+                _ => {}
+            }
+        }
+        let content = self.content();
+        let days =
+            self.from("timeline").and_then(|d| Keymap::of(&self.pack.manifest).root(content, d));
+        let mut zones = BTreeSet::new();
+        days.into_iter().for_each(|d| walk(d, &mut zones));
+        zones.into_iter().filter(|z| !z.is_empty()).collect()
     }
 
     /// Runs the modules, the derived names and the rules over `world`.
@@ -147,8 +234,7 @@ impl Engine {
                     scope.set("store", Value::Map(store.clone()));
                 }
                 Does::Open(screen, with) => {
-                    let params = with.iter().map(|(k, e)| (k.clone(), e.eval(&scope).into_owned()));
-                    let params = Map(params.collect());
+                    let params = values(with, &scope);
                     let top = nav.stack.len() - 1;
                     // Leaving the top resets a screen's local state.
                     nav.stack[top] =
@@ -161,12 +247,46 @@ impl Engine {
                     }
                 }
                 Does::Home => nav.stack.truncate(1),
-                Does::Command(c) => commands.push(c.clone()),
+                Does::Command(name, with) => {
+                    commands.push(Command { name: name.clone(), args: values(with, &scope) });
+                }
             }
         }
         let world = World { store, ..world.clone() };
         let d = self.follow(&world, nav);
         Ok(Outcome { view: self.view(d, nav), store: patch, commands })
+    }
+
+    /// The calendar sync for `scope`: the whole trip when empty, a day by its date, or one event
+    /// by its id. `known` is what the host wrote before, each event id with its fingerprint.
+    pub fn calendar(
+        &self,
+        world: &World,
+        scope: &str,
+        known: &BTreeMap<String, String>,
+    ) -> Result<Plan, String> {
+        check(&world.now)?;
+        let content = self.content();
+        let run = Run::new(Keymap::of(&self.pack.manifest), content, world, Map::default());
+        let within = |id: &str| {
+            scope.is_empty()
+                || id == scope
+                || id.strip_prefix(scope).is_some_and(|r| r.starts_with('.'))
+        };
+        let mut events =
+            run.events(self.from("timeline"), self.from("places"), self.from("alerts"));
+        events.retain(|e| within(&e.id));
+        let ids: HashSet<&str> = events.iter().map(|e| e.id.as_str()).collect();
+        let remove = known.keys().filter(|k| within(k) && !ids.contains(k.as_str())).cloned();
+        let mut plan = Plan { remove: remove.collect(), ..Plan::default() };
+        for e in events {
+            match known.get(&e.id) {
+                None => plan.add.push(e),
+                Some(f) if *f != e.fingerprint => plan.change.push(e),
+                Some(_) => {}
+            }
+        }
+        Ok(plan)
     }
 
     /// Decides, and starts the stack over when the rules picked another screen.
@@ -186,7 +306,8 @@ impl Engine {
 
     fn view(&self, d: Decision, nav: &Nav) -> View {
         let top = &nav.stack[nav.stack.len() - 1];
-        let tree = match self.def.screen(&top.screen) {
+        let holder = d.scope.get("holder").cloned().unwrap_or(Value::Null);
+        let mut tree = match self.def.screen(&top.screen) {
             None => outline(&self.pack),
             Some(screen) => {
                 let mut scope = d.scope;
@@ -194,6 +315,8 @@ impl Engine {
                 build(&top.screen, screen, &mut scope, &Conventions::of(&self.pack.manifest))
             }
         };
+        tree.theme = text(holder.get("theme"));
+        tree.kid = holder.get("adult") == Some(&Value::Bool(false));
         View { tree, watch: d.watch }
     }
 
@@ -201,25 +324,24 @@ impl Engine {
         let now = world.now.as_str();
         let (date, time) = (&now[..10], &now[11..]);
         let manifest = &self.pack.manifest;
-        let text = |s: &str| Value::String(s.to_owned());
+        let string = |s: &str| Value::String(s.to_owned());
         let scope = Map(vec![
             (
                 "now".into(),
                 Value::Map(Map(vec![
-                    ("date".into(), text(date)),
-                    ("time".into(), text(time)),
-                    ("stamp".into(), text(now)),
+                    ("date".into(), string(date)),
+                    ("time".into(), string(time)),
+                    ("stamp".into(), string(now)),
                 ])),
             ),
             ("content".into(), self.pack.content.clone()),
             ("ui".into(), manifest.get("ui").cloned().unwrap_or(Value::Null)),
             ("store".into(), Value::Map(world.store.clone())),
         ]);
-        let empty = Map::default();
-        let content = self.pack.content.as_map().unwrap_or(&empty);
+        let content = self.content();
         let mut run = Run::new(Keymap::of(manifest), content, world, scope);
         for m in &self.def.modules {
-            run.module(m.name, &m.from);
+            run.module(m);
         }
         for (name, e) in &self.def.derive {
             let value = e.eval(&run.scope).into_owned();
@@ -230,12 +352,26 @@ impl Engine {
         let screen = rule.map_or(OUTLINE.to_owned(), |r| r.screen.clone());
 
         // The earliest instant still to come; the next midnight always is one, since the day changes.
-        let clocks = self.def.clocks.iter().map(|c| {
-            let at = if c.at.len() == 5 { format!("{date}T{}", c.at) } else { c.at.clone() };
+        // A `day.time` clock is on the day's own clock: moved by how far that is from the pack's.
+        let day = run.scope.get("day");
+        let field = |k: &str| text(day.and_then(|d| d.get(k)));
+        let (on, here) = (field("date"), field("time"));
+        let off = if here.is_empty() { 0 } else { minutes(now) - minutes(&format!("{on}T{here}")) };
+        let clocks = self.def.clocks.iter().filter(|c| !c.day || !here.is_empty()).map(|c| {
+            let at = match (c.at.len(), c.day) {
+                (5, true) => shift(&format!("{on}T{}", c.at), off),
+                (5, false) => format!("{date}T{}", c.at),
+                _ => c.at.clone(),
+            };
             if c.later { next_minute(&at) } else { at }
         });
         let midnight = format!("{}T00:00", next_day(date));
-        let instants = run.until.into_iter().chain(clocks).chain([midnight]);
+        // When an automatic sync falls due, the host is to be asked again, and it fetches then.
+        let due = self.def.modules.iter().filter_map(|m| {
+            let every = m.sync.as_ref()?.every?;
+            Some(Self::due(world, m.name, every))
+        });
+        let instants = run.until.into_iter().chain(clocks).chain([midnight]).chain(due);
         let until = instants.filter(|u| u.as_str() > now).min().unwrap_or_default();
         let watch = Watch { until, regions: run.regions };
         Decision { screen, scope: run.scope, watch }
@@ -247,6 +383,11 @@ fn check(now: &str) -> Result<(), String> {
         return Ok(());
     }
     Err(format!("{} is not a time: YYYY-MM-DDTHH:MM, in the pack's timezone", quote(now)))
+}
+
+/// Each name with the value of its expression.
+fn values(with: &[(String, Expr)], scope: &Map) -> Map {
+    Map(with.iter().map(|(k, e)| (k.clone(), e.eval(scope).into_owned())).collect())
 }
 
 /// Adds what a screen's expressions read besides the decision: its `params` and its state.
@@ -307,6 +448,84 @@ rules:
     }
 
     #[test]
+    fn a_calendar_sync_adds_changes_and_removes_only_within_its_scope() {
+        let e = engine(DEFINITION);
+        let none = BTreeMap::new();
+        assert!(e.calendar(&World::default(), "", &none).is_err());
+        let w = World { now: "2026-04-10T09:00".into(), ..World::default() };
+        let first = e.calendar(&w, "", &none).unwrap();
+        let ids = |l: &[Event]| l.iter().map(|e| e.id.clone()).collect::<Vec<_>>();
+        let day = ["2026-04-11.blocks.0", "2026-04-11.blocks.1", "2026-04-11.blocks.2"];
+        assert_eq!(
+            (ids(&first.add), first.change.len(), first.remove.len()),
+            (day.map(String::from).to_vec(), 0, 0)
+        );
+        let mut known: BTreeMap<String, String> =
+            first.add.iter().map(|e| (e.id.clone(), e.fingerprint.clone())).collect();
+        for (id, print) in [
+            (day[0], "x"),
+            ("2026-04-11.blocks.9", "y"),
+            ("2026-04-11x", "z"),
+            ("2026-04-12.fixed.0", "z"),
+        ] {
+            known.insert(id.into(), print.into());
+        }
+        let plan = e.calendar(&w, "2026-04-11", &known).unwrap();
+        assert_eq!(
+            (plan.add.len(), ids(&plan.change), plan.remove),
+            (0, vec![day[0].to_owned()], vec!["2026-04-11.blocks.9".to_owned()])
+        );
+        let one = e.calendar(&w, "2026-04-11.blocks.9", &known).unwrap();
+        assert_eq!(
+            (one.add.len(), one.change.len(), one.remove),
+            (0, 0, vec!["2026-04-11.blocks.9".to_owned()])
+        );
+        let trip = e.calendar(&w, "", &known).unwrap();
+        assert_eq!(trip.remove, ["2026-04-11.blocks.9", "2026-04-11x", "2026-04-12.fixed.0"]);
+        let bare = engine("screens: {idle: {}}\nrules: [{screen: idle}]\n");
+        assert_eq!(bare.calendar(&w, "", &none).unwrap(), Plan::default());
+    }
+
+    #[test]
+    fn the_zones_are_the_ones_the_days_name_once_each() {
+        assert!(engine(DEFINITION).zones().is_empty());
+        assert!(engine("screens: {idle: {}}\nrules: [{screen: idle}]\n").zones().is_empty());
+        let content = r#"days:
+  - date: 2026-04-11
+    title: Arrive
+    zone: Asia/Tokyo
+    blocks:
+      - ["10:30", "Walk", {zone: Asia/Seoul, until: "11:00", until_zone: Asia/Tokyo}]
+      - ["11:15", "Museum", {zone: ""}]
+zone: Europe/Paris
+"#;
+        let pack = Pack {
+            manifest: parse(&format!("{HEAD}{DEFINITION}")).unwrap(),
+            content: parse(content).unwrap(),
+            theme: None,
+        };
+        assert_eq!(Engine::load(pack).unwrap().0.zones(), ["Asia/Seoul", "Asia/Tokyo"]);
+    }
+
+    #[test]
+    fn a_day_clock_is_watched_on_the_days_own_clock() {
+        let content = "days: [{date: 2026-04-11, title: A, zone: Asia/Tokyo}]\n";
+        let definition = "modules: {timeline: }\nderive: {night: \"day.time >= '19:00'\"}\nscreens: {a: {}}\nrules: [{screen: a}]\n";
+        let pack = Pack {
+            manifest: parse(&format!("{HEAD}{definition}")).unwrap(),
+            content: parse(content).unwrap(),
+            theme: None,
+        };
+        let e = Engine::load(pack).unwrap().0;
+        // Tokyo is nine hours on, so its 19:00 is 10:00 here, before its midnight at 15:00.
+        let mut w = at("2026-04-11T08:00");
+        w.zones = Map(vec![("Asia/Tokyo".into(), Value::String("2026-04-11T17:00".into()))]);
+        assert_eq!(e.decide(&w).unwrap().watch.until, "2026-04-11T10:00");
+        // With no day today there is no day clock, and the day changes at midnight.
+        assert_eq!(e.decide(&at("2026-04-10T16:00")).unwrap().watch.until, "2026-04-11T00:00");
+    }
+
+    #[test]
     fn a_pack_with_errors_does_not_load() {
         let pack = Pack {
             manifest: parse(&format!("{HEAD}modules: {{weather: {{}}}}")).unwrap(),
@@ -321,13 +540,33 @@ rules:
     #[test]
     fn a_pack_that_loads_keeps_its_warnings() {
         let pack = Pack {
-            manifest: parse(&format!("{HEAD}modules:\n  climate: {{sync: {{}}}}\n")).unwrap(),
-            content: parse(CONTENT).unwrap(),
+            manifest: parse(HEAD).unwrap(),
+            content: parse(&format!("{CONTENT}people: [{{id: rita}}]\n")).unwrap(),
             theme: None,
         };
         let (engine, warnings) = Engine::load(pack).unwrap();
-        assert_eq!(warnings[0].at, "modules.climate.sync");
+        assert_eq!(warnings[0].message, "a person with no name shows up as their id");
         assert_eq!(engine.pack().name(), Some("Test".into()));
+    }
+
+    #[test]
+    fn the_tree_carries_the_holders_theme_and_whether_a_child_holds_it() {
+        let people =
+            "people: [{id: rita, adult: true, theme: rita-light}, {id: tomas, adult: false}]";
+        let pack = Pack {
+            manifest: parse(&format!("{HEAD}modules: {{people: }}")).unwrap(),
+            content: parse(&format!("{CONTENT}{people}\n")).unwrap(),
+            theme: None,
+        };
+        let e = Engine::load(pack).unwrap().0;
+        let view = |holder: &str| {
+            let world = World { holder: holder.into(), ..at("2026-04-11T10:00") };
+            let tree = e.screen(&world, &mut Nav::default()).unwrap().tree;
+            (tree.theme, tree.kid)
+        };
+        assert_eq!(view(""), (String::new(), false));
+        assert_eq!(view("rita"), ("rita-light".into(), false));
+        assert_eq!(view("tomas"), (String::new(), true));
     }
 
     #[test]
@@ -366,7 +605,7 @@ rules:
         assert_eq!(show(d.scope.get("store")), r#"{"seen": true}"#);
         assert_eq!(show(d.scope.get("ui")), r#"{"today": "Today"}"#);
         assert_eq!(show(d.scope.get("busy")), "true");
-        assert_eq!(d.watch.regions, ["azulejo"]);
+        assert_eq!(d.watch.regions.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["azulejo"]);
         assert_eq!(e.decide(&at("2026-04-11T13:05")).unwrap().screen, "idle");
         assert_eq!(e.decide(&at("2026-04-11T18:00")).unwrap().screen, "evening");
     }
@@ -403,7 +642,7 @@ screens:
       confirm:
         - {if: picked, store: \"choice.{now.date}\", value: picked}
         - {if: store.choice, set: picked, to: \"'never'\"}
-        - calendar.sync
+        - {do: calendar.sync, with: {day: now.date}}
       detail: [{set: picked, to: \"'gone'\"}, {open: info, with: {what: block.text}}]
       finish: [{store: done, value: true}]
       stay: [back, home]
@@ -429,7 +668,7 @@ rules:
 ";
 
     fn texts(view: &View) -> Vec<String> {
-        view.tree.nodes.iter().map(|n| crate::value::text(Some(&n.props[0].1))).collect()
+        view.tree.nodes.iter().map(|n| text(Some(&n.props[0].1))).collect()
     }
 
     fn act(e: &Engine, nav: &mut Nav, action: &str, arg: Value) -> Outcome {
@@ -513,7 +752,9 @@ rules:
     fn store_and_commands_go_to_the_host_and_the_effects_after_them_see_the_facts() {
         let (e, mut nav) = (engine(MACHINE), Nav::default());
         let out = act(&e, &mut nav, "confirm", Value::Null);
-        assert_eq!((out.store, out.commands), (Map::default(), vec!["calendar.sync".to_owned()]));
+        let day = Map(vec![("day".to_owned(), Value::String("2026-04-11".into()))]);
+        let sync = Command { name: "calendar.sync".into(), args: day };
+        assert_eq!((out.store, out.commands), (Map::default(), vec![sync]));
         act(&e, &mut nav, "pick", Value::String("b".into()));
         let out = act(&e, &mut nav, "confirm", Value::Null);
         let stored = vec![("choice.2026-04-11".to_owned(), Value::String("b".into()))];

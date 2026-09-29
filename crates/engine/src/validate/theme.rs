@@ -4,7 +4,8 @@ use super::Report;
 use super::patterns::is_slug;
 use crate::value::{Value, show, text, truthy};
 
-pub(super) const TOKENS: [&str; 23] = [
+/// The color tokens every theme carries.
+pub const TOKENS: [&str; 23] = [
     "paper",
     "ink",
     "ink-muted",

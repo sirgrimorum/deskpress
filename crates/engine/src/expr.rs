@@ -4,6 +4,8 @@
 use std::borrow::Cow;
 use std::fmt;
 
+use crate::clock::later;
+use crate::validate::patterns::{is_real_date, is_stamp};
 use crate::value::{Map, Value, quote, show, text, truthy};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -11,7 +13,8 @@ pub enum Expr {
     Literal(Value),
     /// A name and the keys under it: `place.at.lat`.
     Path(Vec<String>),
-    Call(Func, Box<Expr>),
+    /// A function and its values, as many as it takes.
+    Call(Func, Vec<Expr>),
     Not(Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
@@ -35,10 +38,21 @@ pub enum Func {
     First,
     Last,
     Empty,
+    /// `later(stamp, minutes)`: the stamp that many minutes on.
+    Later,
 }
 
-const FUNCS: [(&str, Func); 4] =
-    [("count", Func::Count), ("first", Func::First), ("last", Func::Last), ("empty", Func::Empty)];
+/// Each function by name, with how many values it takes.
+const FUNCS: [(&str, Func, usize); 5] = [
+    ("count", Func::Count, 1),
+    ("first", Func::First, 1),
+    ("last", Func::Last, 1),
+    ("empty", Func::Empty, 1),
+    ("later", Func::Later, 2),
+];
+
+// The most `later` moves a stamp: a year of minutes.
+const MAX_MINUTES: f64 = 366.0 * 24.0 * 60.0;
 
 /// A problem at a column of the expression, counted in characters from 1. The caller knows the key
 /// path it came from.
@@ -91,10 +105,13 @@ impl Expr {
                 let found = path[1..].iter().fold(scope.get(&path[0]), |v, k| v?.get(k));
                 self::found(found)
             }
-            Expr::Call(f, arg) => match arg.eval(scope) {
-                Cow::Borrowed(v) => f.apply(v),
-                Cow::Owned(v) => Cow::Owned(f.apply(&v).into_owned()),
-            },
+            Expr::Call(f, args) => {
+                let more = args.get(1).map(|a| a.eval(scope));
+                match args[0].eval(scope) {
+                    Cow::Borrowed(v) => f.apply(v, more.as_deref()),
+                    Cow::Owned(v) => Cow::Owned(f.apply(&v, more.as_deref()).into_owned()),
+                }
+            }
             Expr::Not(e) => Cow::Owned(Value::Bool(!truthy(Some(&e.eval(scope))))),
             Expr::And(a, b) => {
                 let left = a.eval(scope);
@@ -115,7 +132,8 @@ impl Expr {
         f(self);
         match self {
             Expr::Literal(_) | Expr::Path(_) => {}
-            Expr::Call(_, e) | Expr::Not(e) => e.visit(f),
+            Expr::Call(_, args) => args.iter().for_each(|e| e.visit(f)),
+            Expr::Not(e) => e.visit(f),
             Expr::And(a, b) | Expr::Or(a, b) | Expr::Compare(_, a, b) => {
                 a.visit(f);
                 b.visit(f);
@@ -172,7 +190,7 @@ impl Op {
 }
 
 impl Func {
-    fn apply(self, v: &Value) -> Cow<'_, Value> {
+    fn apply<'a>(self, v: &'a Value, more: Option<&Value>) -> Cow<'a, Value> {
         let len = match v {
             Value::List(items) => items.len(),
             Value::Map(m) => m.0.len(),
@@ -185,7 +203,23 @@ impl Func {
             Func::First => found(list.first()),
             Func::Last => found(list.last()),
             Func::Empty => Cow::Owned(Value::Bool(len == 0)),
+            Func::Later => Cow::Owned(minutes_on(v, more.unwrap_or(&Value::Null))),
         }
+    }
+}
+
+/// A real stamp `minutes` whole minutes on, up to a year; null for anything else.
+fn minutes_on(stamp: &Value, minutes: &Value) -> Value {
+    match (stamp, minutes) {
+        (Value::String(s), Value::Number(n))
+            if is_stamp(s)
+                && is_real_date(&s[..10])
+                && n.fract() == 0.0
+                && (0.0..=MAX_MINUTES).contains(n) =>
+        {
+            Value::String(later(s, *n as u32))
+        }
+        _ => Value::Null,
     }
 }
 
@@ -413,15 +447,22 @@ impl Parser {
             _ => {}
         }
         if self.eat(&Tok::Sym("(")) {
-            let Some((_, f)) = FUNCS.into_iter().find(|(n, _)| *n == name) else {
-                let names: Vec<&str> = FUNCS.iter().map(|(n, _)| *n).collect();
+            let Some((_, f, takes)) = FUNCS.into_iter().find(|(n, ..)| *n == name) else {
+                let names: Vec<&str> = FUNCS.iter().map(|(n, ..)| *n).collect();
                 return fail(
                     col,
                     format!("{} is not a function: {}", quote(&name), names.join(", ")),
                 );
             };
-            let arg = self.or()?;
-            return self.close(Expr::Call(f, Box::new(arg)));
+            let mut args = vec![self.or()?];
+            while self.eat(&Tok::Sym(",")) {
+                args.push(self.or()?);
+            }
+            if args.len() != takes {
+                let values = if takes == 1 { "one value" } else { "two values" };
+                return fail(col, format!("{} takes {values}", quote(&name)));
+            }
+            return self.close(Expr::Call(f, args));
         }
         let mut path = vec![name];
         while self.eat(&Tok::Sym(".")) {
@@ -490,14 +531,17 @@ nothing: ~",
         assert_eq!(err("a b"), "column 3: expected the end, found \"b\"");
         assert_eq!(err("a == b == c"), "column 8: expected the end, found \"==\"");
         assert_eq!(err("(a"), "column 3: expected \")\", found the end");
-        assert_eq!(err("count(a, b)"), "column 8: expected \")\", found \",\"");
+        assert_eq!(err("count(a, b)"), "column 1: \"count\" takes one value");
+        assert_eq!(err("later(a)"), "column 1: \"later\" takes two values");
+        assert_eq!(err("later(a, 1"), "column 11: expected \")\", found the end");
+        assert_eq!(err("later(a, )"), "column 10: expected a value, found \")\"");
         assert_eq!(err("count()"), "column 7: expected a value, found \")\"");
         assert_eq!(err("a.1"), "column 3: expected a name after \".\", found 1");
         assert_eq!(err("a.'b'"), "column 3: expected a name after \".\", found 'b'");
         assert_eq!(err("a ,"), "column 3: expected the end, found \",\"");
         assert_eq!(
             err("explode(a)"),
-            "column 1: \"explode\" is not a function: count, first, last, empty"
+            "column 1: \"explode\" is not a function: count, first, last, empty, later"
         );
         assert_eq!(err("(a or b or (c"), "column 14: expected \")\", found the end");
     }
@@ -584,7 +628,7 @@ nothing: ~",
     }
 
     #[test]
-    fn the_four_functions() {
+    fn the_five_functions() {
         assert_eq!(eval("count(days)"), Value::Number(2.0));
         assert_eq!(eval("count(place)"), Value::Number(2.0));
         assert_eq!(eval("count('Museu')"), Value::Number(5.0));
@@ -599,6 +643,26 @@ nothing: ~",
         assert_eq!(eval("empty(days)"), Value::Bool(false));
         // A function of a computed value.
         assert_eq!(eval("count(count(days))"), Value::Number(0.0));
+    }
+
+    #[test]
+    fn later_is_a_real_stamp_whole_minutes_on_or_null() {
+        let later = |src: &str| eval(&format!("later({src})"));
+        assert_eq!(later("'2026-04-11T23:50', 15"), Value::String("2026-04-12T00:05".into()));
+        assert_eq!(later("'2026-04-11T10:00', 0"), Value::String("2026-04-11T10:00".into()));
+        assert_eq!(later("'2026-04-11T10:00', 527040"), Value::String("2027-04-12T10:00".into()));
+        for bad in [
+            "'2026-04-11T10:00', 527041",
+            "'2026-04-11T10:00', -1",
+            "'2026-04-11T10:00', 1.5",
+            "'2026-04-11T10:00', '15'",
+            "'2026-02-30T10:00', 15",
+            "'10:00', 15",
+            "n, 15",
+        ] {
+            assert_eq!(later(bad), Value::Null, "{bad}");
+        }
+        assert_eq!(parse("later(a.b, c)").unwrap().roots(), ["a", "c"]);
     }
 
     #[test]

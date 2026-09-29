@@ -56,7 +56,16 @@ pub fn parse(text: &str) -> Result<Value> {
         return Ok(Value::Null);
     }
     // Every reader stops on a line that is not blank, so anything left is a line out of place.
-    let value = doc.node(0)?;
+    // A document that is one flow collection, as JSON is, may wrap over every line.
+    let (_, head) = doc.head();
+    let value = if head.starts_with(['[', '{']) {
+        let line = doc.line_no();
+        doc.i += 1;
+        scalar(&doc.join_flow(&head, line)?, line)?
+    } else {
+        doc.node(0)?
+    };
+    doc.skip_blanks()?;
     if !doc.eof() {
         return err("content left over after the document", doc.line_no());
     }
@@ -919,6 +928,17 @@ places:
         let fixed = key(&v, &["fixed"]).as_list().unwrap();
         assert_eq!(fixed.len(), 2);
         assert_eq!(fixed[1].as_list().unwrap()[0], s("20:00"));
+    }
+
+    #[test]
+    fn a_document_that_is_one_flow_collection_reads_as_json_does() {
+        let v = read("{\"daily\": {\"max\": [21.5,\n  -3, null]},\n \"note\": \"Sunny\"}\n\n");
+        assert_eq!(key(&v, &["daily", "max"]).as_list().unwrap()[1], Value::Number(-3.0));
+        assert_eq!(key(&v, &["note"]), &s("Sunny"));
+        assert_eq!(read("[1]").as_list().unwrap().len(), 1);
+        assert_eq!(refused("[1]\nx: 2").message, "content left over after the document");
+        assert_eq!(refused("[1] x").message, "unexpected \"x\" after a flow collection");
+        assert!(refused("[1]\n---\n[2]").message.starts_with("a second document starts here"));
     }
 
     #[test]

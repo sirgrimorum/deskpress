@@ -13,6 +13,7 @@ pub use keymap::Keymap;
 use patterns::{
     is_date, is_id, is_language, is_real_date, is_slug, is_stamp, is_time, is_timezone,
 };
+pub use theme::TOKENS as COLOR_TOKENS;
 
 use crate::value::{Map, Value, quote, show, text, truthy};
 
@@ -386,7 +387,7 @@ impl Checker<'_> {
                 }
                 self.decision(&at, &date, read("decision"));
             }
-            let known = ["date", "title", "who", "blocks", "fixed", "options", "decision"];
+            let known = ["date", "title", "who", "zone", "blocks", "fixed", "options", "decision"];
             self.free_keys(&at, day, &known, "day");
         }
 
@@ -617,11 +618,34 @@ impl Checker<'_> {
             if !truthy(read("title")) {
                 self.r.error(&at, "a document needs a title");
             }
-            if !truthy(read("file")) {
+            let file = text(read("file"));
+            if file.is_empty() {
                 self.r.error(
                     &at,
                     "a document needs a file: it is the thing somebody at a counter is asking for",
                 );
+            } else if patterns::leaves(&file) {
+                self.r.error(
+                    format!("{at}.file"),
+                    format!("{} leaves the pack folder", show(read("file"))),
+                );
+            }
+            match read("call") {
+                Some(Value::Map(numbers)) => {
+                    for (label, number) in numbers.iter() {
+                        if !patterns::is_phone(&text(Some(number))) {
+                            let at = format!("{at}.call.{label}");
+                            self.r.error(
+                                at,
+                                format!("{} is not a number to dial", show(Some(number))),
+                            );
+                        }
+                    }
+                }
+                Some(_) => {
+                    self.r.error(format!("{at}.call"), "has to be a mapping of label to number")
+                }
+                None => {}
             }
             self.person(&format!("{at}.for"), &text(read("for")));
             if read("fields").is_some_and(|f| f.as_map().is_none()) {
@@ -838,7 +862,8 @@ mod tests {
         let manifest = yaml(include_str!("../../../../examples/one-day/pack.yaml"));
         let manifest = crate::template::extend(manifest).unwrap();
         let content = yaml(include_str!("../../../../examples/one-day/content.yaml"));
-        assert_eq!(said(&validate(&manifest, &content, None)), "");
+        let theme = yaml(include_str!("../../../../examples/one-day/theme.yaml"));
+        assert_eq!(said(&validate(&manifest, &content, Some(&theme))), "");
     }
 
     #[test]
@@ -1011,6 +1036,7 @@ days:
       - ['10:00', 'x', {type: visit, place: azulejo, guide: rita, for: [rita], until: '11:00', locked: true}]
       - ['12:00', 'x', {type: zzz, place: nowhere, guide: nobody, for: nobody, until: '11:00', locked: 'yes'}]
       - ['13:00', 'x', {type: meal, until: noon, for: [rita, ~]}]
+      - ['23:00', 'x', {until: '01:00', until_zone: Asia/Tokyo}]
 ";
         let s = said(&with("", content, None));
         let at = "days.2026-04-11.blocks[1]";
@@ -1026,7 +1052,7 @@ days:
         ] {
             assert!(s.contains(&needle), "wanted {needle:?} in:\n{s}");
         }
-        assert!(!s.contains("blocks[0]"), "{s}");
+        assert!(!s.contains("blocks[0]") && !s.contains("blocks[3]"), "{s}");
         says(
             "days:\n  - {date: 2026-04-11, title: x, blocks: [['10:00', 'x', {place: azulejo}]]}",
             "this pack has no places, so \"azulejo\" points at nothing",
@@ -1201,7 +1227,7 @@ days:
 
     #[test]
     fn a_document_needs_an_id_a_title_and_a_file() {
-        let doc = "{id: passport_rita, title: Passport, file: files/passport.pdf, for: rita, fields: {number: X1}}";
+        let doc = "{id: passport_rita, title: Passport, file: files/passport.pdf, for: rita, fields: {number: X1}, call: {Help: '+1 (555) 010-0100', Emergency: '112'}}";
         let people = "people: [{id: rita, name: Rita}]\n";
         clean("", &day_and(&format!("{people}documents:\n  - {doc}\n")), None);
         let content = day_and(&format!(
@@ -1211,6 +1237,8 @@ days:
   - text
   - {{id: Bad, for: nobody, fields: x}}
   - {{}}
+  - {{id: out, title: T, file: ../x.pdf, call: {{Desk: '12', Home: 'ask', Plus: '+', Deep: [1]}}}}
+  - {{id: flat, title: T, file: x.pdf, call: '112'}}
 "
         ));
         let s = said(&with("", &content, None));
@@ -1223,6 +1251,12 @@ days:
             "documents[3].for: \"nobody\" is not one of the people in this pack",
             "documents[3].fields: has to be a mapping of label to value",
             "documents[4]: a document needs an id",
+            "documents[5].file: \"../x.pdf\" leaves the pack folder",
+            "documents[5].call.Desk: \"12\" is not a number to dial",
+            "documents[5].call.Home: \"ask\" is not a number to dial",
+            "documents[5].call.Plus: \"+\" is not a number to dial",
+            "documents[5].call.Deep: [1] is not a number to dial",
+            "documents[6].call: has to be a mapping of label to number",
         ] {
             assert!(s.contains(needle), "wanted {needle:?} in:\n{s}");
         }
@@ -1339,8 +1373,7 @@ days:
 
     #[test]
     fn the_definition_is_part_of_the_report() {
-        let r = with("modules: {weather: {}, climate: {sync: {}}}\n", &day_and(""), None);
+        let r = with("modules: {weather: {}}\n", &day_and(""), None);
         assert_eq!(r.errors[0].at, "modules.weather");
-        assert_eq!(r.warnings[0].at, "modules.climate.sync");
     }
 }

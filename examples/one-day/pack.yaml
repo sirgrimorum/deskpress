@@ -1,4 +1,5 @@
-# The smallest pack worth reading: one day, two places, two people, one alert.
+# The smallest pack worth reading: one day, the choice for the next, two places, two people,
+# one alert.
 # Copy the folder, change the content, load it. Nothing here needs the shell to be changed.
 # `extends: travel` brings the screens and the rules of a trip, so this file only says what is
 # particular to this pack. See templates/travel/pack.yaml for what it gets.
@@ -9,6 +10,7 @@ pack:
   language: en
   timezone: Europe/Lisbon
   content: content.yaml
+  theme: theme.yaml
   extends: travel
 
 conventions:

@@ -57,6 +57,13 @@ impl<'a> Keymap<'a> {
         steps.try_fold(first, |node, step| node.get(step))
     }
 
+    /// The top level key of the content that holds a root: the first step of its keymap path.
+    pub fn root_key(&self, canonical: &str) -> String {
+        let path = self.section("root").and_then(|r| r.get(canonical)).map(|p| text(Some(p)));
+        let path = path.filter(|p| !p.is_empty()).unwrap_or_else(|| canonical.to_owned());
+        path.split('.').next().unwrap_or_default().to_owned()
+    }
+
     /// `obj` with the pack's own key names turned back into canonical ones, so a module hands
     /// every pack the same shape. Anything that is not a mapping comes back as it is.
     pub fn canon(&self, obj: &Value, kind: &str) -> Value {

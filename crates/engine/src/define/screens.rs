@@ -6,7 +6,7 @@ use crate::validate::patterns::is_id;
 use crate::value::{Map, Value, quote, text};
 
 /// The components a layout can use. The set grows only with a shell release (decision 0005).
-pub const COMPONENTS: [&str; 12] = [
+pub const COMPONENTS: [&str; 13] = [
     "BigValue",
     "Label",
     "Card",
@@ -18,6 +18,7 @@ pub const COMPONENTS: [&str; 12] = [
     "Segmented",
     "Missing",
     "Auto",
+    "Group",
     "Screen",
 ];
 
@@ -45,6 +46,8 @@ pub struct Component {
     pub props: Vec<(String, Prop)>,
     /// Event to action: `on_tap: pick` is `("tap", "pick")`.
     pub on: Vec<(String, String)>,
+    /// What a Group holds, drawn inside it.
+    pub children: Vec<Component>,
 }
 
 /// A prop: an expression, or a text whose `{expr}` pieces are filled in.
@@ -93,8 +96,8 @@ pub enum Does {
     Open(String, Vec<(String, Expr)>),
     Back,
     Home,
-    /// A module's action, like `calendar.sync`, for the host to run.
-    Command(String),
+    /// A module's action, like `calendar.sync`, for the host to run, with the values it takes.
+    Command(String, Vec<(String, Expr)>),
 }
 
 const EFFECT: &str = "has to be an effect: back, home, a module action like calendar.sync, or {set, to}, {store, value}, {open, with} or {do}";
@@ -138,10 +141,7 @@ impl Definer {
                 return s;
             }
         };
-        for key in m.keys().filter(|k| !["state", "actions", "layout"].contains(k)) {
-            let message = format!("{} is not part of a screen: state, actions, layout", quote(key));
-            self.r.error(format!("{at}.{key}"), message);
-        }
+        self.only(at, m, "a screen", &["state", "actions", "layout"]);
         let known = self.known.len();
         self.known.push("params".to_owned());
         s.state = self.state(at, m.get("state"));
@@ -238,13 +238,9 @@ impl Definer {
         let with = match main {
             "set" => "to",
             "store" => "value",
-            "open" => "with",
-            _ => "do",
+            _ => "with",
         };
-        for key in m.keys().filter(|k| ![main, with, "if"].contains(k)) {
-            let message = format!("{} is not part of this effect: {main}, {with}, if", quote(key));
-            self.r.error(format!("{at}.{key}"), message);
-        }
+        self.only(at, m, "this effect", &[main, with, "if"]);
         let when = m.get("if").map(|w| self.expr(&format!("{at}.if"), w));
         let value = || m.get(with).unwrap_or(&Value::Null);
         let does = match main {
@@ -278,7 +274,20 @@ impl Definer {
                 let params = self.params(&format!("{at}.with"), m.get("with"));
                 params.filter(|_| found).map(|p| Does::Open(screen, p))
             }
-            _ => self.does(&format!("{at}.do"), &text(m.get("do"))),
+            _ => {
+                let does = self.does(&format!("{at}.do"), &text(m.get("do")));
+                match does {
+                    Some(Does::Command(name, _)) => {
+                        let args = self.params(&format!("{at}.with"), m.get("with"));
+                        args.map(|a| Does::Command(name, a))
+                    }
+                    Some(_) if m.get("with").is_some() => {
+                        self.r.error(format!("{at}.with"), "only a module action takes values");
+                        None
+                    }
+                    does => does,
+                }
+            }
         };
         if when.as_ref().is_some_and(Option::is_none) {
             return None;
@@ -292,7 +301,7 @@ impl Definer {
             None if word == "back" => Some(Does::Back),
             None if word == "home" => Some(Does::Home),
             Some((module, action)) if is_id(module) && is_id(action) => {
-                Some(Does::Command(word.to_owned()))
+                Some(Does::Command(word.to_owned(), Vec::new()))
             }
             _ => {
                 let message = format!(
@@ -404,14 +413,16 @@ impl Definer {
             when: None,
             props: Vec::new(),
             on: Vec::new(),
+            children: Vec::new(),
         };
+        let group = kind == "Group";
         let each = props.get("each");
         if let Some(each) = each {
             out.each = self.expr(&format!("{at}.each"), each);
             ok &= out.each.is_some();
             self.known.push("item".to_owned());
         }
-        for (key, v) in props.iter().filter(|(k, _)| *k != "each") {
+        for (key, v) in props.iter().filter(|(k, _)| *k != "each" && !(group && *k == "layout")) {
             let here = format!("{at}.{key}");
             if key == "if" {
                 out.when = self.expr(&here, v);
@@ -441,6 +452,24 @@ impl Definer {
                 };
                 ok &= prop.is_some();
                 out.props.extend(prop.map(|p| (key.to_owned(), p)));
+            }
+        }
+        if group {
+            // Inside, a repeating Group's item is also `group`, since a child's own `each` hides `item`.
+            let named = each.is_some();
+            if named {
+                self.known.push("group".to_owned());
+            }
+            let layout = props.get("layout").filter(|l| l.as_list().is_some_and(|l| !l.is_empty()));
+            if layout.is_none() {
+                self.r.error(format!("{at}.layout"), "has to be a list of the components it holds");
+                ok = false;
+            }
+            let before = self.r.errors.len();
+            out.children = self.layout(&at, layout, screen);
+            ok &= self.r.errors.len() == before;
+            if named {
+                self.known.pop();
             }
         }
         if each.is_some() {
@@ -530,12 +559,12 @@ mod tests {
             "screens.a.actions.go: has to be a list of effects, run in order"
         );
         let d = def(
-            "screens: {a: {actions: {go: [back, home, calendar.sync, {do: map.open, if: $arg}]}}}",
+            "screens: {a: {actions: {go: [back, home, calendar.sync, {do: map.open, with: {to: $arg}, if: $arg}]}}}",
         );
         let effects = d.screens[0].1.action("go").unwrap();
         let does: Vec<&Does> = effects.iter().map(|e| &e.does).collect();
-        let sync = Does::Command("calendar.sync".into());
-        let map = Does::Command("map.open".into());
+        let sync = Does::Command("calendar.sync".into(), vec![]);
+        let map = Does::Command("map.open".into(), vec![("to".into(), e("$arg"))]);
         assert_eq!(does, [&Does::Back, &Does::Home, &sync, &map]);
         assert_eq!(effects[3].when, Some(e("$arg")));
         assert_eq!(d.screens[0].1.action("stay"), None);
@@ -559,8 +588,16 @@ mod tests {
             format!("screens.a.actions.go[0].do: {}", word("forward"))
         );
         assert_eq!(
+            effect("{do: back, with: {a: 1}}"),
+            "screens.a.actions.go[0].with: only a module action takes values"
+        );
+        assert_eq!(
+            effect("{do: map.open, with: [1]}"),
+            "screens.a.actions.go[0].with: has to be a mapping of name to expression, read as params.name"
+        );
+        assert_eq!(
             effect("{do: back, to: 1}"),
-            "screens.a.actions.go[0].to: \"to\" is not part of this effect: do, do, if"
+            "screens.a.actions.go[0].to: \"to\" is not part of this effect: do, with, if"
         );
         assert_eq!(
             effect("{set: n, to: 1, value: 2}"),
@@ -657,8 +694,14 @@ mod tests {
             "screens.a.layout[0].Label: has to be a mapping of prop to expression"
         );
         let d = def("screens:\n  a:\n    layout:\n      - Label:\n");
-        let label =
-            Component { kind: "Label".into(), each: None, when: None, props: vec![], on: vec![] };
+        let label = Component {
+            kind: "Label".into(),
+            each: None,
+            when: None,
+            props: vec![],
+            on: vec![],
+            children: vec![],
+        };
         assert_eq!(d.screens[0].1.layout, [label]);
     }
 
@@ -701,8 +744,55 @@ mod tests {
             when: Some(e("item")),
             props: vec![("label".into(), label), ("kid".into(), Prop::Expr(e("true")))],
             on: vec![("tap".into(), "go".into())],
+            children: vec![],
         };
         assert_eq!(d.screens[0].1.layout, [button]);
+    }
+
+    #[test]
+    fn a_group_holds_a_layout_and_calls_its_item_group_inside() {
+        let known = "Known: now, content, ui, store, params";
+        let empty = "screens.a.layout[0].Group.layout: has to be a list of the components it holds";
+        for props in ["{title: \"'x'\"}", "{layout: []}", "{layout: x}"] {
+            assert_eq!(layout(&format!("[{{Group: {props}}}]")), empty);
+        }
+        assert_eq!(
+            layout("[{Group: {layout: [{Label: {text: group}}, {Nope: {}}]}}]"),
+            format!(
+                "screens.a.layout[0].Group.layout[0].Label.text: column 1: \"group\" is not a name here. {known}\n\
+                 screens.a.layout[0].Group.layout[1].Nope: \"Nope\" is not a component: {}",
+                COMPONENTS.join(", ")
+            )
+        );
+        // `group` is only known inside the Group that repeats.
+        assert_eq!(
+            layout(
+                "[{Group: {each: content, layout: [{Label: {text: group}}]}}, {Label: {text: group}}]"
+            ),
+            format!(
+                "screens.a.layout[1].Label.text: column 1: \"group\" is not a name here. {known}"
+            )
+        );
+        let d = def(
+            "screens: {a: {actions: {go: [back]}, layout: [{Group: {each: content, title: item, layout: [{Row: {each: group, text: item, on_tap: go}}]}}]}}",
+        );
+        let row = Component {
+            kind: "Row".into(),
+            each: Some(e("group")),
+            when: None,
+            props: vec![("text".into(), Prop::Expr(e("item")))],
+            on: vec![("tap".into(), "go".into())],
+            children: vec![],
+        };
+        let group = Component {
+            kind: "Group".into(),
+            each: Some(e("content")),
+            when: None,
+            props: vec![("title".into(), Prop::Expr(e("item")))],
+            on: vec![],
+            children: vec![row],
+        };
+        assert_eq!(d.screens[0].1.layout, [group]);
     }
 
     #[test]

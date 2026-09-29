@@ -2,6 +2,16 @@ people:
   - {id: rita,  name: Rita,  adult: true}
   - {id: tomas, name: Tomas, adult: false}
 
+documents:
+  - id: insurance_rita
+    title: Travel insurance
+    for: rita
+    file: files/insurance-rita.pdf
+    call: {Assistance: "+1 555 0100", Emergency: "112"}
+    fields:
+      Certificate: EX-0001
+      Cover: "Medical, repatriation included"
+
 days:
   - date: 2026-04-11
     title: The tile museum and the late ferry
@@ -16,7 +26,24 @@ days:
       - ["13:15", "Lunch in the museum cloister. It is the cheap one, not the famous one.",
          {type: meal}]
       - ["18:40", "Ferry from Cais do Sodre. Last one that connects is 19:10, do not wait for it.",
-         {type: transfer, place: cais_do_sodre, locked: true}]
+         {type: transfer, place: cais_do_sodre, locked: true, until: "19:15"}]
+  # The next day is still open: two plans, asked the evening before.
+  - date: 2026-04-12
+    title: Sintra or the beach
+    who: [rita, tomas]
+    fixed:
+      - ["09:00", "Breakfast at the guesthouse.", {type: meal}]
+    options:
+      - id: sintra
+        name: Sintra
+        recommended: true
+        why: "The palaces are quieter before the weekend."
+        blocks: [["10:00", "Train to Sintra from Rossio.", {type: train}]]
+      - id: beach
+        name: The beach
+        why: "Warm enough for the sand, not for the water."
+        blocks: [["10:30", "Train to Cascais from Cais do Sodre.", {type: train}]]
+    decision: {when: 2026-04-11, at: "20:00", question: "Sintra or the beach tomorrow?"}
 
 places:
   azulejo:
@@ -40,6 +67,14 @@ places:
         name: The small cloister
         what: "Manueline arches, and the quietest bench in the building."
         for_kids: "Count the lions. They are all different on purpose."
+    # What the child the block names as guide tells the family.
+    guide:
+      facts:
+        - "Azulejo comes from an Arabic word for a small polished stone."
+        - "The building was a convent five hundred years ago."
+      question: "Why did people put tiles on the outside of houses?"
+      answer: "They keep the walls cool and dry, and they are easy to clean."
+      challenge: "Find a tile with a bird and show it to everybody."
   cais_do_sodre:
     name: Cais do Sodre ferry terminal
     kind: ferry terminal

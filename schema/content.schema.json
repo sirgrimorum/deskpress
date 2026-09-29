@@ -28,6 +28,29 @@
       "type": "array",
       "items": { "$ref": "#/$defs/document" }
     },
+    "climate": {
+      "type": "object",
+      "properties": {
+        "units": { "enum": ["metric", "imperial"] },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "place": { "$ref": "#/$defs/id", "description": "Missing: the whole pack." },
+              "month": { "type": "integer", "minimum": 1, "maximum": 12 },
+              "date": { "$ref": "#/$defs/date", "description": "A date beats a month." },
+              "high": { "type": "number" },
+              "low": { "type": "number" },
+              "rain": { "type": "number", "minimum": 0, "maximum": 100 },
+              "sunrise": { "$ref": "#/$defs/time" },
+              "sunset": { "$ref": "#/$defs/time" },
+              "summary": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
     "sheets": {
       "type": "object",
       "description": "Anything else. Any tree here becomes a sheet: bookings, phrases, budget, packing lists, contacts. With no sheets key at all, every root branch the shell does not know becomes a sheet.",
@@ -60,9 +83,14 @@
       "properties": {
         "type": { "$ref": "#/$defs/moment_type" },
         "place": { "$ref": "#/$defs/id" },
-        "for": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+        "for": {
+          "description": "Who this block is for. It is left out of the day while somebody else holds the phone.",
+          "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "array", "items": { "$ref": "#/$defs/id" } }]
+        },
         "guide": { "$ref": "#/$defs/id" },
         "until": { "$ref": "#/$defs/time" },
+        "zone": { "type": "string", "pattern": "^[A-Za-z_]+/[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)?$|^UTC$", "description": "IANA. The clock of this block's time. The day's zone if missing." },
+        "until_zone": { "type": "string", "pattern": "^[A-Za-z_]+/[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)?$|^UTC$", "description": "IANA. The clock of until, like a flight's arrival. The block's zone if missing." },
         "locked": { "type": "boolean", "description": "An hour that cannot move: a booked train, a timed entry." },
         "language": { "type": "string", "description": "Which branch of the phrase sheets applies here." }
       },
@@ -75,6 +103,7 @@
         "date": { "$ref": "#/$defs/date" },
         "title": { "type": "string", "minLength": 1 },
         "who": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+        "zone": { "type": "string", "pattern": "^[A-Za-z_]+/[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)?$|^UTC$", "description": "IANA. The day's own clock: today and the block times are read there. The pack's timezone if missing." },
         "blocks": { "type": "array", "items": { "$ref": "#/$defs/block" } },
         "fixed": {
           "description": "On a day with options: the blocks that happen whatever gets chosen. The only ones written to the calendar up front.",
@@ -126,7 +155,8 @@
           "description": "Other dates whose options depend on this answer.",
           "type": "array",
           "items": { "$ref": "#/$defs/date" }
-        }
+        },
+        "question": { "type": "string", "description": "What the choose screen asks." }
       },
       "additionalProperties": true
     },
@@ -135,6 +165,7 @@
       "properties": {
         "name": { "type": "string", "minLength": 1, "description": "If absent the shell uses the id with underscores turned into spaces, and the validator warns." },
         "kind": { "type": "string", "description": "Free prose. Never used to choose a view." },
+        "address": { "type": "string", "description": "The street address. A calendar event at this place gets it after the name, so the calendar can offer the route." },
         "at": {
           "description": "Coordinates and radius. Present means the shell can build a geofence for this place.",
           "type": "object",
@@ -142,11 +173,22 @@
           "properties": {
             "lat": { "type": "number", "minimum": -90, "maximum": 90 },
             "lon": { "type": "number", "minimum": -180, "maximum": 180 },
-            "radius_m": { "type": "number", "minimum": 25, "maximum": 20000, "default": 150 }
+            "radius_m": { "type": "number", "minimum": 25, "maximum": 20000, "default": 100 }
           },
           "additionalProperties": false
         },
         "safe": { "type": "boolean", "description": "A kid session may run here." },
+        "guide": {
+          "description": "The script for the child a block here names as its guide. Every key is optional.",
+          "type": "object",
+          "properties": {
+            "facts": { "type": "array", "items": { "type": "string" }, "description": "What to tell the family." },
+            "question": { "type": "string" },
+            "answer": { "type": "string", "description": "Shown after a tap." },
+            "challenge": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
         "during": {
           "description": "The content of a moment at this place. Unknown keys inside become cards.",
           "type": "object",
@@ -222,6 +264,11 @@
           "description": "Label -> value. Shown on the card, in this order.",
           "type": "object",
           "additionalProperties": { "type": ["string", "number"] }
+        },
+        "call": {
+          "description": "Label -> number. Buttons that come before the file.",
+          "type": "object",
+          "additionalProperties": { "type": "string", "pattern": "^[+]?[0-9 ().-]+$" }
         }
       },
       "additionalProperties": true

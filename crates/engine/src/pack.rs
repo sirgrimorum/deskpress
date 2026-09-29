@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 
 use crate::template;
+use crate::validate::patterns::leaves;
 use crate::value::{Map, Value, quote, text, truthy};
 use crate::yaml;
 
@@ -97,13 +98,10 @@ fn named(
     read: &mut impl FnMut(&str) -> Result<String, String>,
 ) -> Result<Value, String> {
     let file = text(Some(file));
-    let path = file.replace('\\', "/");
-    let drive = path.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
-        && path.as_bytes().get(1) == Some(&b':');
-    if path.is_empty() {
+    if file.is_empty() {
         return Err(format!("{at}: names no file"));
     }
-    if path.starts_with('/') || drive || path.split('/').any(|s| s == "..") {
+    if leaves(&file) {
         return Err(format!(
             "{at}: {} leaves the pack folder. Every file a pack names lives inside it",
             quote(&file)

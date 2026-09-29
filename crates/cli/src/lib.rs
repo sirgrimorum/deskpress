@@ -3,7 +3,7 @@
 use std::io::Write;
 use std::path::Path;
 
-use deskpress_engine::engine::{Engine, Nav, View, World};
+use deskpress_engine::engine::{Engine, Nav, Region, View, World};
 use deskpress_engine::tree::Tree;
 use deskpress_engine::value::{Map, Value, show};
 use deskpress_engine::{pack, validate, yaml};
@@ -17,7 +17,8 @@ commands:
   version                                    print the screen tree version
 
 <time> is local to the pack, YYYY-MM-DDTHH:MM. [world] is any of --holder <person id>,
---inside <place id> and --store <key>=<value>, the last two once per value. An action is a name,
+--inside <place id> and --store <key>=<value>, the last two once per value. Any --inside means
+the device is located; --inside '' says it is inside none. An action is a name,
 or name=<value> to send it a value. A value is YAML, like 3, true, b or [a, b].";
 
 /// Runs one command and returns the exit code.
@@ -129,7 +130,12 @@ fn screen(target: &str, args: &[String], act: bool) -> (u8, String, String) {
             world.store.set(k, v.clone());
             stored.set(k, v.clone());
         }
-        commands.extend(out.commands.into_iter().map(Value::String));
+        commands.extend(out.commands.into_iter().map(|c| {
+            Value::Map(Map(vec![
+                ("name".to_owned(), Value::String(c.name)),
+                ("args".to_owned(), Value::Map(c.args)),
+            ]))
+        }));
         view = out.view;
     }
     let effects = act.then(|| {
@@ -157,7 +163,10 @@ fn world(args: &[String]) -> Result<(World, Vec<String>), String> {
         match arg.as_str() {
             "--at" => world.now.clone_from(v),
             "--holder" => world.holder.clone_from(v),
-            "--inside" => world.inside.push(v.clone()),
+            "--inside" => {
+                world.located = true;
+                world.inside.extend(Some(v.clone()).filter(|v| !v.is_empty()));
+            }
             "--store" => {
                 let Some((key, v)) = v.split_once('=') else {
                     return Err(format!("--store takes key=value, not {v}"));
@@ -179,26 +188,42 @@ fn value(src: &str) -> Value {
     doc.and_then(|d| d.get("v").cloned()).unwrap_or_else(|| Value::String(src.to_owned()))
 }
 
+/// A node as JSON, with the nodes it holds.
+fn node(n: deskpress_engine::tree::Node) -> Value {
+    let on = n.on.into_iter().map(|(k, v)| (k, Value::String(v)));
+    Value::Map(Map(vec![
+        ("kind".to_owned(), Value::String(n.kind)),
+        ("props".to_owned(), Value::Map(Map(n.props))),
+        ("on".to_owned(), Value::Map(Map(on.collect()))),
+        ("children".to_owned(), Value::List(n.children.into_iter().map(node).collect())),
+    ]))
+}
+
+/// A region as JSON.
+fn region(r: Region) -> Value {
+    let number = |k: &str, n: f64| (k.to_owned(), Value::Number(n));
+    Value::Map(Map(vec![
+        ("id".to_owned(), Value::String(r.id)),
+        number("lat", r.lat),
+        number("lon", r.lon),
+        number("radius_m", r.radius_m),
+    ]))
+}
+
 /// The view as the JSON a renderer would get, with what the actions did after it.
 fn json(view: View, effects: Option<Map>) -> Value {
-    let Tree { version, screen, nodes } = view.tree;
+    let Tree { version, screen, nodes, theme, kid } = view.tree;
     let text = |s: String| Value::String(s);
-    let node = |n: deskpress_engine::tree::Node| {
-        let on = n.on.into_iter().map(|(k, v)| (k, text(v)));
-        Value::Map(Map(vec![
-            ("kind".to_owned(), text(n.kind)),
-            ("props".to_owned(), Value::Map(Map(n.props))),
-            ("on".to_owned(), Value::Map(Map(on.collect()))),
-        ]))
-    };
     let watch = Map(vec![
         ("until".to_owned(), text(view.watch.until)),
-        ("regions".to_owned(), Value::List(view.watch.regions.into_iter().map(text).collect())),
+        ("regions".to_owned(), Value::List(view.watch.regions.into_iter().map(region).collect())),
     ]);
     let mut out = Map(vec![
         ("version".to_owned(), Value::Number(f64::from(version))),
         ("screen".to_owned(), text(screen)),
         ("nodes".to_owned(), Value::List(nodes.into_iter().map(node).collect())),
+        ("theme".to_owned(), text(theme)),
+        ("kid".to_owned(), Value::Bool(kid)),
         ("watch".to_owned(), Value::Map(watch)),
     ]);
     out.0.extend(effects.map(|e| e.0).unwrap_or_default());
@@ -481,7 +506,7 @@ Rooted: loads. 0 warnings.
 
     #[test]
     fn version_prints_the_screen_tree_version() {
-        assert_eq!(call(&["version"]), (0, "tree 2\n".to_owned(), String::new()));
+        assert_eq!(call(&["version"]), (0, "tree 4\n".to_owned(), String::new()));
     }
 
     const MACHINE: &str = "modules:
@@ -541,9 +566,13 @@ rules:
     #[test]
     fn screen_prints_the_tree_and_its_watch_as_json() {
         let world =
-            ["--at", "2026-04-11T10:30", "--store", "x=1", "--holder", "rita", "--inside", "home"];
-        let (code, out, err) = at(&machine("screen"), "screen", &world);
-        let expected = r#"{"version": 2, "screen": "a", "nodes": [{"kind": "Label", "props": {"text": "x  1"}, "on": {"tap": "go"}}], "watch": {"until": "2026-04-12T00:00", "regions": []}}"#;
+            ["--at", "2026-04-11T10:30", "--store", "x=1", "--holder", "rita", "--inside", ""];
+        let content = format!("{DAY}places:\n  home: {{at: {{lat: 1, lon: 2}}}}\n");
+        let modules = MACHINE.replace("  timeline:\n", "  timeline:\n  places:\n");
+        let pack = manifest(&format!("  name: M\n{modules}"));
+        let dir = folder("screen", &[("pack.yaml", &pack), ("content.yaml", &content)]);
+        let (code, out, err) = at(&dir, "screen", &world);
+        let expected = r#"{"version": 4, "screen": "a", "nodes": [{"kind": "Label", "props": {"text": "x  1"}, "on": {"tap": "go"}, "children": []}], "theme": "", "kid": false, "watch": {"until": "2026-04-12T00:00", "regions": [{"id": "home", "lat": 1, "lon": 2, "radius_m": 100}]}}"#;
         assert_eq!((code, out.as_str(), err.as_str()), (0, format!("{expected}\n").as_str(), ""));
     }
 
@@ -553,7 +582,7 @@ rules:
         let (code, out, _) =
             at(&dir, "act", &["--at", "2026-04-11T10:30", "go=[a, b]", "go=hello"]);
         assert_eq!(code, 0);
-        let tail = r#""props": {"text": "x hello "}, "on": {"tap": "go"}}], "watch": {"until": "2026-04-12T00:00", "regions": []}, "store": {"seen.2026-04-11": "hello"}, "commands": ["map.open", "map.open"]}"#;
+        let tail = r#""props": {"text": "x hello "}, "on": {"tap": "go"}, "children": []}], "theme": "", "kid": false, "watch": {"until": "2026-04-12T00:00", "regions": []}, "store": {"seen.2026-04-11": "hello"}, "commands": [{"name": "map.open", "args": {}}, {"name": "map.open", "args": {}}]}"#;
         assert!(out.ends_with(&format!("{tail}\n")), "{out}");
         // What YAML cannot read goes as text.
         let (_, out, _) = at(&dir, "act", &["--at", "2026-04-11T10:30", "go={"]);

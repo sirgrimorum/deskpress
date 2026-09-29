@@ -2,24 +2,29 @@
 //! parsed expressions, so a call to the engine never parses.
 
 mod screens;
+mod sync;
 
 pub use screens::{COMPONENTS, Component, Does, Effect, Piece, Prop, Screen, fill};
+pub(crate) use sync::key;
+pub use sync::{FLOOR, Fetch};
 
 use crate::expr::{Expr, Op, column_of, parse};
 use crate::validate::Report;
 use crate::validate::patterns::{is_id, is_real_date, is_stamp, is_time};
-use crate::value::{Value, quote, text};
+use crate::value::{Map, Value, quote, text};
 
 /// The modules in the order they run, the content root each reads unless told otherwise, and the
 /// names it exposes. A module reads the names the ones before it exposed.
-pub const MODULES: [(&str, &str, &[&str]); 7] = [
+/// `sheets` comes last: it hands out what the modules before it did not read.
+pub const MODULES: [(&str, &str, &[&str]); 8] = [
     ("timeline", "days", &["day", "block", "next", "days", "tomorrow"]),
     ("choices", "days", &["decision"]),
     ("people", "people", &["holder", "people"]),
-    ("places", "places", &["place", "here"]),
+    ("places", "places", &["place", "here", "away"]),
     ("alerts", "alerts", &["alerts"]),
     ("documents", "documents", &["documents"]),
     ("climate", "climate", &["weather"]),
+    ("sheets", "sheets", &["sheets"]),
 ];
 
 /// The names every expression can read.
@@ -28,8 +33,9 @@ pub const BASE: [&str; 4] = ["now", "content", "ui", "store"];
 #[derive(Debug, Clone, PartialEq)]
 pub struct Module {
     pub name: &'static str,
-    /// The content root it reads, through the keymap.
-    pub from: String,
+    /// The content root it reads, through the keymap; None for a module fed by its sync alone.
+    pub from: Option<String>,
+    pub sync: Option<Fetch>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -40,11 +46,13 @@ pub struct Rule {
 }
 
 /// An instant some expression compares the clock with: `HH:MM` (today) or `YYYY-MM-DDTHH:MM`.
-/// `later` means the answer changes the minute after it, as with `now.time > '11:15'`.
+/// `later` means the answer changes the minute after it, as with `now.time > '11:15'`. `day`
+/// means the time is on today's day's own clock, `day.time`, rather than the pack's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Clock {
     pub at: String,
     pub later: bool,
+    pub day: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -105,21 +113,24 @@ impl Definer {
                 continue;
             };
             let at = format!("modules.{name}");
-            let mut from = root.to_owned();
+            let (mut from, mut sync, mut own) = (root.to_owned(), None, false);
             match config {
                 Value::Null => {}
                 Value::Map(settings) => {
                     for (key, v) in settings.iter() {
                         match (key, v) {
-                            ("from", Value::String(s)) if !s.is_empty() => from = s.clone(),
+                            ("from", Value::String(s)) if !s.is_empty() => {
+                                from = s.clone();
+                                own = true;
+                            }
                             ("from", _) => self.r.error(
                                 format!("{at}.from"),
                                 format!("names the content root this module reads, like {root}"),
                             ),
-                            ("sync", _) => self.r.warn(
-                                format!("{at}.sync"),
-                                "syncing lands in phase 7. Until then this module reads the pack",
-                            ),
+                            ("sync", _) if name != "climate" => {
+                                self.r.error(format!("{at}.sync"), "only climate syncs so far")
+                            }
+                            ("sync", v) => sync = self.sync(&format!("{at}.sync"), v),
                             _ => self.r.error(
                                 format!("{at}.{key}"),
                                 format!("{} is not a module setting: from, sync", quote(key)),
@@ -130,7 +141,9 @@ impl Definer {
                 _ => self.r.error(&at, "has to be a mapping of settings, or nothing"),
             }
             self.known.extend(exposed.iter().map(|n| (*n).to_owned()));
-            self.def.modules.push(Module { name, from });
+            // With a sync and no from, the pack's data is not read at all.
+            let reads = own || config.get("sync").is_none();
+            self.def.modules.push(Module { name, from: reads.then_some(from), sync });
         }
     }
 
@@ -182,10 +195,7 @@ impl Definer {
                 self.r.error(&at, "has to be a mapping: {when: expression, screen: name}");
                 continue;
             };
-            for key in rule.keys().filter(|k| !["when", "screen"].contains(k)) {
-                let message = format!("{} is not part of a rule: when, screen", quote(key));
-                self.r.error(format!("{at}.{key}"), message);
-            }
+            self.only(&at, rule, "a rule", &["when", "screen"]);
             let screen = text(rule.get("screen"));
             if screen.is_empty() {
                 self.r.error(&at, "a rule needs a screen");
@@ -212,6 +222,14 @@ impl Definer {
                 (Some(w), false) => self.expr(&format!("{at}.when"), w),
             };
             self.def.rules.push(Rule { when, screen });
+        }
+    }
+
+    /// Reports each key of `m` that is not one of `keys`.
+    fn only(&mut self, at: &str, m: &Map, what: &str, keys: &[&str]) {
+        for key in m.keys().filter(|k| !keys.contains(k)) {
+            let message = format!("{} is not part of {what}: {}", quote(key), keys.join(", "));
+            self.r.error(format!("{at}.{key}"), message);
         }
     }
 
@@ -264,14 +282,15 @@ impl Definer {
                 _ => return,
             };
             let clock = match path.iter().map(String::as_str).collect::<Vec<_>>()[..] {
-                ["now", "time"] => is_time(at),
+                ["now" | "day", "time"] => is_time(at),
                 ["now", "stamp"] => is_stamp(at) && is_real_date(&at[..10]),
                 _ => false,
             };
             if !clock {
                 return;
             }
-            let mut push = |later| clocks.push(Clock { at: at.clone(), later });
+            let day = path[0] == "day";
+            let mut push = |later| clocks.push(Clock { at: at.clone(), later, day });
             match op {
                 Op::Eq | Op::Ne => {
                     push(false);
@@ -303,9 +322,10 @@ mod tests {
 
     fn said(manifest: &str) -> String {
         let (_, r) = define(&yaml(manifest).unwrap());
-        let all =
-            r.errors.iter().map(|f| ("error", f)).chain(r.warnings.iter().map(|f| ("warning", f)));
-        all.map(|(kind, f)| format!("{kind} {}: {}", f.at, f.message))
+        assert!(r.warnings.is_empty(), "a definition only has errors");
+        r.errors
+            .iter()
+            .map(|f| format!("error {}: {}", f.at, f.message))
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -332,7 +352,7 @@ mod tests {
         );
         assert_eq!(
             said("modules: {weather: {}}"),
-            "error modules.weather: \"weather\" is not a module: timeline, choices, people, places, alerts, documents, climate"
+            "error modules.weather: \"weather\" is not a module: timeline, choices, people, places, alerts, documents, climate, sheets"
         );
         assert_eq!(
             said("modules: {timeline: 3}"),
@@ -351,8 +371,8 @@ mod tests {
             "error modules.places.from: names the content root this module reads, like places"
         );
         assert_eq!(
-            said("modules: {climate: {sync: {trigger: button}}}"),
-            "warning modules.climate.sync: syncing lands in phase 7. Until then this module reads the pack"
+            said("modules: {alerts: {sync: {trigger: button}}}"),
+            "error modules.alerts.sync: only climate syncs so far"
         );
     }
 
@@ -363,8 +383,31 @@ mod tests {
   timeline:
   people: {}
 ");
-        let got: Vec<(&str, &str)> = d.modules.iter().map(|m| (m.name, m.from.as_str())).collect();
-        assert_eq!(got, [("timeline", "days"), ("people", "people"), ("climate", "tiempo")]);
+        let got: Vec<(&str, Option<&str>)> =
+            d.modules.iter().map(|m| (m.name, m.from.as_deref())).collect();
+        let expected =
+            [("timeline", Some("days")), ("people", Some("people")), ("climate", Some("tiempo"))];
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn a_module_with_a_sync_and_no_from_reads_no_pack_data() {
+        let sync =
+            "{trigger: auto, every: 6h, request: {url: 'https://a.org/f'}, read: {high: d.max}}";
+        let only = def(&format!("modules: {{climate: {{sync: {sync}}}}}"));
+        let both = def(&format!("modules: {{climate: {{from: climate, sync: {sync}}}}}"));
+        assert_eq!(
+            (only.modules[0].from.as_deref(), both.modules[0].from.as_deref()),
+            (None, Some("climate"))
+        );
+        let s = only.modules[0].sync.as_ref().unwrap();
+        assert_eq!((s.every, s.host(), s.url.as_str()), (Some(360), "a.org", "https://a.org/f"));
+        assert_eq!(s.read, [("high".to_owned(), vec!["d".to_owned(), "max".to_owned()])]);
+        let broken = define(&yaml("modules: {climate: {sync: {trigger: auto}}}").unwrap()).0;
+        assert_eq!(
+            (broken.modules[0].from.as_deref(), broken.modules[0].sync.is_none()),
+            (None, true)
+        );
     }
 
     #[test]
@@ -486,6 +529,8 @@ mod tests {
             clocks("now.stamp >= '2026-04-11T17:30' and not (now.time < '09:00')"),
             "2026-04-11T17:30 09:00"
         );
+        let d = def("modules: {timeline: }\nderive: {x: \"day.time >= '19:00'\"}");
+        assert_eq!((d.clocks[0].at.as_str(), d.clocks[0].day), ("19:00", true));
     }
 
     #[test]
