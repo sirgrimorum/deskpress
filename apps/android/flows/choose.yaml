@@ -1,0 +1,23 @@
+# A day with options, asked the evening before: the recommended plan, the others behind a
+# button, and keeping one writes the day to the calendar. The agenda opens it again.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T20:30"
+- assertVisible: 'Sintra or the beach tomorrow\?'
+- assertVisible: "The palaces are quieter.*"
+- tapOn: "See the other options"
+- tapOn: "The beach"
+- assertVisible: "Warm enough for the sand.*"
+- tapOn: "Keep this plan"
+- tapOn: "Deskpress e2e.*"
+- assertVisible: "2 new, 0 changed, 0 removed"
+- tapOn: "Apply"
+- assertVisible: "TONIGHT"
+- tapOn: "Today"
+- tapOn: "Change the plan"
+- assertVisible: 'Sintra or the beach tomorrow\?'
+- assertVisible: "Warm enough for the sand.*"
+- assertNotVisible: "Until somebody chooses.*"

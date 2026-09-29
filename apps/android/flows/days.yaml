@@ -5,6 +5,7 @@ appId: dev.deskpress.app
     clearState: true
     arguments:
       now: "2026-04-10T09:00"
-- assertVisible: "The days of this trip"
+- assertVisible: "THE DAYS OF THIS TRIP"
+- assertVisible: "The plan does not cover today."
 - assertVisible: "The tile museum and the late ferry"
 - assertVisible: "2026-04-11"

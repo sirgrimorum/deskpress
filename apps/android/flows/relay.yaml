@@ -7,7 +7,13 @@ appId: dev.deskpress.app
       now: "2026-04-11T11:30"
 - tapOn: 'Whose phone is it\?'
 - assertVisible: "Rita"
-- tapOn: "Tomas"
+# The block names Tomas its guide, so he carries the star.
+- tapOn: "★ Tomas"
 - assertVisible: "Count the lions.*"
 - tapOn: "Go"
-- assertVisible: "Now · visit"
+# A child goes to their own screen, with the place's script when they guide it.
+- assertVisible: "You could be the guide"
+- tapOn: "Show the answer"
+- assertVisible: "They keep the walls cool.*"
+- scrollUntilVisible:
+    element: "Give the phone back"

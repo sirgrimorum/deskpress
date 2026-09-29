@@ -1,11 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Only while the app is open: the regions of the pack's places, and a position to save. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Asked on the first sync: the calendar the person picks gets the plan's events. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+    <!-- A data sync fetches from the hosts the person allowed; the pack is read offline. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- No cloud backup: the facts, hosts and ledgers stay on this phone (decision 0015). -->
     <application
+        android:allowBackup="false"
         android:label="deskpress"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <!-- Compose redraws on a rotation or a theme change, so the open dialogs and syncs stay. -->
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

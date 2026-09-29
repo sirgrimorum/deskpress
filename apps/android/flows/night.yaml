@@ -1,9 +1,10 @@
-# After the last block, from nine: tonight and what is left.
+# Once the last block is over, from seven on the day's own clock: tonight and what is left.
 appId: dev.deskpress.app
 ---
 - launchApp:
     clearState: true
     arguments:
-      now: "2026-04-11T21:30"
-- assertVisible: "Tonight"
-- assertVisible: "Nothing more today"
+      now: "2026-04-11T19:30"
+- assertVisible: "TONIGHT"
+# The foot names tomorrow.
+- assertVisible: "Sintra or the beach"

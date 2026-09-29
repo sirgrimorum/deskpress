@@ -1,0 +1,19 @@
+# From the day, the documents grouped by whose they are; one opens with its numbers to call
+# before the file, and the file shows full screen until Back.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T11:30"
+- tapOn: "Today"
+- tapOn: "Documents"
+- assertVisible: "RITA"
+- tapOn: "Travel insurance"
+- assertVisible: "Call Assistance"
+- assertVisible: "Call Emergency"
+- assertVisible: "EX-0001"
+- tapOn: "Open the file"
+- assertVisible: "Page 1 of 1"
+- tapOn: "Back"
+- assertVisible: "Open the file"

@@ -1,0 +1,32 @@
+# The design system from the menu: an edit is written to the theme file, drawn, and still there
+# after a restart; an edit that makes text unreadable is refused with the pair and its ratio.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T11:30"
+- tapOn: "Menu"
+- tapOn: "Design system"
+- assertVisible: "DESIGN SYSTEM"
+- assertVisible: "plain-light"
+- tapOn: "paper"
+- eraseText
+- inputText: "#FAFAFA"
+- tapOn: "Save"
+- assertVisible: "#FAFAFA"
+- launchApp:
+    stopApp: true
+    arguments:
+      now: "2026-04-11T11:30"
+- tapOn: "Menu"
+- tapOn: "Design system"
+- assertVisible: "#FAFAFA"
+- tapOn: "ink"
+- eraseText
+- inputText: "#FFFFFF"
+- tapOn: "Save"
+- assertVisible: "(?s)ink on paper is .*"
+- tapOn: "Cancel"
+- tapOn: "Back"
+- assertVisible: "Now · visit"

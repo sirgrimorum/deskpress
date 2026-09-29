@@ -1,15 +1,61 @@
-# A child holding the phone through a block that is not theirs: one thing, give it back.
+# A child holding the phone into a block that is not safe, or out of a safe place: give it back,
+# or 15 more minutes.
 appId: dev.deskpress.app
 ---
 - launchApp:
     clearState: true
     arguments:
-      now: "2026-04-11T10:40"
+      now: "2026-04-11T13:20"
 - tapOn: 'Whose phone is it\?'
+- tapOn: "Rita"
+# Rita hands it to Tomas; it comes back to her.
+- tapOn: "Rita"
 - tapOn: "Tomas"
+# Later the same day, the facts kept: the child still holds it where it is not safe.
+- launchApp:
+    stopApp: true
+    arguments:
+      now: "2026-04-11T18:50"
 - assertVisible: "Time is up"
-# The caption says it too; the button is the second one.
+# The caption says it too; the button is the one below it.
 - tapOn:
     text: "Give the phone back"
-    index: 1
+    below: "Give the phone back"
 - assertVisible: "Rita"
+# Again, and this time the parent grants more time.
+- launchApp:
+    stopApp: true
+    arguments:
+      now: "2026-04-11T13:20"
+- tapOn: "Rita"
+- tapOn: "Tomas"
+- launchApp:
+    stopApp: true
+    arguments:
+      now: "2026-04-11T18:50"
+- tapOn: "15 more minutes"
+- assertVisible: "Tomas"
+- assertNotVisible: "Time is up"
+# At the museum a child may hold it; out of the museum's region the phone is called back, and
+# back inside the alarm ends. "at" pins the device's position, as "now" pins the clock.
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T11:30"
+      at: "38.7248,-9.1139"
+- tapOn: 'Whose phone is it\?'
+- tapOn: "★ Tomas"
+- assertVisible: "Count the lions.*"
+- launchApp:
+    stopApp: true
+    arguments:
+      now: "2026-04-11T11:30"
+      at: "38.7300,-9.1000"
+- assertVisible: "Time is up"
+- launchApp:
+    stopApp: true
+    arguments:
+      now: "2026-04-11T11:30"
+      at: "38.7248,-9.1139"
+- assertVisible: "Count the lions.*"
+- assertNotVisible: "Time is up"

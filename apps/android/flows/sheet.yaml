@@ -6,7 +6,7 @@ appId: dev.deskpress.app
     arguments:
       now: "2026-04-11T11:30"
 - tapOn: "Point by point"
-- assertVisible: "Museu Nacional do Azulejo"
+- assertVisible: "MUSEU NACIONAL DO AZULEJO"
 - assertVisible: "The small cloister"
 - tapOn: "Back"
 - assertVisible: "Point by point"

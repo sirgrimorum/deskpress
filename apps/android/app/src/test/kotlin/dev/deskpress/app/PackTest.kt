@@ -20,7 +20,7 @@ class PackTest {
         mapOf("pack.yaml" to manifest, "content.yaml" to content)
 
     private fun opened(files: () -> Map<String, String>) = attempt {
-        load("pack.yaml", files()).use { show(it.screen(world(NOON, emptyMap())), 0) }
+        load("pack.yaml", files()).use { show(it.screen(world(NOON, emptyMap()))) }
     }
 
     @Test
@@ -44,7 +44,7 @@ class PackTest {
     fun anActionTheScreenDoesNotHaveIsRefused() {
         val state = attempt {
             load("pack.yaml", files("days: []\n")).use {
-                show(it.dispatch(world(NOON, emptyMap()), "fly", Value.Null).view, 0)
+                show(it.dispatch(world(NOON, emptyMap()), "fly", Value.Null).view)
             }
         }
         assertEquals(PackState.Failed("\"fly\" is not an action of the screen \"outline\""), state)
@@ -52,8 +52,8 @@ class PackTest {
 
     @Test
     fun aNewerTreeIsRefusedNotHalfDrawn() {
-        val view = View(Tree(TREE_VERSION + 1u, "s", emptyList()), Watch("", emptyList()))
-        assertEquals(PackState.Failed("tree version 3, this app draws 2"), show(view, 0))
+        val view = View(Tree(TREE_VERSION + 1u, "s", emptyList(), "", false), Watch("", emptyList()))
+        assertEquals(PackState.Failed("tree version 5, this app draws 4"), show(view))
     }
 
     @Test

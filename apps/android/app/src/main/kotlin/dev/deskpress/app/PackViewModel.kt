@@ -2,13 +2,30 @@ package dev.deskpress.app
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.deskpress.engine.CallException
+import dev.deskpress.engine.Edit
+import dev.deskpress.engine.Field
+import dev.deskpress.engine.Finding
+import dev.deskpress.engine.LoadException
 import dev.deskpress.engine.LoadedPack
+import dev.deskpress.engine.Plan
 import dev.deskpress.engine.Value
 import dev.deskpress.engine.View
+import dev.deskpress.engine.World
+import dev.deskpress.engine.decodeFacts
+import dev.deskpress.engine.editTheme
+import dev.deskpress.engine.encodeFacts
 import dev.deskpress.engine.load
+import java.io.File
+import java.io.IOException
+import java.net.URI
+import java.net.URLEncoder
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.ZoneId
+import kotlin.text.Charsets.UTF_8
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,60 +47,282 @@ class PackViewModel(
     private val now: (ZoneId) -> LocalDateTime = LocalDateTime::now,
     scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    private val facts: Facts? = null,
+    // Where an edited file goes: the pack's own folder, or the bundled pack's overlay.
+    private val write: (String, String) -> Unit = { _, _ -> throw IOException("this pack is read only") },
+    // A GET of an https address, run on `io`.
+    private val fetch: (String) -> Reply = ::get,
 ) : ViewModel(scope) {
     private val _state = MutableStateFlow<PackState>(PackState.Loading)
     val state: StateFlow<PackState> = _state.asStateFlow()
 
     private var pack: LoadedPack? = null
-    private var zone: ZoneId = ZoneId.of("UTC")
-    private var warnings = 0
-    // What actions kept. In memory until the store persists.
+    private var files = emptyMap<String, String>()
+    /** The pack's timezone, the one its times are local to. */
+    var timezone: ZoneId = ZoneId.of("UTC")
+        private set
+    // The plan's other zones the phone knows, by the name the pack gives them.
+    private var zones = emptyMap<String, ZoneId>()
+    /** The pack's id, which names the files the host keeps for it. */
+    var packId = ""
+        private set
+    private var theme: Value = Value.Null
+    private var warnings = emptyList<Finding>()
+    // What actions kept, saved under the pack's id after each one.
     private val store = mutableMapOf<String, Value>()
     private var timer: Job? = null
+    // Where the device is, once it knows, and the regions of the pack around it.
+    private var position: Pair<Double, Double>? = null
+    private var inside = emptyList<String>()
+    // The modules being fetched, and whether the person said no to fetching this session.
+    private val syncing = mutableSetOf<String>()
+    private var declined = false
+
+    // The host's biometric or credential check, hooked by the activity.
+    var unlock: (done: (Boolean) -> Unit) -> Unit = { it(false) }
+
+    // The dialer with a number, and a pack file full screen: the activity's too.
+    var call: (number: String) -> Unit = {}
+    var show: (file: String, title: String) -> Unit = { _, _ -> }
+
+    // A map at a point with a label, and what to do when a position is asked for with none yet.
+    var map: (lat: Double, lon: Double, label: String) -> Unit = { _, _, _ -> }
+    var unlocated: () -> Unit = {}
+
+    // A calendar sync of a scope: the whole trip when empty, a date, or one event id.
+    var sync: (scope: String) -> Unit = {}
+
+    // Whether the pack may fetch from these hosts, a secret by its name for the host it goes to
+    // (null when there is none), and forgetting one the server turned down: the activity asks the
+    // person and keeps both. A secret goes only to the host it was given for.
+    var allow: suspend (hosts: List<String>) -> Boolean = { false }
+    var secret: suspend (name: String, host: String) -> String? = { _, _ -> null }
+    var forget: (name: String, host: String) -> Unit = { _, _ -> }
 
     init {
         viewModelScope.launch {
-            _state.value = attempt {
-                val loaded = withContext(io) { load("pack.yaml", files()) }
-                addCloseable(loaded)
-                pack = loaded
-                zone = ZoneId.of(loaded.timezone())
-                warnings = loaded.warnings().size
-                val world = world(now(zone), store)
-                show(withContext(io) { loaded.screen(world) }, warnings)
-            }
+            _state.value = attempt { open(withContext(io) { files() }) }
             watch()
         }
     }
 
+    /** Loads `files` as the pack, in place of the one before, and draws its screen. */
+    private suspend fun open(files: Map<String, String>): PackState {
+        val loaded = withContext(io) { load("pack.yaml", files) }
+        val tz = loaded.timezone()
+        timezone = runCatching { ZoneId.of(tz) }.getOrNull() ?: return PackState.Failed("the timezone $tz is not one this phone knows")
+        // The one before is not closed: a fetch or timer may still hold it, and the bindings'
+        // cleaner frees it once nothing does.
+        pack = loaded
+        this.files = files
+        zones = loaded.zones().mapNotNull { n -> runCatching { ZoneId.of(n) }.getOrNull()?.let { n to it } }.toMap()
+        packId = loaded.id()
+        theme = loaded.theme()
+        warnings = loaded.warnings()
+        withContext(io) { facts?.read(packId)?.let { store.putAll(decodeFacts(it)) } }
+        val world = here()
+        return show(withContext(io) { loaded.screen(world) }, warnings, theme)
+    }
+
+    override fun onCleared() {
+        pack?.close()
+    }
+
+    /**
+     * Sets the value at `path` of the theme file, writes the file back and draws with it. `done`
+     * gets why the edit was refused, or null when it was kept, and the edited file when it was
+     * valid but could not be written, for the person to save a copy of.
+     */
+    fun edit(path: List<String>, value: String, done: (String?, Edit?) -> Unit) {
+        viewModelScope.launch {
+            // The edited file until it is written.
+            var copy: Edit? = null
+            val why =
+                try {
+                    val edited = withContext(io) { editTheme("pack.yaml", files, path, value) }
+                    copy = edited
+                    withContext(io) { write(edited.file, edited.text) }
+                    _state.value = attempt { open(files + (edited.file to edited.text)) }
+                    watch()
+                    copy = null
+                    null
+                } catch (e: LoadException.Unreadable) {
+                    e.detail
+                } catch (e: LoadException.Invalid) {
+                    e.errors.joinToString("\n") { it.message }
+                } catch (e: IOException) {
+                    "not written: ${e.message}"
+                } catch (e: SecurityException) {
+                    "not written: the folder can no longer be written. Open it again from the menu, or save a copy."
+                }
+            done(why, copy)
+        }
+    }
+
     /** Runs an action of the screen, as a tap on a node that names it. */
-    fun act(action: String, arg: Value) = update { pack ->
-        val world = world(now(zone), store)
-        val out = withContext(io) { pack.dispatch(world, action, arg) }
-        store.putAll(out.store)
-        out.view
+    fun act(action: String, arg: Value) {
+        val pack = pack ?: return
+        viewModelScope.launch {
+            val world = here()
+            val out =
+                try {
+                    withContext(io) { pack.dispatch(world, action, arg) }
+                } catch (e: CallException.Refused) {
+                    _state.value = PackState.Failed(e.detail)
+                    return@launch
+                }
+            store.putAll(out.store)
+            keep()
+            _state.value = attempt { show(out.view, warnings, theme) }
+            watch()
+            for (cmd in out.commands) {
+                when (cmd.name) {
+                    "device.unlock" -> unlock { ok ->
+                        val then = cmd.args["then"].text()
+                        if (ok && then.isNotEmpty()) act(then, Value.Null)
+                    }
+                    "phone.call" -> call(cmd.args["number"].text())
+                    "document.open" -> show(cmd.args["file"].text(), cmd.args["title"].text())
+                    "location.get" -> {
+                        val at = position
+                        val then = cmd.args["then"].text()
+                        if (at == null) unlocated()
+                        else if (then.isNotEmpty()) act(then, point(at.first, at.second))
+                    }
+                    "calendar.sync" -> sync(cmd.args["scope"].text())
+                    "map.open" -> {
+                        val lat = (cmd.args["lat"] as? Value.Number)?.value
+                        val lon = (cmd.args["lon"] as? Value.Number)?.value
+                        if (lat != null && lon != null) map(lat, lon, cmd.args["label"].text())
+                    }
+                    else -> if (cmd.name.endsWith(".sync")) refresh(cmd.name.removeSuffix(".sync"))
+                }
+            }
+        }
+    }
+
+    /**
+     * The device is at `lat`, `lon`. The engine is asked again only when that changes the regions
+     * it is inside, or on the first position, which makes `away` mean something.
+     */
+    fun moved(lat: Double, lon: Double) {
+        val regions = (_state.value as? PackState.Showing)?.view?.watch?.regions.orEmpty()
+        val now = inside(regions, lat, lon)
+        val first = position == null
+        position = lat to lon
+        if (!first && now == inside) return
+        inside = now
+        redraw()
+    }
+
+    /** What a calendar sync of `scope` would do, against the events `known` written before. */
+    suspend fun plan(scope: String, known: Map<String, String>): Plan? {
+        val pack = pack ?: return null
+        val world = here()
+        return withContext(io) { pack.calendar(world, scope, known) }
+    }
+
+    private fun here(): World {
+        val local = now(timezone)
+        val at = local.atZone(timezone)
+        val others = zones.mapValues { at.withZoneSameInstant(it.value).toLocalDateTime() }
+        return world(local, store, inside, position != null, others)
     }
 
     private fun update(call: suspend (LoadedPack) -> View) {
         val pack = pack ?: return
         viewModelScope.launch {
-            _state.value = attempt { show(call(pack), warnings) }
+            _state.value = attempt { show(call(pack), warnings, theme) }
             watch()
         }
     }
 
-    /** One timer, until the moment the engine said its answer changes. */
+    /**
+     * Fetches what `module` syncs, or every automatic sync that is due when it is empty, and draws
+     * with what came back. A module already being fetched is left to finish.
+     */
+    private fun refresh(module: String) {
+        val pack = pack ?: return
+        if (module.isEmpty() && declined) return
+        viewModelScope.launch {
+            val world = here()
+            val requests =
+                try {
+                    withContext(io) { pack.requests(world, module) }.filter { it.module !in syncing }
+                } catch (_: CallException.Refused) {
+                    return@launch
+                }
+            if (requests.isEmpty()) return@launch
+            // Taken before the question, so a second refresh while it is open neither asks nor fetches.
+            val modules = requests.map { it.module }
+            syncing += modules
+            try {
+                declined = !allow(withContext(io) { pack.hosts() })
+                if (declined) return@launch
+                for (r in requests) {
+                    // The engine only lets through plain https hosts.
+                    val host = URI(r.url).host
+                    val url = if (r.secret.isEmpty()) r.url else secret(r.secret, host)?.let { key ->
+                        val sep = if ('?' in r.url) '&' else '?'
+                        "${r.url}$sep${URLEncoder.encode(r.param, UTF_8)}=${URLEncoder.encode(key, UTF_8)}"
+                    }
+                    val reply = if (url == null) Reply(0, "no ${r.secret} to ask with") else withContext(io) { fetch(url) }
+                    if (r.secret.isNotEmpty() && (reply.status == 401 || reply.status == 403)) forget(r.secret, host)
+                    val now = here()
+                    store.putAll(withContext(io) { pack.received(now, r, reply.status.toUShort(), reply.body) })
+                }
+            } finally {
+                syncing -= modules.toSet()
+            }
+            keep()
+            redraw()
+        }
+    }
+
+    /** One timer, until the moment the engine said its answer changes, and any sync now due. */
     private fun watch() {
+        refresh("")
         timer?.cancel()
         val until = (_state.value as? PackState.Showing)?.view?.watch?.until
         if (until.isNullOrEmpty()) return
-        val wait = Duration.between(now(zone), LocalDateTime.parse(until)).toMillis()
+        // Measured on the zone's own clock, so a daylight saving change in between counts.
+        val wait = Duration.between(now(timezone).atZone(timezone), LocalDateTime.parse(until).atZone(timezone)).toMillis()
         timer = viewModelScope.launch {
             delay(wait)
-            update { pack ->
-                val world = world(now(zone), store)
-                withContext(io) { pack.screen(world) }
-            }
+            redraw()
         }
     }
+
+    /** The screen again, for the same pack in a changed world. */
+    private fun redraw() = update { pack ->
+        val world = here()
+        withContext(io) { pack.screen(world) }
+    }
+
+    /** What actions kept, saved under the pack's id. */
+    private suspend fun keep() = withContext(io) { facts?.write(packId, encodeFacts(store)) }
 }
+
+/** What the host keeps of each pack between runs: one file per pack id in `dir`. */
+class Facts(private val dir: File, private val ext: String = "yaml") {
+    fun read(id: String): String? = File(dir, "$id.$ext").takeIf { it.exists() }?.readText()
+
+    fun write(id: String, text: String) {
+        dir.mkdirs()
+        File(dir, "$id.$ext").replace(text.encodeToByteArray())
+    }
+}
+
+/** Writes `bytes` whole or not at all: a crash midway leaves the old file as it was. */
+fun File.replace(bytes: ByteArray) {
+    val next = File(parentFile, "$name$NEXT")
+    next.writeBytes(bytes)
+    Files.move(next.toPath(), toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+}
+
+/** The suffix of a file being written, never read as one. */
+const val NEXT = ".next"
+
+/** A position as the engine reads it: `{lat, lon}`. */
+fun point(lat: Double, lon: Double): Value =
+    Value.Fields(listOf(Field("lat", Value.Number(lat)), Field("lon", Value.Number(lon))))

@@ -1,0 +1,13 @@
+# A child holding the phone where it is safe: kid screen, no menu, and hand back.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T13:20"
+- tapOn: 'Whose phone is it\?'
+- tapOn: "Tomas"
+- assertVisible: "Tomas"
+- assertNotVisible: "Menu"
+- tapOn: "Give the phone back"
+- assertVisible: "Now · meal"

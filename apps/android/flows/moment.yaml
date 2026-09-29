@@ -1,4 +1,5 @@
-# Inside a block: its answer, what the place says, and what comes next.
+# Inside a block: its answer, what the place says, what comes next, and the block into the calendar,
+# or a refusal when the calendar is not allowed.
 appId: dev.deskpress.app
 ---
 - launchApp:
@@ -8,5 +9,32 @@ appId: dev.deskpress.app
 - assertVisible: "Now · visit"
 - assertVisible: "11:15"
 - assertVisible: "10:00 to 18:00, closed on Mondays"
-- assertVisible: "Next, 13:15: .*"
+- assertVisible: "NEXT"
+- assertVisible: "13:15"
 - assertVisible: "Point by point"
+- scrollUntilVisible:
+    element: "Open in the map"
+- scrollUntilVisible:
+    element: "Put this in the calendar"
+- tapOn: "Put this in the calendar"
+- tapOn: "Deskpress e2e.*"
+- assertVisible: "1 new, 0 changed, 0 removed"
+- tapOn: "Apply"
+- assertVisible: "The calendar is updated: 1 new, 0 changed, 0 removed."
+# Asked again, there is nothing left to write.
+- tapOn: "Put this in the calendar"
+- extendedWaitUntil:
+    visible: "The calendar is up to date."
+    timeout: 10000
+# With the calendar refused, the app says so and writes nothing.
+- launchApp:
+    clearState: true
+    permissions:
+      calendar: deny
+    arguments:
+      now: "2026-04-11T11:30"
+- scrollUntilVisible:
+    element: "Put this in the calendar"
+- tapOn: "Put this in the calendar"
+- tapOn: "Don.t allow"
+- assertVisible: "Without the calendar permission, nothing is written."

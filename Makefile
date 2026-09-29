@@ -18,6 +18,8 @@ AVD ?= UE_pixel_6_API_35
 ifeq ($(OS),Windows_NT)
   ANDROID_HOME ?= $(subst \,/,$(LOCALAPPDATA))/Android/Sdk
   BAT := .bat
+  # make started outside a POSIX shell has no HOME; Maestro installs under it.
+  HOME ?= $(subst \,/,$(USERPROFILE))
 else ifeq ($(shell uname),Darwin)
   ANDROID_HOME ?= $(HOME)/Library/Android/sdk
 else
@@ -104,8 +106,13 @@ run: bindings ## Install the debug app on the running device or emulator and ope
 	$(GRADLE) installDebug
 	"$(ADB)" shell am start -n dev.deskpress.app/.MainActivity
 
+# A local calendar on the device for the sync flows, made anew each run so events never pile up.
+CALENDAR := content://com.android.calendar/calendars?caller_is_syncadapter=true&account_name=e2e&account_type=LOCAL
+
 e2e: bindings $(MAESTRO) ## Install the debug app and run the regression flows on the device
 	$(GRADLE) installDebug
+	MSYS_NO_PATHCONV=1 "$(ADB)" shell "content delete --uri '$(CALENDAR)' --where \"account_name='e2e'\""
+	MSYS_NO_PATHCONV=1 "$(ADB)" shell "content insert --uri '$(CALENDAR)' --bind account_name:s:e2e --bind account_type:s:LOCAL --bind name:s:e2e --bind calendar_displayName:s:'Deskpress e2e' --bind calendar_access_level:i:700 --bind ownerAccount:s:e2e --bind visible:i:1 --bind sync_events:i:1 --bind calendar_timezone:s:UTC"
 	"$(MAESTRO)" test $(APP)/flows
 
 emulator: ## Start the emulator AVD (AVD=name to pick another) and wait until it boots
@@ -114,8 +121,8 @@ emulator: ## Start the emulator AVD (AVD=name to pick another) and wait until it
 	@until [ "$$("$(ADB)" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; do \
 		sleep 2; done
 
-android: bindings ## Run the app's tests and build the APK
-	$(GRADLE) testDebugUnitTest assembleDebug
+android: bindings ## Run the app's tests with their coverage floor and build the APK
+	$(GRADLE) testDebugUnitTest koverVerifyDebug koverLogDebug assembleDebug
 
 # Everything
 

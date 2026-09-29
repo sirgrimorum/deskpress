@@ -1,0 +1,13 @@
+# The shell menu, on any screen: whether the pack loads, and what the validator found.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T11:30"
+- tapOn: "Menu"
+- tapOn: "Check the pack"
+- assertVisible: "CHECK THE PACK"
+- assertVisible: "loads. 0 warnings."
+- tapOn: "Back"
+- assertVisible: "Now · visit"

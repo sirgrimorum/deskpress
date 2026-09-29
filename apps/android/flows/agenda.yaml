@@ -1,4 +1,4 @@
-# Today opens the whole day, each block with its state, and Back returns.
+# Today opens the whole day, each block with its state, puts the day in the calendar, and Back returns.
 appId: dev.deskpress.app
 ---
 - launchApp:
@@ -8,5 +8,17 @@ appId: dev.deskpress.app
 - tapOn: "Today"
 - assertVisible: "Walk up through Graca.*"
 - assertVisible: "Ferry from Cais do Sodre.*"
+- scrollUntilVisible:
+    element: "Put this day in the calendar"
+- tapOn: "Put this day in the calendar"
+- tapOn: "Deskpress e2e.*"
+- assertVisible: "4 new, 0 changed, 0 removed"
+- tapOn: "Apply"
+- assertVisible: "The calendar is updated: 4 new, 0 changed, 0 removed."
+# Asked again, there is nothing left to write.
+- tapOn: "Put this day in the calendar"
+- extendedWaitUntil:
+    visible: "The calendar is up to date."
+    timeout: 10000
 - tapOn: "Back"
 - assertVisible: "Now · visit"
