@@ -1,0 +1,22 @@
+name: Feature Proposal
+description: Suggest an enhancement or new feature
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Features must fit the architectural principles: offline-first, pure engine, declarative packs.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What personal or operational need does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How should this work in terms of pack schema, engine logic, or renderer components?
+    validations:
+      required: true

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and Documentation
+    url: https://github.com/sirgrimorum/deskpress/blob/main/docs/architecture.md
+    about: Read the architectural documentation and pack format reference.
