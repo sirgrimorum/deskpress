@@ -30,6 +30,7 @@ entry is the short answer; the linked document has the rest.
 | **holder** | the person holding the phone right now. Screens can change with who it is |
 | **keymap** | a map in `pack.yaml` from canonical keys to the pack's own key names, grouped by context |
 | **kid mode** | the screens shown when the holder is not an adult |
+| **ledger** | what the host wrote into the calendar for one pack: the calendar picked, and a row and fingerprint per event id. A sync touches only those rows |
 | **main machine** | the pack's `rules`: it answers "which screen, right now" |
 | **manifest** | `pack.yaml`: the pack's name, language, timezone, where its content is, and its definition |
 | **module** | shared, tested logic a pack opts into: `timeline`, `choices`, `people`, `places`, `alerts`, `documents`, `climate` |
@@ -47,20 +48,20 @@ entry is the short answer; the linked document has the rest.
 | **screen machine** | a screen's own state and actions: it answers "what can happen here" |
 | **screen tree** | what the engine hands the renderer: plain, versioned data listing the nodes to draw |
 | **sheet** | any other tree in the content (bookings, phrases, contacts), shown as rows and cards with no shell support needed |
-| **secret** | a key a sync needs, named in the pack and typed on the device. Kept in the keystore, never in the pack |
+| **secret** | a key a sync needs, named in the pack with the query parameter it goes in, and typed on the device. Kept sealed with a keystore key, never in the pack |
 | **shell** | the engine plus a host: everything that is the same for every pack |
 | **stored fact** | a value the app saved on the device, like a decision. It is an input, so it can change the screen |
 | **template** | a definition bundled with the engine, like `travel`, that a pack names in `pack.extends` and only overrides where it differs. See `docs/templates.md` |
 | **theme** | the design system as data, in `theme.yaml`: color, type, spacing and radius tokens |
 | **token** | one named value of the theme. Components read tokens and never a theme's name |
-| **sync** | fetching a module's data from a source the pack names, on a button or automatically every so often |
+| **sync** | fetching a module's data from a source the pack names, on a button or automatically every so often while the app is open. Only `climate` so far |
 | **tool** | a device capability the engine can ask the host for: map, calendar, geofence, fingerprint |
 | **tree version** | the number of the screen tree's shape. A renderer refuses a newer one instead of half drawing it |
 | **unknown key rule** | a key the shell does not know becomes a card labelled with that key, or an alert by its prefix or date. `Auto` applies it. Enriching a pack never breaks it |
 | **validate** | load a pack and list its errors and warnings. `deskpress validate <pack>` on the desk, `load` in the app |
 | **warning** | something worth fixing that does not stop the pack from loading, like a place with no coordinates |
 | **watch** | what comes with each tree to say what would change it: the next instant (`until`) and the geofences that matter. The host calls the engine again only then |
-| **world** | what the host pushes in on each call, as opposed to a module's data: the local time in the pack's timezone, the places whose region the device is inside, the holder and the stored facts |
+| **world** | what the host pushes in on each call, as opposed to a module's data: the local time in the pack's timezone and in each zone the days name, the places whose region the device is inside and whether it is located, the holder and the stored facts |
 | **write back** | a theme edit in the app is saved to the loaded theme file, keeping its comments and order |
 
 ## Technical terms

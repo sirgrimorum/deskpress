@@ -31,8 +31,10 @@ flowchart LR
 ```
 
 - **The engine** (`crates/engine`) is pure Rust, standard library only. It never reads a clock, a
-  file, a sensor or the network; the host passes everything in. Three calls: `load(files)`,
-  `screen(world)`, `dispatch(world, action, arg)`. On the phone it is a native library reached through UniFFI
+  file, a sensor or the network; the host passes everything in. The main calls: `load(files)`,
+  `screen(world)`, `dispatch(world, action, arg)`, plus `calendar`, `hosts`, `requests` and
+  `received` for the calendar and data syncs, `zones` for the clocks the host passes, and the free
+  functions `edit_theme`, `encode_facts` and `decode_facts`. On the phone it is a native library reached through UniFFI
   (`crates/ffi`, phase 2), which generates typed Kotlin, later Swift, bindings. On the desk and in
   the LLM plugin it is the `deskpress` binary (`crates/cli`), which prints trees as JSON.
 - **The main machine** is the pack's `rules`: ordered `when` guards, first true wins, the last rule
@@ -44,7 +46,7 @@ flowchart LR
   fact, which is an input, so it can move the main machine. A module action goes to the host as a
   command.
 - **Modules** hold shared domain logic a pack opts into: `timeline`, `places`, `people`, `choices`,
-  `alerts`, `documents`. Each declares its config schema, the names it exposes, its actions and the
+  `alerts`, `documents`, `climate`, `sheets`. Each declares its config schema, the names it exposes, its actions and the
   host tools it needs. `derive` adds named values, in order, from expressions.
 - **Expressions** are our own small grammar (in `docs/pack-format.md`), parsed to an AST at load and
   never evaluated as code. A bad expression is a load error with key path and column.
@@ -58,7 +60,7 @@ flowchart LR
   tokens, never packs.
 - **The host** (`apps/android`, Kotlin + Compose) owns the device: file picking with persisted SAF
   permission, storage of facts, the clock and location, and tools (map, calendar, geofence,
-  biometric). Theme edits from the design system section are validated (contrast 4.5:1) and
+  biometric, dialer, documents, HTTPS fetch with sealed secrets). Theme edits from the design system section are validated (contrast 4.5:1) and
   written back to the loaded theme file, preserving comments and order.
 
 Every decision above has a record in `docs/decisions/`. Read the relevant one before changing the
@@ -80,7 +82,8 @@ not wrap the `deskpress` CLI: run that directly.
 | `make coverage` | an HTML report, to find what a test misses |
 | `make install` | puts `deskpress` on the PATH |
 | `make bindings` | builds the engine for the app and writes its Kotlin bindings |
-| `make android-test`, `make apk` | the app's JVM tests against the real engine; the debug APK |
+| `make android` | the app's JVM tests against the real engine, their Kover coverage floor, and the debug APK |
+| `make android-test`, `make apk` | the JVM tests alone; the debug APK alone |
 | `make emulator`, `make run` | boots the AVD; installs and opens the app on it |
 | `make e2e` | the device regression: installs the app and runs the Maestro flows in `apps/android/flows` |
 | `make clean` | removes every build output |
@@ -108,7 +111,7 @@ SDK in the Makefile, Gradle in its wrapper, the app's libraries in
 | `templates/` | definitions a pack extends, bundled into the engine: `travel` |
 | `examples/one-day/` | a complete public example pack, invented on purpose |
 | `skills/write-a-deskpress-pack/` | what an LLM loads to write a pack; becomes a plugin |
-| `schema/` | machine readable JSON schema for the content and theme |
+| `schema/` | machine readable JSON schemas for the pack definition, the content and the theme |
 | `docs/` | `architecture.md`, `pack-format.md`, `templates.md`, `authoring.md`, `glossary.md`, `roadmap.md`, `decisions/` |
 | `content/` | **git ignored**: real packs. See `content/README.md` |
 | `private/` | **git ignored**: the owner's plans, journal, PR drafts |

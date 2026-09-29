@@ -33,17 +33,21 @@ replaces `screens.moment` whole.
 
 ## travel
 
-The trip app of the design: six views (moment, sheet, agenda, suggestion, complete, relay) and
-three moments of the day with a screen of their own (morning, night, and the list of days).
+The trip app of the design: six views (moment, sheet, agenda, suggestion, complete, relay),
+three moments of the day with a screen of their own (morning, night, and the list of days), `kid`
+for a child holding the phone, `documents` and `document` for what a counter asks for, and
+`choose` for a day with options.
 
 **Rules**, first true wins:
 
 | when | screen | what it answers |
 | --- | --- | --- |
+| `kid and not safe and not extended` | `complete` | a child holds the phone where it is not safe and extra time ran out: alarm screen |
+| `decision.due and not decision.answered and not kid` | `choose` | a decision whose hour has come and nobody answered: the recommended plan, the others behind a button |
 | `not day` | `days` | a date the pack does not cover: every day there is |
 | `mine` | `suggestion` | the current block names the person holding the phone as `guide` or `for` |
-| `kid and block` | `complete` | a child holds the phone through a block that is not theirs: give it back |
-| `night` | `night` | from 21:00 with nothing left today: tomorrow's first hour |
+| `kid` | `kid` | a child holding the phone where it is safe: kid screen |
+| `night` | `night` | from 19:00 on the day's own clock once the last block is over (one with no `until` lasts the day): tomorrow's first hour |
 | `not day.started` | `morning` | before the first timed block: the first hour and the day ahead |
 | `block` | `moment` | inside a block: its answer, its place, what comes next |
 | (none) | `agenda` | between blocks: the whole day, each block with its state |
@@ -52,23 +56,27 @@ three moments of the day with a screen of their own (morning, night, and the lis
 
 | screen | shows | actions |
 | --- | --- | --- |
-| `moment` | the day's critical alerts, the block's type, who holds the phone, the answer (`hero`), the weather, the place's parking and `during` keys, the block's own keys, high alerts, what comes next | `agenda`, `relay`, `points` and `ticket` (both open `sheet`) |
+| `moment` | the day's critical alerts, the block's type, who holds the phone, the answer (`hero`), the weather, the place's parking and `during` keys, the block's own keys, high alerts; what comes next in the bottom bar | `agenda`, `relay`, `points` and `ticket` (both open `sheet`), `map` (the place in a map app, when it has `at`), `park` on a parking block (saves the position as `store.car`), `calendar` (the block into the calendar, `calendar.sync` with its `event`) |
 | `morning` | the first hour, the weather, the day's own keys, high alerts | `agenda`, `relay` |
-| `night` | tomorrow's first hour and title, tomorrow's own keys | `agenda` |
-| `agenda` | critical alerts, the weather, every block with its state, medium alerts as rows | `back`, `alerts` (opens `sheet`) |
-| `days` | one row per day | |
-| `sheet` | what `open` passed: a title, a value (a reference is followed), rows | `back` |
-| `suggestion` | the block and its place's points, with what each has for children | `go` (opens `moment`) |
-| `complete` | "time is up" and one button | `relay` |
-| `relay` | one chip per person | `hold` stores `holder`, and the rules decide again; `back` |
+| `night` | tomorrow's first hour, its own keys; its title in the bottom bar | `agenda` |
+| `agenda` | critical alerts, the weather and why its last sync failed, every block with its state, medium alerts as rows | `back`, `alerts` (opens `sheet`), `documents` (opens `documents`), `car` (where the car was left, in a map app, once saved), `calendar_day` and `calendar_trip` (the day or every day into the calendar; not for a child), `weather` (`climate.sync`, when the module syncs; not for a child), `sheet` (one row per sheet, opens `sheet`), `choose` (opens `choose` to change a kept plan while its decision is due; not for a child) |
+| `days` | a line saying the plan does not cover today, then one row per day | |
+| `sheet` | what `open` passed: a title, a value through `Auto` (a reference is followed), rows | `back` |
+| `choose` | the decision's question, a line saying the day follows the recommended plan until chosen (only before one is), the option in force with why and its own keys | `agenda` (Today), `others` (shows every option), `pick`, `confirm` (stores `choice.<date>`, runs `calendar.sync` for that date and goes home) |
+| `documents` | a group per person with their documents, then the ones that are nobody's. None for a child | `back`, `open` (opens `document` with the row's document) |
+| `document` | whose it is, a button per number to call, its fields, and the button to the file | `back`, `call` (`phone.call`), `file` (`document.open`) |
+| `suggestion` | the block and its place's points, with what each has for children | `go` (opens `kid` if kid, else `moment`) |
+| `kid` | child holding the phone: points for kids, what comes next, no menu, give back button; when the block names them its guide, "You could be the guide" and the place's `guide` script | `give_back` (unlocks via host, then `returned`), `returned`, `answer` (shows the script's answer) |
+| `complete` | alarm screen when time is up or unsafe: big "Time is up", give back and 15 more minutes | `give_back` (unlocks then `returned`), `more_time` (unlocks then `extend`), `returned`, `extend` |
+| `relay` | one chip per person (children offered only if safe or adult), a star on the block's guide | `hold` stores `holder`, `returns_to` and clears `holder_until`; `back` |
 
-**Derives:** `kid` (the holder is not an adult), `mine`, `night`, and `hero`, the answer at the top
+**Derives:** `kid` (the holder is not an adult), `safe` (here is safe, or a train/driving/flight block, or the block's place is safe or a meal or lodging and the device is not `away` from it), `extended` (`now.stamp < store.holder_until`), `mine`, `guiding` (the block names the holder its guide), `night`, and `hero`, the answer at the top
 of a moment: a drive or a walk its `duration`, a flight its `boarding`, a parking the place's
 parking price or `ui.free`, a lodging its `check_in`, free time its `until`, anything else the
 block's time. A block missing the key its type reads shows its time too, and the validator warns.
 
 **What the pack gives it.** A block's `type`, `place`, `guide`, `for`, `until` and `ticket`; a
-place's `during`, `parking` and `points` (points and ticket may also sit inside `during`); people with `adult`. Every other key of a block, a
+place's `during`, `parking`, `points` and `guide` (points and ticket may also sit inside `during`); people with `adult`. Every other key of a block, a
 place's `during` or `parking`, a day or tomorrow shows through `Auto`, by the unknown key rule, in
 the pack's order. `conventions` decide which prefixes hide and which warn. The `ui` labels are in
 English; a pack in another language overrides them by key.

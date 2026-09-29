@@ -17,6 +17,15 @@ history.
 | [0009](0009-documentation.md) | who each document is for, and what stays private | accepted |
 | [0010](0010-rust-core-uniffi.md) | a Rust core loaded natively through UniFFI; Cargo for the repo | accepted |
 | [0011](0011-android-host-and-make.md) | the Android host, the ffi crate, one Makefile, Maestro flows | accepted |
-| [0012](0012-data-sources-and-sync.md) | a module's data comes from the pack, a sync, or both; the climate module | accepted |
+| [0012](0012-data-sources-and-sync.md) | a module's data comes from the pack, a sync, or both; the climate module | accepted, amended by 0022 |
 | [0013](0013-call-only-on-change.md) | the engine is called only when its answer can change; each tree says when | accepted |
 | [0014](0014-travel-template.md) | a pack extends a bundled template; the travel template is the first | accepted |
+| [0015](0015-android-renderer.md) | the renderer draws from theme tokens; a pack comes from a picked folder; facts stay on the device | accepted |
+| [0016](0016-theme-editor.md) | the design system screen edits one theme value at a time, through the engine | accepted, amended by 0023 |
+| [0017](0017-kid-mode-and-handoff.md) | kid mode, handoff, and host device commands | accepted, amended by 0023 |
+| [0018](0018-documents.md) | documents: numbers before the file, the file full screen offline, adults only | accepted |
+| [0019](0019-group.md) | `Group`, the one component that holds others; tree version 4 | accepted |
+| [0020](0020-location.md) | location: geofences only while open, `away`, the car's spot and the map | accepted |
+| [0021](0021-calendar.md) | calendar sync: a picked account calendar, a ledger of the app's own events, a plan to confirm | accepted, amended by 0023 |
+| [0022](0022-data-sync.md) | data sync: the engine builds requests and reads replies, the host fetches; climate first | accepted |
+| [0023](0023-drift-review.md) | the drift review of phase 7: what was fixed, what is kept on purpose, the spec's extras as phases | accepted |

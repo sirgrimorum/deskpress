@@ -11,10 +11,9 @@ flowchart TD
   root --> files["files/, optional: PDFs and images the content points at"]
 ```
 
-This page has two halves. **The definition** (modules, rules, screens, expressions) is new and is a
-draft until the engine that runs it lands; it follows decisions 0002 to 0005. **The content** (days,
-places, people, alerts, documents, sheets) is what the first modules read, and is stable, except
-`climate`, which is new.
+This page has two halves. **The definition** (modules, rules, screens, expressions) is what the
+engine runs; it follows decisions 0002 to 0005. **The content** (days, places, people, alerts,
+documents, climate, sheets) is what the modules read.
 
 Two rules before the keys.
 
@@ -33,7 +32,7 @@ you enrich a pack tonight and see it on the phone tomorrow without anyone writin
 
 ```yaml
 pack:
-  id: ruta-2027               # slug. Stable forever: calendar event ids derive from it
+  id: ruta-2027               # slug. Stable forever: the facts and calendar events kept are filed under it
   name: Mi ruta               # what the app calls itself once this pack is loaded
   language: es                # BCP 47. Picks the shell's own handful of labels
   timezone: Europe/Lisbon     # IANA. The moment is computed in this zone
@@ -80,7 +79,7 @@ names them that way here too.
 
 ## The definition
 
-Draft. The rest of `pack.yaml` says how the app behaves: which modules read the content, which
+The rest of `pack.yaml` says how the app behaves: which modules read the content, which
 screen shows when, and what can happen on each screen. A pack may also start from a template with
 `pack.extends: travel` and only override what differs: `modules`, `derive`, `screens` and `ui`
 merge by key, the pack's entry winning; the pack's `rules` are tried before the template's; any
@@ -94,7 +93,7 @@ modules:                      # shared logic the pack opts into. Empty reads its
   places:   {from: lugares}   # or name the content root it reads
 
 derive:                       # further names, in order, each from an expression
-  kid: not holder.adult
+  kid: holder.adult == false
 
 rules:                        # the main machine: first true `when` picks the screen
   - when: decision.due and not decision.answered
@@ -139,9 +138,36 @@ modules:
 
 A module with neither reads the pack under its own root: `timeline` and `choices` read `days`,
 the others the root named like them. Field names come through the `keymap`, never through module
-settings. Until syncing lands (phase 7) a `sync` is a warning and the module reads the pack. The
-person approves the hosts once, and a `secret` is only a name: its value is typed on the device. The request and reply mapping are a draft until
-the first sync source lands; see [decision 0012](decisions/0012-data-sources-and-sync.md).
+settings. With a `sync` and no `from`, the module reads nothing from the pack. Only `climate`
+syncs so far; see [decision 0022](decisions/0022-data-sync.md).
+
+```yaml
+modules:
+  climate:
+    from: climate
+    sync:
+      trigger: auto
+      every: 6h                                  # m, h or d; at least 15m. auto only
+      request:
+        url: "https://api.example.org/forecast?units=metric"
+        query: {lat: place.at.lat, lon: place.at.lon, day: now.date}
+        secret: {name: forecast_key, param: key}
+      tag: {place: place.id}
+      read: {date: daily.time, high: daily.max, low: daily.min, summary: daily.text}
+```
+
+| key | what it is |
+| --- | --- |
+| `trigger` | `button`: the action `climate.sync` fetches. `auto`: also whenever it falls due while the app is open |
+| `every` | how long a good reply lasts. A failed try waits 15 minutes before the next |
+| `request.url` | an `https://` address. The person approves its host once per pack before the first fetch |
+| `request.query` | parameters from expressions, percent-encoded. One with no value, say with no place, skips the fetch |
+| `request.secret` | `name` is asked on the device the first time and kept there sealed, never in the pack, and sent only to the host it was given for; it goes in the query parameter `param`. The server answering 401 or 403 forgets it |
+| `tag` | row keys set from expressions on every row read, like the place the request was for |
+| `read` | row keys (the ones of `climate.entries`) to dotted paths in the JSON reply. A path that finds a list gives one row per item; one that finds a single value gives it to every row |
+
+A reply is kept whole, as the rows it read, and replaces the last one. Synced rows rank like the
+pack's entries and win a tie. A `sunrise` or `sunset` sent as a timestamp is cut to its `HH:MM`.
 
 ### What the modules expose
 
@@ -150,20 +176,26 @@ with canonical keys, whatever the pack calls them.
 
 | module | names | what they hold |
 | --- | --- | --- |
-| `timeline` | `day`, `block`, `next`, `days`, `tomorrow` | today's day with its blocks in force, its `choice` and `started` (a timed block has begun); the last block whose time has come, until its `until`; the first one still to come; every day; the day after today, with `first`, its first timed block. A block is `{time, text, state, ...its map}` |
+| `timeline` | `day`, `block`, `next`, `days`, `tomorrow` | today's day with its blocks in force, its `choice`, `started` (a timed block has begun) and `time` (the time on the day's own clock); the last block whose time has come, until its `until`; the first one still to come; every day; the day after today, with `first`, its first timed block. A block is `{time, text, state, event, ...its map}`, where `event` is its calendar id, `{date}.{list}.{n}`: the list is `blocks`, `fixed` or `option-{id}`, and `n` its place in that list |
 | `choices` | `decision` | the first decision due and unanswered, else the first one due, else the next one coming: `{date, title, options, recommended, choice, due, answered}` plus the decision's own keys. Due from `when` at `at` until its day is over |
-| `people` | `holder`, `people` | the person holding the phone (the host's, else the one stored as `holder`), and everyone |
-| `places` | `place`, `here` | where the current block happens, and the first place whose region the device is inside. Both carry their `id` |
+| `people` | `holder`, `people` | the person holding the phone (the host's, else the one stored as `holder`; a valid stamp stored as `holder_until` sets the watch until it runs out), and everyone |
+| `places` | `place`, `here`, `away` | where the current block happens; the place the device is inside, the block's own when it is one of them, else the smallest; and whether the device knows where it is and is out of the block place's region. Both places carry their `id` ([decision 0020](decisions/0020-location.md)) |
 | `alerts` | `alerts` | the ones showing now, most severe first: from `notify_from` (else the start of their day) to the end of their day |
-| `documents` | `documents` | all of them |
+| `documents` | `documents` | all of them, each with `person` (the name of its `for`, from the `people` module listed before it) and `call` as `[{label, number}]`. None when a child holds the phone |
 | `climate` | `weather` | the weather for today at `place`, else `here` |
+| `sheets` | `sheets` | every tree under `sheets` as `{id, title, value}`, the title the key with `_` as spaces; with no `sheets` root, every root key no other module reads |
 
 A block's `state` is `note` (no time), `now`, `past`, `locked`, or `next` (still to come), for
 the agenda. A block's `type` comes out canonical through `keymap.values.type`, and a place's
 `during`, `parking` and `points` through their keymap contexts.
 
 A day with options runs its `fixed` blocks and the chosen option's, in time order. The choice in
-force is the one stored as `choice.<date>`, else the recommended one, else the first.
+force is the one stored as `choice.<date>`, else the recommended one, else the first. A block with
+a `for` that does not name the person holding the phone is left out of the day.
+
+Each day runs on its own clock when it names a `zone` (see [days](#days)): today is the first day
+whose date is the date there, and a block has begun when its time there has come. The host passes
+the local time of each zone the pack names (`Engine::zones`), so the engine needs no zone rules.
 
 ### Rules
 
@@ -189,7 +221,16 @@ Effects:
 | `{open: screen, with: {name: expr}}` | push a screen, passing values it reads as `params` |
 | `back`, `home` | pop one screen, or clear the stack |
 | `module.action` | a module's action, like `calendar.sync` or `map.open`. Goes to the host as a command |
-| `{do: module.action}` | the same, in mapping form, so it can take an `if` |
+| `{do: module.action, with: {key: expr}}` | the same, in mapping form, so it can take an `if` and pass values to the host command |
+
+The commands the Android host runs: `device.unlock` (asks for the fingerprint or the device
+credential, then runs the action named in `then`), `phone.call` (opens the dialer with `number`),
+`document.open` (shows the pack's `file` full screen under `title`), `location.get` (runs the
+action named in `then` with the device's position as `$arg`, `{lat, lon}`), `map.open` (a map
+app at `lat`, `lon`, pinned with `label`), `climate.sync` (fetches the module's `sync` now,
+decision 0022) and `calendar.sync` (writes the events within `scope`,
+an event id, a date, or the whole trip when left out, into a calendar the person picks once per
+pack, after showing what it would add, change and remove; decision 0021).
 
 Any mapping effect takes `if: expr` and is skipped when it is false. `$arg` is the value the
 component sent: any component with an `on_tap` sends its `value` prop. After the effects run, the rules decide again
@@ -206,22 +247,34 @@ set here.
 | `BigValue` | the answer, at the top, large |
 | `Label` | a line of small text |
 | `Card` | a titled box with a body; `kid: true` in kid mode becomes a kid box |
-| `Row` | label and value on one line; `state` (a block's `now`, `past`, ...) tints it |
-| `PhraseRow` | a phrase, its translation and a hint |
+| `Row` | `text` and `caption`, with `time` in a fixed column; `state` (a block's `now`, `past`, `locked`) tints it |
+| `PhraseRow` | `text` (the phrase there) in bold, its `translation`, and a `hint` above the phrase |
 | `Alert` | a warning, by severity |
 | `Chip` | a small tag |
 | `Button` | an action |
-| `Segmented` | a choice between a few items |
+| `Segmented` | two or three `items` of equal width; the one equal to `value` is filled, and a tap sends its item |
 | `Missing` | a fact nobody confirmed, drawn as a striped hole |
-| `Auto` | expands a mapping by the unknown key rule, one node per key; `skip: [keys]` leaves some out |
-| `Screen` | the frame: title, back link, the way to the first screen |
+| `Auto` | expands a mapping by the unknown key rule, one node per key; a list is a `Card` per item, and any other value one `Card`. `skip: [keys]` leaves keys out |
+| `Group` | a titled box around the components in its own `layout`; left out when nothing inside is drawn |
+| `Screen` | the frame: `title` in the top bar, `on_back` as a round button, every other `on_<event>` as a pill labelled by the prop of that name; `foot_label`, `foot_time` and `foot` in the bottom bar; `alarm: true` signals an audible/haptic alert to the host |
 
 A component is a one-key mapping, `Kind: {props}`. A prop is an expression; a text with `{` in it
 is a text template, like `"Next, {next.time}"`. `on_<event>: action` names an action of the same screen.
 `params` holds what `open` passed, and is empty on a screen the rules picked.
 
 `each: expr` on any component repeats it once per item, with the item available as `item` in its
-`if` and its props, not in `each` itself. `if: expr` hides it when false. The set grows only by shell release; see decision 0005.
+`if` and its props, not in `each` itself. `if: expr` hides it when false. Inside a `Group` that
+repeats, its item is also `group`, so a child with its own `each` still reaches it:
+
+```yaml
+- Group:
+    each: people
+    title: item.name
+    layout:
+      - Row: {each: documents, if: "item.for == group.id", text: item.title}
+```
+
+ The set grows only by shell release; see decision 0005.
 
 ### Expressions
 
@@ -235,12 +288,13 @@ not      := "not" not | compare
 compare  := value (("==" | "!=" | "<" | "<=" | ">" | ">=" | "in") value)?
 value    := literal | path | call | "(" expr ")"
 path     := name ("." name)*
-call     := name "(" expr ")"
+call     := name "(" (expr ("," expr)*)? ")"
 literal  := number | "'" text "'" | true | false | null
 ```
 
-Functions take one argument. `count` is the length of a list, a mapping or a text; `empty` is
-whether that length is zero; `first` and `last` are the ends of a list, and null for anything else.
+Functions:
+- One argument: `count` is the length of a list, a mapping or a text; `empty` is whether that length is zero; `first` and `last` are the ends of a list, and null for anything else.
+- Two arguments: `later(stamp, minutes)` adds a whole number of minutes to an ISO timestamp and returns the new timestamp string.
 A name or key that is not there is null. An expression is at most 128 tokens; past that, split it
 with `derive`.
 
@@ -254,6 +308,8 @@ is a load error with the path and the column.
 
 Comparing the clock with a literal, like `now.time >= '18:00'`, tells the engine when the answer
 can change, so the host sets its timer there ([decision 0013](decisions/0013-call-only-on-change.md)).
+`day.time` works the same on the day's own clock: the watch is moved by the difference between the
+two clocks.
 
 ## days
 
@@ -265,6 +321,7 @@ days:
   - date: 2026-04-11                  # required, YYYY-MM-DD
     title: Arrival and the tile museum  # required
     who: [rita, tomas]                # optional, person ids
+    zone: Europe/Lisbon               # optional, IANA. The day's clock; the pack's timezone if missing
     sleeps_at: Casa da Graca          # optional, any free key is allowed here too
     blocks:
       - ["09:20", "Land at LIS T1. Passport queue, 45 to 90 min to clear."]
@@ -291,6 +348,8 @@ The third element is what turns a line of text into a real moment:
 | `for` | person ids this block belongs to | everyone |
 | `guide` | who is offered the chance to present this moment | nobody, and the kid screen does not appear |
 | `until` | closes the moment before the next block starts | the next block closes it |
+| `zone` | the clock of this block, like a flight's departure | the day's `zone` |
+| `until_zone` | the clock of `until`, like a flight's arrival; `until` may then read earlier than the time, and ends the next day when that falls before the block | the block's zone |
 | `locked` | an hour that cannot move: a booked train, a timed entry | the hour is treated as soft |
 | `language` | which branch of your phrase sheets applies here | no phrase sheet |
 
@@ -331,15 +390,18 @@ alternatives, and the shell keeps the choice on the device.
     decision:
       when: 2026-04-09          # the night the app asks, once
       at: "21:00"
+      question: Which plan for tomorrow?
       decides: [2026-04-15]     # other days whose options depend on this answer
 ```
 
 Rules the shell applies, and they are the whole feature:
 
-- Until somebody chooses, the app behaves as the `recommended` option and says so in one line.
-- `fixed` blocks are the only ones written to the calendar up front. The chosen option's blocks are
-  written when it is chosen, and the previous option's events are removed. They are the only
-  calendar events the app ever retracts.
+- Until somebody chooses, the app behaves as the `recommended` option. From `when` at `at`, the
+  travel template asks an adult on its `choose` screen, which says so in one line; keeping a plan
+  stores it and writes the day to the calendar.
+- A sync writes the day's `blocks` and `fixed` blocks. An option's blocks are written only once it
+  is chosen, and a sync after a new choice removes the previous option's events. An event whose
+  block left the pack is removed too, and events the app did not write are never touched.
 - A day listed in `decides` filters its own options against the answer: an option whose `id`
   matches a `requires` on that day stays, the rest are dropped. Declare that with
   `requires: {date: 2026-04-12, option: hill_town}` on the dependent option.
@@ -352,7 +414,8 @@ places:
   azulejo:
     name: Museu Nacional do Azulejo
     kind: museum                      # free prose. Never used to choose a view
-    at: {lat: 38.7248, lon: -9.1139, radius_m: 120}   # optional, enables geofences
+    at: {lat: 38.7248, lon: -9.1139, radius_m: 120}   # optional, enables geofences; radius 100 when left out
+    address: "Rua da Madre de Deus 4"  # optional, the calendar event's location after the name
     safe: true                        # optional, a kid session may run here
     during:                           # the content of a moment at this place
       type: visit
@@ -372,6 +435,17 @@ places:
         for_kids: "Find the boat with three masts. There are four of them"
 ```
 
+A place may carry a `guide` script for the child the block names as its guide: `facts` to tell the
+family, a `question` with its `answer` behind a tap, and a `challenge`. Each key is optional.
+
+```yaml
+    guide:
+      facts: ["The building was a convent five hundred years ago."]
+      question: "Why did people put tiles on the outside of houses?"
+      answer: "They keep the walls cool and dry."
+      challenge: "Find a tile with a bird."
+```
+
 `points` is where kid mode earns its keep: in kid mode the sheet is **filtered**, not translated.
 Only points with `for_kids` appear, and that text is what shows. A point without it is not a gap to
 fill: there was nothing there to offer them.
@@ -387,7 +461,8 @@ people:
   - {id: tomas, name: Tomas, adult: false, theme: tomas}
 ```
 
-`adult` decides the mode, and it is not a setting anyone can flip. Who is holding the phone is
+`adult` decides the mode, and it is not a setting anyone can flip. `theme` names the theme drawn
+while that person holds the phone. Who is holding the phone is
 chosen once and changed on the handoff screen.
 
 ## alerts
@@ -423,21 +498,27 @@ Files that have to open with no signal, because somebody at a counter is asking 
 documents:
   - id: insurance_rita
     title: Travel insurance
-    for: rita                        # person id. One card per person
-    file: files/insurance-rita.pdf
+    for: rita                        # person id: whose it is
+    file: files/insurance-rita.pdf   # inside the pack folder
+    call:                            # label: number. Buttons that come before the file
+      Assistance: "+1 555 0100"
+      Emergency: "112"
     fields:
-      Certificate: "PT-2210554"
-      Cover: "20,000 EUR medical, repatriation included"
-      Call: "[to confirm]"
-      Valid: "6 h before departure until 6 h after the return flight"
+      Certificate: EX-0001
+      Cover: "Medical, repatriation included"
 ```
 
-The shell renders one card per document, groups them by `for`, opens the file full screen at maximum
-brightness, and never needs the network to do it.
+`file` is a path inside the pack folder: an absolute path or one with `..` is an error. Each
+number in `call` is digits, with an optional leading `+` and spaces, dashes, dots or brackets.
+
+The travel template lists them from the agenda, in a group per person, then the ones with no `for`. A document shows
+its numbers to call first, then its fields, then a button that opens the file full screen at
+maximum brightness, with no network. They are for adults: with a child holding the phone the
+module hands out none. See [decision 0018](decisions/0018-documents.md).
 
 ## climate
 
-Draft, read by the `climate` module. The weather a place usually has, and any day you know better.
+Read by the `climate` module. The weather a place usually has, and any day you know better.
 
 ```yaml
 climate:
@@ -459,7 +540,10 @@ climate:
 
 The most specific entry wins, and a key it lacks falls through to the next match. The module
 exposes the result for the current day and place as `weather.high`, `weather.low`, `weather.rain`,
-`weather.sunrise`, `weather.sunset`, `weather.summary` and `weather.as_of`.
+`weather.sunrise`, `weather.sunset`, `weather.summary` and `weather.units`. A module with a `sync`
+adds `weather.syncs` (true), `weather.as_of` (when the last good reply came, or null) and
+`weather.failed` (why the last try failed, or null), and then `weather` is never null, so a screen
+can always offer the sync.
 
 ## sheets
 
@@ -482,6 +566,45 @@ sheets:
       code: "MNA-20418"
       when: 2026-04-11T11:15
 ```
+
+## The theme file
+
+`theme.yaml` is the design system: colors per theme, and one type scale, spacing, radius, border
+and touch size for all of them. Sizes are px, drawn 1:1 as dp and sp; tracking is em.
+
+```yaml
+default: rita-light
+themes:
+  rita-light:
+    name: Rita
+    mode: light
+    colors: {paper: "#FFFFFF", ink: "#1B1B1F", ...}
+  rita-dark: {name: Rita at night, mode: dark, colors: {...}}
+  tomas-light:
+    name: Tomas
+    mode: light
+    kid: true
+    colors: {...}
+    shadow: {kid-action: "4px 4px 0 #1B1B1F", kid-box: "inset -4px -4px 0 #D9D9E0"}
+type:
+  hero: {size: 64px, line: 1, weight: 800, tracking: -0.02em, family: text}
+  px-hero: {size: 56px, line: 1, weight: 400, family: pixel}
+spacing: {margin: 16px, gap: 12px, ...}
+radius: {card: 16px, action: 16px, pill: 999px, ...}
+border: {base: 2px, kid: 4px, rule: 1px}
+touch: {min: 48px, action-height: 56px, row-height: 52px, chip: 40px}
+```
+
+The shell draws the holder's theme in the system's mode: `rita-dark` at night for a person with
+`theme: rita` or `theme: rita-light`. Without one, `default` in the mode, then `default` itself.
+A color, type step or size the chosen theme leaves out comes from the shell's own neutral theme,
+not from `default`, so a pack with no theme file still draws. `family` is `text` (Atkinson Hyperlegible Next) or `pixel` (Jersey 10). While a child
+holds the phone, a `px-` step replaces the plain one, a `Card` with `kid: true` becomes the kid box,
+and buttons carry the `kid-action` shadow.
+
+The app's Design system screen edits this file in place, one value at a time, and keeps its
+comments and order. It reaches only values of block mappings: write a theme you want to edit in
+block style, as `examples/one-day/theme.yaml` is.
 
 ## Path references
 

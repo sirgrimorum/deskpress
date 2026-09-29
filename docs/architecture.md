@@ -58,7 +58,7 @@ sequenceDiagram
   H->>H: draw, set one timer, register the regions
   Note over H: nothing changes: no call
   H->>E: dispatch(confirm)
-  E-->>H: tree + watch + store patch + commands
+  E-->>H: tree + watch + store patch + commands(name, args)
   H->>H: persist patch, run commands
   H->>E: screen(new world) when the timer fires or a region is crossed
 ```
@@ -67,9 +67,12 @@ Same world, same tree: the host never calls the engine to find out that nothing 
 `watch` says what would change the answer (the next instant, the geofences that matter), so the
 host waits on one timer instead of polling. See [decision 0013](decisions/0013-call-only-on-change.md).
 
-The world is four things: the local time in the pack's timezone as `YYYY-MM-DDTHH:MM` (the host
-converts, so the engine carries no timezone database), the ids of the places whose region the
-device is inside (never coordinates), who holds the phone, and the stored facts.
+The world is four things: the local time in the pack's timezone as `YYYY-MM-DDTHH:MM`, with the
+local time of each other zone the days name (the host converts, so the engine carries no
+timezone database), the ids of the places whose region the
+device is inside (never coordinates) and whether it knows where it is, who holds the phone, and
+the stored facts. The regions come from the pack: `watch` carries each place's circle, and the host
+works out which it is inside.
 
 ### Two machines
 
@@ -88,7 +91,7 @@ The details, and why, are in [decision 0002](decisions/0002-main-machine-and-scr
 
 Shared, tested domain logic that a pack opts into: `timeline` (which day, which block), `places`
 (which place, geofences), `people` (who holds the phone), `choices` (stored decisions), `alerts`,
-`documents`, `climate` (the weather here, today). Each exposes names to expressions and may ask the host for tools. A module mixes
+`documents`, `climate` (the weather here, today), `sheets` (reference tables). Each exposes names to expressions and may ask the host for tools. A module mixes
 two inputs: its data, which the pack says where to take from (the pack, a sync, or both), and the
 world, which the host pushes in and the module's code decides which parts it reads. See
 [decision 0004](decisions/0004-modules-and-derive.md).
@@ -122,18 +125,22 @@ The contract between engine and renderer. Plain data, versioned, and the same on
 
 ```json
 {
-  "version": 2,
+  "version": 4,
   "screen": "moment",
+  "theme": "rita-light",
+  "kid": false,
   "nodes": [
-    { "kind": "BigValue", "props": { "text": "11:15", "caption": "Tile museum, top floor first" }, "on": {} },
-    { "kind": "Button", "props": { "label": "Point by point" }, "on": { "tap": "points" } }
+    { "kind": "BigValue", "props": { "text": "11:15", "caption": "Tile museum, top floor first" }, "on": {}, "children": [] },
+    { "kind": "Button", "props": { "label": "Point by point" }, "on": { "tap": "points" }, "children": [] }
   ]
 }
 ```
 
 A prop is any value: text, a number, a list or a mapping. `on` maps an event to an action of the
 screen; the host sends that name back through `dispatch`, with the node's `value` prop as `$arg`.
-Theme and kid mode join the tree when their phases land.
+`children` are the nodes a `Group` holds; every other kind has none.
+`theme` is the theme id of the person holding the phone (empty for the pack's default) and `kid`
+says a child holds it, so the renderer switches to kid type, borders and boxes.
 
 Next to the tree, the engine returns `watch: {until, regions}` for the host, not the renderer. The
 renderer keeps the current tree on screen until a different one arrives, so a call never flickers.
@@ -147,20 +154,27 @@ wants it. Components read tokens and never branch on a theme name. Contrast is c
 on every edit: 4.5:1 or refused.
 
 The app's design system section shows every token and component of the loaded theme, lets you edit
-them, and writes the edit back to the theme file. See [decision 0006](decisions/0006-theme-edits-write-back.md).
+them, and writes the edit back to the theme file. The engine makes the edit in the file's text and
+checks the whole pack with it; the host only writes what it gets back. See
+[decision 0006](decisions/0006-theme-edits-write-back.md) and [0016](decisions/0016-theme-editor.md).
 
 ## The host
 
 Everything that touches the device lives here, in Kotlin: reading and writing the picked files,
 loading the engine through UniFFI, feeding it the clock and location, persisting stored facts, and
-the tools: open a map, sync a calendar, watch geofences, unlock with a fingerprint.
+the tools: open a map, sync a calendar, fetch a module's data, watch geofences, unlock with a fingerprint, dial a
+number, show a pack file full screen. For a calendar sync the engine says what the events are
+and what changed against what the host wrote before; the host writes only its own rows. See
+[decision 0021](decisions/0021-calendar.md).
 
 ## Offline first
 
 The pack is a file on the device. The engine and the validator are local. With no `sync` in the
-pack, the only thing that can reach the network is opening a map, and without signal that button
-shows the address as text.
+pack, nothing the app does reaches the network itself: opening a map hands the place to a map app,
+and a calendar sync writes into an account calendar the phone syncs on its own.
 
 A module can also sync its data, if the pack says so: by button or automatically, over the pack's
 own data or instead of it. The person approves the hosts once, a failed sync keeps the last good
-data with its age, and no secret lives in the pack. See [decision 0012](decisions/0012-data-sources-and-sync.md).
+data with its age, and no secret lives in the pack. The engine builds each request and reads each
+reply; the host only makes the HTTPS `GET`, and only while the app is open. See
+[decision 0012](decisions/0012-data-sources-and-sync.md) and [0022](decisions/0022-data-sync.md).
