@@ -511,6 +511,22 @@ packing: {check: true, items: [Hat, Bottle]}
         let visit = e.screen(&w, &mut Nav::default()).unwrap().tree;
         assert_eq!(prop(&visit, "Map", "image"), Value::String("maps/museum.png".into()));
         assert_eq!(prop(&visit, "Map", "caption"), Value::String("The hall".into()));
+        // A point with an `at` pins the moment's map and the kid's; the kid's list keeps for_kids.
+        let gate = load(&TRIP.replace(
+            "points: [{name: Hall, for_kids",
+            "points: [{name: Gate, at: {lat: 38.51, lon: -9.51}}, {name: Hall, for_kids",
+        ));
+        let area = |t: &Tree| {
+            let map = t.nodes.iter().find(|n| n.kind == "Map" && at(n, "image").is_none());
+            let points = map.and_then(|m| at(m, "points")).and_then(Value::as_list).unwrap();
+            points.iter().map(|p| text(p.get("name"))).collect::<Vec<_>>()
+        };
+        assert_eq!(area(&gate.screen(&w, &mut Nav::default()).unwrap().tree), ["Gate"]);
+        let leo = world("2026-04-11T11:30", "leo", &[]);
+        let kid = gate.dispatch(&leo, &mut Nav::default(), "go", Value::Null).unwrap().view.tree;
+        assert_eq!((kid.screen.as_str(), area(&kid)), ("kid", vec!["Gate".to_owned()]));
+        let rows: Vec<_> = said(&kid).into_iter().filter(|l| l.starts_with("Row")).collect();
+        assert_eq!(rows, ["Row  Hall"]);
         // A moving block lists what it passes, in the order it passes it.
         let (_, drive) = shown("2026-04-11T13:20", "ana", &[]);
         assert!(drive.contains(&"Row Bridge".to_owned()), "{drive:?}");

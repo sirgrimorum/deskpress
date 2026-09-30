@@ -179,7 +179,7 @@ with canonical keys, whatever the pack calls them.
 | `timeline` | `day`, `block`, `next`, `days`, `tomorrow` | today's day with its blocks in force, its `choice`, `started` (a timed block has begun) and `time` (the time on the day's own clock); the last block whose time has come, until its `until`; the first one still to come; every day; the day after today, with `first`, its first timed block. A block is `{time, text, state, event, ...its map}`, where `event` is its calendar id, `{date}.{list}.{n}`: the list is `blocks`, `fixed`, `option-{id}` or `added`, and `n` its place in that list. The day is then rebuilt from the device's own edits, `plan.<event>` and `added.<date>` |
 | `choices` | `decision` | the first decision due and unanswered, else the first one due, else the next one coming: `{date, title, options, recommended, choice, due, answered}` plus the decision's own keys. Due from `when` at `at` until its day is over |
 | `people` | `holder`, `people` | the person holding the phone (the host's, else the one stored as `holder`; a valid stamp stored as `holder_until` sets the watch until it runs out), and everyone |
-| `places` | `place`, `here`, `away`, `chart` | where the current block happens; the place the device is inside, the block's own when it is one of them, else the smallest; and whether the device knows where it is and is out of the block place's region. Both places carry their `id` ([decision 0020](decisions/0020-location.md)). `chart` is the day on plain paper: `{points, path, route, span_m}`, `route` being every stop in order as `{lat, lon, name}`, null when no place the day names has an `at` ([decision 0026](decisions/0026-maps.md)) |
+| `places` | `place`, `here`, `away`, `chart`, `area` | where the current block happens; the place the device is inside, the block's own when it is one of them, else the smallest; and whether the device knows where it is and is out of the block place's region. Both places carry their `id` ([decision 0020](decisions/0020-location.md)). `chart` is the day on plain paper: `{points, path, route, span_m}`, `route` being every stop in order as `{lat, lon, name}`, null when no place the day names has an `at` ([decision 0026](decisions/0026-maps.md)). `area` is the block's place up close: its points that have an `at`, charted the same way, `path` and `route` empty unless the place is `in_order`, null when none has one ([decision 0031](decisions/0031-maps-to-guide-by.md)) |
 | `alerts` | `alerts` | the ones showing now, most severe first: from `notify_from` (else the start of their day) to the end of their day |
 | `documents` | `documents` | all of them, each with `person` (the name of its `for`, from the `people` module listed before it) and `call` as `[{label, number}]`. None when a child holds the phone |
 | `climate` | `weather` | the weather for today at `place`, else `here` |
@@ -187,7 +187,7 @@ with canonical keys, whatever the pack calls them.
 
 A block's `state` is `note` (no time), `now`, `past`, `locked`, or `next` (still to come), for
 the agenda. A block's `type` comes out canonical through `keymap.values.type`, and a place's
-`during`, `parking` and `points` through their keymap contexts.
+`during`, `parking` and `points`, wherever the points sit, through their keymap contexts.
 
 A day with options runs its `fixed` blocks and the chosen option's, in time order. The choice in
 force is the one stored as `choice.<date>`, else the recommended one, else the first. A block with
@@ -298,7 +298,7 @@ set here.
 | `Segmented` | two or three `items` of equal width; the one equal to `value` is filled, and a tap sends its item |
 | `Check` | a line to tick off: `text`, and `checked` for the box. A tap sends its `value` |
 | `Field` | a line to type on: `label` above, `hint` when empty; every keystroke sends the typed text as `on_change` |
-| `Map` | pins at their fractions of a drawing: `points` as `{name, x, y, state}` with `x` and `y` from 0 to 1, `path` joining them in order, `image` a picture the pack carries, `caption`, and `span` metres as a scale line |
+| `Map` | pins at their fractions of a drawing: `points` as `{name, x, y, lat, lon, state}` with `x` and `y` from 0 to 1 and `lat` and `lon` optional, `path` joining them in order, `image` a picture the pack carries, `caption`, and `span` metres as a scale line. When the pins carry `lat` and `lon`, a tap opens them on a real map, full screen, in the card's words: `open` for the link and the title, `pick` before a pin is picked, `follow`, and `unplaced` when the phone has no position; English when left out |
 | `Missing` | a fact nobody confirmed, drawn as a striped hole |
 | `Auto` | expands a mapping by the unknown key rule, one node per key; a list is a `Card` per item, and any other value one `Card`. `skip: [keys]` leaves keys out |
 | `Group` | a titled box around the components in its own `layout`; left out when nothing inside is drawn |
@@ -477,13 +477,22 @@ places:
       where: "On the street below the cloister"
       price: "[to confirm]"
       verified: 2026-03-02
-    points:                           # ordered. The route is the order. May also sit inside during
+    in_order: false                   # optional: true joins the points on the map in their order
+    points:                           # may also sit inside during
       - id: panorama
         name: The great panorama
         what: "Twenty three metres of the city as it looked before the earthquake"
         why: "It is the only picture of the streets that are gone"
         for_kids: "Find the boat with three masts. There are four of them"
+      - id: cloister
+        name: The small cloister
+        at: {lat: 38.7245, lon: -9.1141}   # optional: puts the point on the place's map
 ```
+
+A point with an `at` is a pin on the place's map, which a person can walk the family around
+([decision 0031](decisions/0031-maps-to-guide-by.md)). The map kept offline reaches the place's
+circle and at least a kilometre around it; a point farther out is a warning, and so are points
+with an `at` in a place that has none.
 
 A place shows through the blocks that name it with `place:`, or through `here` when it has an
 `at`; one with neither is a warning.
@@ -501,7 +510,7 @@ family, a `question` with its `answer` behind a tap, and a `challenge`. Each key
 
 `points` is where kid mode earns its keep: in kid mode the sheet is **filtered**, not translated.
 Only points with `for_kids` appear, and that text is what shows. A point without it is not a gap to
-fill: there was nothing there to offer them.
+fill: there was nothing there to offer them. The map above it still shows every point with an `at`.
 
 A place may also carry a `plan`, its own map: named pins in the picture's own coordinates, and the
 picture when the pack ships one ([decision 0026](decisions/0026-maps.md)). `x` and `y` run from 0 to

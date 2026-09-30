@@ -25,14 +25,15 @@ history.
 | [0017](0017-kid-mode-and-handoff.md) | kid mode, handoff, and host device commands | accepted, amended by 0023 |
 | [0018](0018-documents.md) | documents: numbers before the file, the file full screen offline, adults only | accepted |
 | [0019](0019-group.md) | `Group`, the one component that holds others; tree version 4 | accepted |
-| [0020](0020-location.md) | location: geofences only while open, `away`, the car's spot and the map | accepted |
+| [0020](0020-location.md) | location: geofences only while open, `away`, the car's spot and the map | accepted, amended by 0031 |
 | [0021](0021-calendar.md) | calendar sync: a picked account calendar, a ledger of the app's own events, a plan to confirm | accepted, amended by 0023 |
 | [0022](0022-data-sync.md) | data sync: the engine builds requests and reads replies, the host fetches; climate first | accepted |
 | [0023](0023-drift-review.md) | the drift review of phase 7: what was fixed, what is kept on purpose, the spec's extras as phases | accepted |
 | [0024](0024-public-repo-ci-and-security.md) | the public repo: remote, CI for gate and Android, security audit, community files | accepted |
 | [0025](0025-the-day-in-hand.md) | the day in hand: edits as facts keyed by `event`, checkable sheets, the set-off notice, two shell settings | accepted, amended by 0030 |
-| [0026](0026-maps.md) | maps with nothing fetched: the day's chart, a place's plan, `road`, and the `Map` component | accepted |
+| [0026](0026-maps.md) | maps with nothing fetched: the day's chart, a place's plan, `road`, and the `Map` component | accepted, amended by 0031 |
 | [0027](0027-the-assistant.md) | the assistant in three tiers: the pack's menu of questions, the phone's own model, and shortcuts outside the app | accepted, amended by 0030 |
 | [0028](0028-performance-at-scale.md) | performance at scale: one calendar batch, one query per directory, a key per node; the stored facts measured and left where they are | accepted |
 | [0029](0029-the-authoring-plugin.md) | the authoring plugin: the repo as plugin and marketplace, the binary from git, `reference` and `preview` in the CLI, no MCP server yet | accepted |
 | [0030](0030-trying-a-moment-and-the-day-as-a-route.md) | a pretend clock and place in Settings, answers in a `Dialog`, the day's stops as a route, only the installed map apps | accepted |
+| [0031](0031-maps-to-guide-by.md) | maps to guide by: points with `at`, an order only when the pack gives one, the trip's tiles kept on a press, the Map card full screen on MapLibre | accepted |

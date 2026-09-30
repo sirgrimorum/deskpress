@@ -196,8 +196,9 @@
           "additionalProperties": true
         },
         "parking": { "type": "object", "additionalProperties": true },
+        "in_order": { "type": "boolean", "default": false, "description": "Joins the points with a position on the map, in their order." },
         "points": {
-          "description": "Ordered. The route is the order. In kid mode the list is filtered to points that have for_kids. May also sit inside during, where many packs already keep it.",
+          "description": "In kid mode the list is filtered to points that have for_kids; the map shows every point with an at. May also sit inside during, where many packs already keep it.",
           "type": "array",
           "items": {
             "type": "object",
@@ -207,7 +208,17 @@
               "name": { "type": "string", "minLength": 1 },
               "what": { "type": "string" },
               "why": { "type": "string" },
-              "for_kids": { "type": "string" }
+              "for_kids": { "type": "string" },
+              "at": {
+                "description": "Where the point is outdoors, for the place's map. No radius.",
+                "type": "object",
+                "required": ["lat", "lon"],
+                "properties": {
+                  "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+                  "lon": { "type": "number", "minimum": -180, "maximum": 180 }
+                },
+                "additionalProperties": false
+              }
             },
             "additionalProperties": true
           }

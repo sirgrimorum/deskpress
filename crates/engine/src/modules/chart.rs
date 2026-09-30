@@ -1,6 +1,6 @@
-//! The day's places as pins on plain paper (decision 0026). Equirectangular with a `cos`
-//! correction at the middle latitude: right for a day you can cross, and honest about being
-//! nothing more. Nothing here is fetched; the numbers are the pack's own.
+//! The day's places, or a place's points, as pins on plain paper (decisions 0026 and 0031).
+//! Equirectangular with a `cos` correction at the middle latitude: right for a day you can cross,
+//! and honest about being nothing more. Nothing here is fetched; the numbers are the pack's own.
 
 use crate::value::{Map, Value};
 
@@ -19,6 +19,12 @@ pub(crate) struct Pin {
     pub state: &'static str,
 }
 
+/// Metres between two points near enough for this projection to measure.
+pub(crate) fn apart(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    let wide = ((lat1 + lat2) / 2.0).to_radians().cos();
+    ((lon2 - lon1) * wide).hypot(lat2 - lat1) * DEGREE_M
+}
+
 /// The lowest and highest of a run of numbers, which is never empty here.
 fn span(values: impl Iterator<Item = f64>) -> (f64, f64) {
     values.fold((f64::MAX, f64::MIN), |(low, high), v| (low.min(v), high.max(v)))
@@ -29,11 +35,10 @@ fn round(v: f64) -> Value {
     Value::Number((v * 10_000.0).round() / 10_000.0)
 }
 
-/// The chart of these stops, in the order the day visits them: `points`, one pin per place;
-/// `path`, one `{x, y}` per stop, so a place visited twice is one pin and two stops; `route`, one
-/// `{lat, lon, name}` per stop, a repeat in a row dropped, for a navigator; and `span_m`, how wide
-/// the drawing is on the ground, for a scale line. `Null` with no stops.
-pub(crate) fn chart(stops: &[Pin]) -> Value {
+/// These stops in visit order: `points`, a pin per place; `path`, `{x, y, lat, lon}` per stop;
+/// `route`, `{lat, lon, name}` per stop, a repeat in a row dropped; `span_m`, the width on the
+/// ground. `path` and `route` stay empty unless `joined`. `Null` with no stops.
+pub(crate) fn chart(stops: &[Pin], joined: bool) -> Value {
     if stops.is_empty() {
         return Value::Null;
     }
@@ -52,7 +57,7 @@ pub(crate) fn chart(stops: &[Pin]) -> Value {
     let mut path: Vec<Value> = Vec::new();
     let mut route: Vec<Value> = Vec::new();
     for (i, (stop, at)) in stops.iter().zip(&uv).enumerate() {
-        if i == 0 || stops[i - 1].id != stop.id {
+        if joined && (i == 0 || stops[i - 1].id != stop.id) {
             let mut leg = Map::default();
             leg.set("lat", Value::Number(stop.lat));
             leg.set("lon", Value::Number(stop.lon));
@@ -63,7 +68,11 @@ pub(crate) fn chart(stops: &[Pin]) -> Value {
         let mut step = Map::default();
         step.set("x", round(x));
         step.set("y", round(y));
-        path.push(Value::Map(step.clone()));
+        step.set("lat", Value::Number(stop.lat));
+        step.set("lon", Value::Number(stop.lon));
+        if joined {
+            path.push(Value::Map(step.clone()));
+        }
         if points.iter().any(|p| p.get("id") == Some(&Value::String(stop.id.clone()))) {
             continue;
         }
@@ -92,15 +101,15 @@ mod tests {
 
     #[test]
     fn a_day_that_stops_nowhere_has_no_chart() {
-        assert_eq!(chart(&[]), Value::Null);
+        assert_eq!(chart(&[], true), Value::Null);
     }
 
     #[test]
     fn one_place_sits_in_the_middle_of_the_paper_and_spans_nothing() {
-        let out = chart(&[pin("a", 38.7, -9.1, "now")]);
+        let out = chart(&[pin("a", 38.7, -9.1, "now")], true);
         assert_eq!(
             show(out.get("points")),
-            r#"[{"x": 0.5, "y": 0.5, "id": "a", "name": "A", "state": "now"}]"#
+            r#"[{"x": 0.5, "y": 0.5, "lat": 38.7, "lon": -9.1, "id": "a", "name": "A", "state": "now"}]"#
         );
         assert_eq!(out.get("span_m"), Some(&Value::Number(0.0)));
     }
@@ -108,15 +117,15 @@ mod tests {
     #[test]
     fn the_widest_axis_fills_the_paper_and_the_other_stays_centred() {
         // Two degrees of latitude apart, none of longitude: the drawing is a vertical line.
-        let out = chart(&[pin("n", 39.0, -9.0, ""), pin("s", 37.0, -9.0, "here")]);
+        let out = chart(&[pin("n", 39.0, -9.0, ""), pin("s", 37.0, -9.0, "here")], true);
         let points = out.get("points").unwrap().as_list().unwrap();
         assert_eq!(
             show(Some(&points[0])),
-            r#"{"x": 0.5, "y": 0.1, "id": "n", "name": "N", "state": ""}"#
+            r#"{"x": 0.5, "y": 0.1, "lat": 39, "lon": -9, "id": "n", "name": "N", "state": ""}"#
         );
         assert_eq!(
             show(Some(&points[1])),
-            r#"{"x": 0.5, "y": 0.9, "id": "s", "name": "S", "state": "here"}"#
+            r#"{"x": 0.5, "y": 0.9, "lat": 37, "lon": -9, "id": "s", "name": "S", "state": "here"}"#
         );
         // Two degrees of latitude, and the diagonal of a line is the line.
         assert_eq!(out.get("span_m"), Some(&Value::Number(222640.0)));
@@ -124,41 +133,48 @@ mod tests {
 
     #[test]
     fn a_place_visited_twice_is_one_pin_and_two_stops_on_the_path() {
-        let out =
-            chart(&[pin("a", 38.0, -9.0, ""), pin("b", 38.1, -9.0, ""), pin("a", 38.0, -9.0, "")]);
+        let stops = [pin("a", 38.0, -9.0, ""), pin("b", 38.1, -9.0, ""), pin("a", 38.0, -9.0, "")];
+        let out = chart(&stops, true);
         assert_eq!(out.get("points").unwrap().as_list().unwrap().len(), 2);
         assert_eq!(
             show(out.get("path")),
-            r#"[{"x": 0.5, "y": 0.9}, {"x": 0.5, "y": 0.1}, {"x": 0.5, "y": 0.9}]"#
+            r#"[{"x": 0.5, "y": 0.9, "lat": 38, "lon": -9}, {"x": 0.5, "y": 0.1, "lat": 38.1, "lon": -9}, {"x": 0.5, "y": 0.9, "lat": 38, "lon": -9}]"#
         );
     }
 
     #[test]
     fn the_route_is_every_stop_in_order_and_a_stay_in_a_row_is_one() {
-        let out = chart(&[
+        let stops = [
             pin("a", 38.0, -9.0, ""),
             pin("a", 38.0, -9.0, ""),
             pin("b", 38.1, -9.2, ""),
             pin("a", 38.0, -9.0, ""),
-        ]);
+        ];
         assert_eq!(
-            show(out.get("route")),
+            show(chart(&stops, true).get("route")),
             r#"[{"lat": 38, "lon": -9, "name": "A"}, {"lat": 38.1, "lon": -9.2, "name": "B"}, {"lat": 38, "lon": -9, "name": "A"}]"#
         );
     }
 
     #[test]
+    fn pins_with_no_order_are_not_joined() {
+        let out = chart(&[pin("a", 38.0, -9.0, ""), pin("b", 38.1, -9.2, "")], false);
+        assert_eq!(out.get("points").unwrap().as_list().unwrap().len(), 2);
+        assert_eq!((show(out.get("path")), show(out.get("route"))), ("[]".into(), "[]".into()));
+    }
+
+    #[test]
     fn longitude_is_narrowed_at_the_latitude_the_day_is_at() {
         // The same degrees each way, far north: the east west side draws shorter than the other.
-        let out = chart(&[pin("a", 60.0, 0.0, ""), pin("b", 61.0, 1.0, "")]);
+        let out = chart(&[pin("a", 60.0, 0.0, ""), pin("b", 61.0, 1.0, "")], true);
         let points = out.get("points").unwrap().as_list().unwrap();
         assert_eq!(
             show(Some(&points[0])),
-            r#"{"x": 0.303, "y": 0.9, "id": "a", "name": "A", "state": ""}"#
+            r#"{"x": 0.303, "y": 0.9, "lat": 60, "lon": 0, "id": "a", "name": "A", "state": ""}"#
         );
         assert_eq!(
             show(Some(&points[1])),
-            r#"{"x": 0.697, "y": 0.1, "id": "b", "name": "B", "state": ""}"#
+            r#"{"x": 0.697, "y": 0.1, "lat": 61, "lon": 1, "id": "b", "name": "B", "state": ""}"#
         );
     }
 }

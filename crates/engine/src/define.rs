@@ -20,7 +20,7 @@ pub const MODULES: [(&str, &str, &[&str]); 8] = [
     ("timeline", "days", &["day", "block", "next", "days", "tomorrow"]),
     ("choices", "days", &["decision"]),
     ("people", "people", &["holder", "people"]),
-    ("places", "places", &["place", "here", "away", "chart"]),
+    ("places", "places", &["place", "here", "away", "chart", "area"]),
     ("alerts", "alerts", &["alerts"]),
     ("documents", "documents", &["documents"]),
     ("climate", "climate", &["weather"]),

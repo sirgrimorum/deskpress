@@ -2,7 +2,7 @@
 //! would change. Every module hands out canonical keys, whatever the pack calls them.
 
 mod calendar;
-mod chart;
+pub(crate) mod chart;
 pub(crate) mod plan;
 
 use std::cmp::Reverse;
@@ -50,13 +50,34 @@ fn holds(block: &Map, holder: &str) -> bool {
 }
 
 /// The circle of a place's `at`, when it has both coordinates. The radius defaults to 100 metres.
-fn region(id: &str, at: &Value) -> Option<Region> {
+pub(crate) fn region(id: &str, at: &Value) -> Option<Region> {
     let number = |k: &str| match at.get(k) {
         Some(Value::Number(n)) => Some(*n),
         _ => None,
     };
     let (lat, lon) = (number("lat")?, number("lon")?);
     Some(Region { id: id.to_owned(), lat, lon, radius_m: number("radius_m").unwrap_or(100.0) })
+}
+
+/// The place up close: its points that have an `at`, joined only when it is `in_order`.
+fn area(place: &Value) -> Value {
+    let points = place.get("points").filter(|p| **p != Value::Null);
+    let points = points.or_else(|| place.get("during")?.get("points"));
+    let pins: Vec<chart::Pin> = points
+        .and_then(Value::as_list)
+        .unwrap_or_default()
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| {
+            // A point with no id is a pin of its own, under its index, which no id can be.
+            let id = Some(text(p.get("id")))
+                .filter(|id| !id.is_empty())
+                .unwrap_or_else(|| i.to_string());
+            let at = region(&id, p.get("at")?)?;
+            Some(chart::Pin { id, name: text(p.get("name")), lat: at.lat, lon: at.lon, state: "" })
+        })
+        .collect();
+    chart::chart(&pins, place.get("in_order") == Some(&Value::Bool(true)))
 }
 
 impl<'a> Run<'a> {
@@ -424,17 +445,15 @@ impl<'a> Run<'a> {
             let place = places?.get(id)?;
             let mut m = self.canon(place, "place");
             for kind in ["during", "parking", "plan"] {
-                if let Some(v) = m.get(kind).map(|v| self.keymap.canon(v, kind)) {
+                if let Some(mut v) = m.get(kind).map(|v| self.keymap.canon(v, kind)) {
+                    // Points inside `during` or a `plan` go through the `point` context too.
+                    if let Value::Map(inner) = &mut v {
+                        self.pointed(inner);
+                    }
                     m.set(kind, v);
                 }
             }
             self.pointed(&mut m);
-            // A terminal map is a plan of its own, with pins in the picture's coordinates.
-            if let Some(plan) = m.get("plan").and_then(Value::as_map) {
-                let mut plan = plan.clone();
-                self.pointed(&mut plan);
-                m.set("plan", Value::Map(plan));
-            }
             m.set("id", Value::String(id.to_owned()));
             Some(Value::Map(m))
         };
@@ -452,6 +471,7 @@ impl<'a> Run<'a> {
         let away = self.world.located && fenced && !inside.contains(&at);
         let place = find(&at).unwrap_or(Value::Null);
         self.regions.extend(regions);
+        self.set("area", area(&place));
         self.set("place", place);
         self.set("here", here);
         self.set("away", Value::Bool(away));
@@ -476,7 +496,7 @@ impl<'a> Run<'a> {
                 Some(chart::Pin { id, name, lat: circle.lat, lon: circle.lon, state })
             })
             .collect();
-        self.set("chart", chart::chart(&stops));
+        self.set("chart", chart::chart(&stops, true));
     }
 
     /// The `points` of a mapping, each through the `point` context.
@@ -1173,6 +1193,39 @@ day: {blocks: [{place: azulejo}, {place: odd}, {place: half}, {place: cais}, {pl
             out.at("here.plan"),
             r#"{"image": "hall.png", "points": [{"name": "Gate", "x": 0.5, "y": 0.5}]}"#
         );
+    }
+
+    #[test]
+    fn the_area_is_the_block_places_points_that_have_a_position() {
+        let keymap = "keymap: {place: {in_order: seguidos}, point: {name: nombre, at: donde}}";
+        let content = "places:
+  castle:
+    name: Castle
+    points:
+      - {id: gate, nombre: Gate, donde: {lat: 38.71, lon: -9.13}}
+      - {nombre: Tower, donde: {lat: 38.712, lon: -9.132}}
+      - {id: shop, nombre: Shop}
+      - {id: half, nombre: Half, donde: {lat: 38.7}}
+  walk:
+    seguidos: true
+    points: ~
+    during: {points: [{id: b, nombre: B, donde: {lat: 1.001, lon: 1}}, {id: c, nombre: C}, {id: a, nombre: A, donde: {lat: 1, lon: 1}}]}
+  bare: {name: Bare, during: x}
+  indoors: {name: Indoors, points: [{id: x, nombre: X}]}
+";
+        let w = world("2026-04-11T10:00", &[]);
+        let area =
+            |block: &str| run("places", keymap, content, &w, &format!("block: {{place: {block}}}"));
+        let out = area("castle");
+        // The tower has no id, so its place in the list stands for one; shop and half have no position.
+        assert_eq!(out.each("area.points", "id"), "gate 1");
+        assert!(out.at("area.points").contains(r#""lat": 38.712, "lon": -9.132"#));
+        assert_eq!(pair(out.at("area.path"), out.at("area.route")), strs("[]", "[]"));
+        let out = area("walk");
+        // Joined in the pack's order, skipping the point with no position.
+        assert_eq!(out.each("area.route", "name"), "B A");
+        assert_eq!(out.at("area.path").matches("\"x\"").count(), 2);
+        assert_eq!(pair(area("bare").at("area"), area("indoors").at("area")), strs("null", "null"));
     }
 
     #[test]

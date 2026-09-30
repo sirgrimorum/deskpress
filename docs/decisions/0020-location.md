@@ -1,6 +1,7 @@
 # 0020: location
 
-Status: accepted, 2026-09-28.
+Status: accepted, 2026-09-28. Amended by [0031](0031-maps-to-guide-by.md): opening a Map card full
+screen asks for the position too, and follows it closely while open.
 
 ## Context
 

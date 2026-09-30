@@ -35,6 +35,10 @@ ui:
   map: Open in the map
   chart: The day on a map
   route: The whole day in the map app
+  lead: Lead the way
+  pick_next: Pick where to go next.
+  follow_me: Follow me
+  no_position: no position yet
   on_the_way: On the way
   park: Save where the car is
   car: The car
@@ -188,6 +192,7 @@ screens:
       - Button: {if: points, label: ui.points, on_tap: points}
       - Button: {if: block.ticket or place.during.ticket, label: ui.ticket, on_tap: ticket}
       - Map: {if: place.plan, points: place.plan.points, image: place.plan.image, caption: place.plan.caption}
+      - Map: {if: area, points: area.points, path: area.path, span: area.span_m, open: ui.lead, pick: ui.pick_next, follow: ui.follow_me, unplaced: ui.no_position}
       - Button: {if: place.at, label: ui.map, on_tap: map}
       - Button: {if: chart, label: ui.chart, on_tap: chart}
       - Button: {if: questions, label: ui.ask, on_tap: ask}
@@ -258,7 +263,7 @@ screens:
       - Button: {if: weather.syncs and not kid, label: ui.weather_sync, on_tap: weather}
 
   # The day on plain paper: the places it stops at, in the order it visits them. Nothing is
-  # fetched; the pins are the pack's own coordinates.
+  # fetched; a tap opens the pins on the trip's maps when those are kept.
   chart:
     actions:
       back: [back]
@@ -266,7 +271,7 @@ screens:
       route: [{do: map.route, with: {stops: chart.route}}]
     layout:
       - Screen: {title: ui.chart, back: ui.back, on_back: back}
-      - Map: {points: chart.points, path: chart.path, span: chart.span_m}
+      - Map: {points: chart.points, path: chart.path, span: chart.span_m, open: ui.lead, pick: ui.pick_next, follow: ui.follow_me, unplaced: ui.no_position}
       - Button: {if: count(chart.route) > 1, label: ui.route, on_tap: route}
       - Button: {if: place.at, label: ui.map, on_tap: map}
 
@@ -431,6 +436,7 @@ screens:
       - Button: {if: guiding and place.guide.answer and not answer, label: ui.show_answer, on_tap: answer}
       - Card: {if: guiding and answer, text: place.guide.answer}
       - Card: {if: guiding and place.guide.challenge, title: ui.challenge, text: place.guide.challenge}
+      - Map: {if: area, points: area.points, path: area.path, span: area.span_m, open: ui.lead, pick: ui.pick_next, follow: ui.follow_me, unplaced: ui.no_position}
       - Row: {each: points, if: item.for_kids, text: item.name, caption: item.for_kids}
       - Button: {if: questions, label: ui.ask, on_tap: ask}
       - Button: {label: ui.give_back, on_tap: give_back}

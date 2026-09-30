@@ -67,8 +67,14 @@ places:
         for_kids: "Find the boat with three masts. There are four of them."
       - id: cloister
         name: The small cloister
+        at: {lat: 38.7245, lon: -9.1141}
         what: "Manueline arches, and the quietest bench in the building."
         for_kids: "Count the lions. They are all different on purpose."
+      - id: church
+        name: The church of Madre de Deus
+        at: {lat: 38.7247, lon: -9.1137}
+        what: "Carved wood covered in gold on every wall, and tiles under it."
+        for_kids: "Look up. Almost everything that shines is wood painted with gold."
     # What the child the block names as guide tells the family.
     guide:
       facts:

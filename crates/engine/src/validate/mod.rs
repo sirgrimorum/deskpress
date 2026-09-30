@@ -15,7 +15,18 @@ use patterns::{
 };
 pub use theme::TOKENS as COLOR_TOKENS;
 
+use crate::engine::Region;
+use crate::modules::chart::apart;
+use crate::modules::region;
 use crate::value::{Map, Value, quote, show, text, truthy};
+
+/// How far around a place its offline map is kept at the least, in metres, as `Maps.kt` keeps it.
+const KEPT_M: f64 = 1000.0;
+
+/// A number from `lo` to `hi`, both included.
+fn within(v: Option<&Value>, lo: f64, hi: f64) -> bool {
+    matches!(v, Some(Value::Number(n)) if (lo..=hi).contains(n))
+}
 
 /// One problem, at a path into the pack (`days.2026-04-11.blocks[2]`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -266,6 +277,12 @@ impl Checker<'_> {
                 Some(Value::Map(coords)) => {
                     self.shown.insert(id.to_owned());
                     self.coordinates(&at, coords);
+                    let radius = coords.get("radius_m");
+                    if radius.is_some() && !within(radius, 25.0, 20000.0) {
+                        let message =
+                            format!("{} is not a radius in metres between 25 and 20000", show(radius));
+                        self.r.error(format!("{at}.at.radius_m"), message);
+                    }
                 }
                 Some(_) => {
                     self.r.error(format!("{at}.at"), "has to be a mapping with lat, lon and radius_m");
@@ -296,33 +313,36 @@ impl Checker<'_> {
                 .filter(|p| **p != Value::Null)
                 .or_else(|| during_map.and_then(|d| keymap.field(d, "place", "points")));
             if let Some(points) = points {
-                self.points(&at, points);
+                let around = read("at").and_then(|c| region(id, c));
+                self.points(&at, points, around.as_ref());
+            }
+            if read("in_order").is_some_and(|o| !matches!(o, Value::Bool(_))) {
+                self.r.error(format!("{at}.in_order"), "is true or false");
             }
             if let Some(plan) = read("plan") {
                 self.plan(&at, plan);
             }
-            let known =
-                ["name", "kind", "at", "safe", "during", "parking", "points", "plan", "verified"];
+            let known = [
+                "name", "kind", "at", "safe", "during", "parking", "points", "in_order", "plan",
+                "verified",
+            ];
             self.free_keys(&at, place, &known, "place");
         }
     }
 
-    fn coordinates(&mut self, at: &str, coords: &Map) {
-        let within = |v: Option<&Value>, lo: f64, hi: f64| matches!(v, Some(Value::Number(n)) if (lo..=hi).contains(n));
+    /// `lat` and `lon`, and whether both are on the globe.
+    fn coordinates(&mut self, at: &str, coords: &Map) -> bool {
         let lat = coords.get("lat");
-        if !within(lat, -90.0, 90.0) {
+        let on_lat = within(lat, -90.0, 90.0);
+        if !on_lat {
             self.r.error(format!("{at}.at.lat"), format!("{} is not a latitude", show(lat)));
         }
         let lon = coords.get("lon");
-        if !within(lon, -180.0, 180.0) {
+        let on_lon = within(lon, -180.0, 180.0);
+        if !on_lon {
             self.r.error(format!("{at}.at.lon"), format!("{} is not a longitude", show(lon)));
         }
-        let radius = coords.get("radius_m");
-        if radius.is_some() && !within(radius, 25.0, 20000.0) {
-            let message =
-                format!("{} is not a radius in metres between 25 and 20000", show(radius));
-            self.r.error(format!("{at}.at.radius_m"), message);
-        }
+        on_lat && on_lon
     }
 
     /// A place's own map: pins in the picture's coordinates, and the picture when there is one
@@ -368,14 +388,15 @@ impl Checker<'_> {
         }
     }
 
-    fn points(&mut self, at: &str, points: &Value) {
+    /// A place's points; `around` is the place's own circle, which its offline map keeps.
+    fn points(&mut self, at: &str, points: &Value, around: Option<&Region>) {
         let Some(points) = points.as_list() else {
-            self.r
-                .error(format!("{at}.points"), "has to be a list, in the order you would walk it");
+            self.r.error(format!("{at}.points"), "has to be a list of points");
             return;
         };
         let keymap = self.keymap;
         let mut seen = HashSet::new();
+        let mut pinned = false;
         for (i, pt) in points.iter().enumerate() {
             let pat = format!("{at}.points[{i}]");
             let Some(pt) = pt.as_map() else {
@@ -385,6 +406,8 @@ impl Checker<'_> {
             let id = pt.get("id");
             if !truthy(id) {
                 self.r.warn(&pat, "a point with no id cannot be linked to");
+            } else if !is_id(&text(id)) {
+                self.r.error(format!("{pat}.id"), format!("{} {NOT_AN_ID}", show(id)));
             } else if !seen.insert(text(id)) {
                 let message = format!("{} is used twice in this place", show(id));
                 self.r.error(format!("{pat}.id"), message);
@@ -392,12 +415,42 @@ impl Checker<'_> {
             if !truthy(keymap.field(pt, "point", "name")) {
                 self.r.error(&pat, "a point needs a name");
             }
+            if let Some(spot) = keymap.field(pt, "point", "at") {
+                pinned = true;
+                self.point_at(&pat, spot, around);
+            }
             if self.kids && !truthy(keymap.field(pt, "point", "for_kids")) {
                 self.r.warn(
                     &pat,
-                    "nothing written for a kid here, so this point is hidden in kid mode",
+                    "nothing written for a kid here, so this point is left out of the kid's list",
                 );
             }
+        }
+        if pinned && around.is_none() {
+            self.r
+                .warn(at, "its points have a position but it has none, so no map is kept for them");
+        }
+    }
+
+    /// A point's own position, and whether the map kept offline around its place reaches it.
+    fn point_at(&mut self, at: &str, spot: &Value, around: Option<&Region>) {
+        let Some(coords) = spot.as_map() else {
+            self.r.error(format!("{at}.at"), "has to be a mapping with lat and lon");
+            return;
+        };
+        if !self.coordinates(at, coords) {
+            return;
+        }
+        if coords.get("radius_m").is_some() {
+            self.r.warn(format!("{at}.at.radius_m"), "a point has no radius, only where it is");
+        }
+        let (Some(c), Some(p)) = (around, region("", spot)) else { return };
+        let (far, reach) = (apart(c.lat, c.lon, p.lat, p.lon), c.radius_m.max(KEPT_M));
+        if far > reach {
+            let message = format!(
+                "is {far:.0} m from its place, and the map kept offline reaches {reach:.0} m around it"
+            );
+            self.r.warn(format!("{at}.at"), message);
         }
     }
 
@@ -985,7 +1038,7 @@ mod tests {
             "places.old.verified: \"April\" is not a date, YYYY-MM-DD",
             "places.old.during: has to be a mapping",
             "places.old.parking: has to be a mapping",
-            "places.old.points: has to be a list, in the order you would walk it",
+            "places.old.points: has to be a list of points",
         ] {
             assert!(s.contains(needle), "wanted {needle:?} in:\n{s}");
         }
@@ -1017,6 +1070,7 @@ places:
       - {name: Hall}
       - {id: hall, name: Hall, for_kids: The big one}
       - {id: hall}
+      - {id: Hall, name: Big}
   park:
     name: Park
     at: {lat: 1, lon: 1}
@@ -1031,12 +1085,57 @@ places:
             "places.museum.points[1]: nothing written for a kid here",
             "places.museum.points[3].id: \"hall\" is used twice in this place",
             "places.museum.points[3]: a point needs a name",
+            "places.museum.points[4].id: \"Hall\" is not an id",
             "places.park.during.type: \"walk\" is not one of the thirteen types. Did you mean walking?",
         ] {
             assert!(s.contains(needle), "wanted {needle:?} in:\n{s}");
         }
         assert!(!s.contains("points[2]"), "{s}");
         assert!(!s.contains("places.park.points"), "{s}");
+    }
+
+    #[test]
+    fn a_point_may_carry_its_own_position_and_the_place_its_order() {
+        let content = day_and(
+            "places:
+  castle:
+    name: Castle
+    at: {lat: 38.7, lon: -9.1, radius_m: 300}
+    in_order: 'yes'
+    points:
+      - {id: gate, name: Gate, at: {lat: 38.701, lon: -9.1}}
+      - {id: moat, name: Moat, at: {lat: 91, lon: -9.1}}
+      - {id: far, name: Far, at: {lat: 38.72, lon: -9.1}}
+      - {id: odd, name: Odd, at: here}
+      - {id: well, name: Well, at: {lat: 38.7, lon: -9.1, radius_m: 30}}
+  town:
+    name: Town
+    at: {lat: 38.7, lon: -9.1, radius_m: 5000}
+    points: [{id: square, name: Square, at: {lat: 38.718, lon: -9.1}}]
+  loose:
+    name: Loose
+    in_order: true
+    points: [{id: a, name: A, at: {lat: 1, lon: 1}}]
+",
+        );
+        let s = said(&with("", &content, None));
+        for needle in [
+            "places.castle.in_order: is true or false",
+            "places.castle.points[1].at.lat: 91 is not a latitude",
+            "places.castle.points[2].at: is 2226 m from its place, and the map kept offline reaches 1000 m around it",
+            "places.castle.points[3].at: has to be a mapping with lat and lon",
+            "places.castle.points[4].at.radius_m: a point has no radius, only where it is",
+        ] {
+            assert!(s.contains(needle), "wanted {needle:?} in:\n{s}");
+        }
+        assert!(!s.contains("points[0]") && !s.contains("places.loose.points"), "{s}");
+        // Off the globe is one error, not a distance too; a wide place keeps its own circle.
+        assert!(!s.contains("points[1].at:") && !s.contains("places.town"), "{s}");
+        assert!(!s.contains("places.loose.in_order"), "{s}");
+        // A place with no circle of its own has no offline map at all.
+        let kept =
+            "places.loose: its points have a position but it has none, so no map is kept for them";
+        assert!(s.contains(kept), "{s}");
     }
 
     #[test]

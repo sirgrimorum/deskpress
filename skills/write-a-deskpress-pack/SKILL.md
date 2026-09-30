@@ -127,7 +127,7 @@ also walk around": that is a block.
 ## Kid mode is filtering, not rewriting
 
 If the pack has people with `adult: false`, a point is offered to them only when it carries
-`for_kids`. Write that line where there is something real to offer, and leave it out where there is
+`for_kids` (the place's map still shows every point with an `at`). Write that line where there is something real to offer, and leave it out where there is
 not. A place with nothing for a kid is not a gap to fill with a made up game.
 
 ## Before you hand it over
