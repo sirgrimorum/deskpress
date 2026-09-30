@@ -8,7 +8,7 @@
     <!-- Asked on the first sync: the calendar the person picks gets the plan's events. -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
-    <!-- A data sync fetches from the hosts the person allowed; the pack is read offline. -->
+    <!-- A data sync fetches from the hosts the person allowed, and a keep the trip's maps; the pack is read offline. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- The map apps Settings offers: only the ones on this phone. -->

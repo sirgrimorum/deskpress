@@ -12,6 +12,12 @@ appId: dev.deskpress.app
 - tapOn: "Large"
 # Only the map apps on this phone are offered, and the phone asking is always one.
 - tapOn: "Ask"
+# The trip's maps are kept only on a press, with the size said first; the flows never press it.
+- scrollUntilVisible:
+    element: "Keep the trip's maps"
+- assertVisible: "MAPS OFFLINE"
+- assertVisible: "Not kept\\. About \\d+ MB for the trip's places\\."
+- assertNotVisible: "Delete"
 - tapOn: "Back"
 - assertVisible: "Now · visit"
 # Kept across a restart, like every shell choice.

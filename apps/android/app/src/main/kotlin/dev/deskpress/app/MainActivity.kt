@@ -41,6 +41,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -56,6 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.deskpress.engine.CallException
 import dev.deskpress.engine.Edit
+import dev.deskpress.engine.Node
 import dev.deskpress.engine.Plan
 import dev.deskpress.engine.Shortcut
 import java.io.File
@@ -67,6 +69,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.maplibre.android.MapLibre
 
 /** The pack a fresh install opens: a folder of the repo's examples, shipped as assets. */
 private const val PACK = "one-day"
@@ -77,6 +80,8 @@ private const val SCALE = "scale"
 private const val NAVIGATOR = "navigator"
 private const val SHIFT = "shift"
 private const val AT = "at"
+private const val KEPT = "kept"
+private const val KEPT_BYTES = "kept_bytes"
 
 /** The id of a question a launcher or the phone's assistant opened the app at (decision 0027). */
 private const val QUESTION = "dev.deskpress.question"
@@ -135,6 +140,13 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // The map library stays off the network but for a keep the person starts (decision 0031).
+        if (!MapLibre.hasInstance()) {
+            MapLibre.getInstance(this)
+            MapLibre.setConnected(false)
+            // A fresh process runs no keep: with none finished, what one left behind is deleted.
+            if (prefs.getString(KEPT, "").isNullOrEmpty()) forget(applicationContext)
+        }
         asked.value = intent.getStringExtra(QUESTION)
         // The e2e flows freeze the clock at a pack-local moment, the extra "now".
         val frozen = intent.getStringExtra("now")?.let(LocalDateTime::parse)
@@ -199,6 +211,17 @@ class MainActivity : FragmentActivity() {
 
             // The pack file shown full screen, as (file, title), over the pack's screen.
             var doc by remember { mutableStateOf<Pair<String, String>?>(null) }
+            // A Map card open full screen, to walk by.
+            var guide by remember { mutableStateOf<Node?>(null) }
+            val walk = remember { { node: Node -> guide = node } }
+
+            // The trip's maps kept offline, and how far a keep under way has got.
+            var kept by remember { mutableStateOf(prefs.getString(KEPT, "").orEmpty().cells()) }
+            var keptBytes by remember { mutableLongStateOf(prefs.getLong(KEPT_BYTES, 0)) }
+            var keeping by remember { mutableStateOf<Float?>(null) }
+            var halt by remember { mutableStateOf<(() -> Unit)?>(null) }
+            // A keep ends with the screen that can stop it, so the network is never left on.
+            DisposableEffect(Unit) { onDispose { halt?.invoke() } }
 
             var located by remember { mutableStateOf(canLocate()) }
             val ask = rememberLauncherForActivityResult(RequestMultiplePermissions()) {
@@ -318,8 +341,8 @@ class MainActivity : FragmentActivity() {
 
             val state by model.state.collectAsStateWithLifecycle()
 
-            // A pack with regions asks once for the position, and follows it only while started.
-            val fenced = (state as? PackState.Showing)?.view?.watch?.regions?.isNotEmpty() == true
+            // A pack with regions, or an open map, asks once for the position and follows it while started.
+            val fenced = (state as? PackState.Showing)?.view?.watch?.regions?.isNotEmpty() == true || guide != null
             LaunchedEffect(fenced) { if (fenced && !located && frozen == null) ask.launch(LOCATION) }
             // A position pinned by the e2e extra, or by hand in the settings: then nothing is tracked.
             val pin = (if (frozen != null) pinned else null) ?: shell.at.pinned()
@@ -367,7 +390,7 @@ class MainActivity : FragmentActivity() {
             val packFile = remember(folder) {
                 { path: String -> runCatching { file(folder, path) }.getOrNull() }
             }
-            CompositionLocalProvider(LocalShell provides shell, LocalPackFile provides packFile) {
+            CompositionLocalProvider(LocalShell provides shell, LocalPackFile provides packFile, LocalGuide provides walk) {
                 MaterialTheme(if (dark) darkColorScheme() else lightColorScheme()) {
                     val close = { page = null }
                     if (page != null) BackHandler(onBack = close)
@@ -389,12 +412,48 @@ class MainActivity : FragmentActivity() {
                         is Asking.Secret -> AskSecret(a.name, a.host) { asking = null; a.answer.complete(it) }
                         null -> {}
                     }
+                    val walking = guide
                     when {
+                        // On paper while a keep runs: the network is on, and the kept style would pan onto it.
+                        walking != null -> Guide(walking, kept.isNotEmpty() && keeping == null, model.position) { guide = null }
                         open != null -> Document(state, open.second, { file(folder, open.first) }) { doc = null }
                         page == "check" -> Check(state, close)
                         page == "design" -> Design(state, model::edit, { copy -> unwritten = copy; copier.launch(copy.file.substringAfterLast('/')) }, close)
-                        page == "settings" ->
-                            Settings(shell, { now(model.timezone) }, remember { navigators() }, shown?.view?.watch?.regions.orEmpty(), { new ->
+                        page == "settings" -> {
+                            val regions = shown?.view?.watch?.regions.orEmpty()
+                            val wanted = remember(regions) { cells(regions) }
+                            // Keeping them again takes a network, so a delete takes a second tap.
+                            var sure by remember { mutableStateOf(false) }
+                            val forgetAll = {
+                                sure = !sure
+                                if (!sure) {
+                                    forget(applicationContext) {
+                                        kept = emptySet()
+                                        keptBytes = 0
+                                        prefs.edit { remove(KEPT); remove(KEPT_BYTES) }
+                                    }
+                                }
+                            }
+                            val keepAll = {
+                                sure = false
+                                keeping = 0f
+                                halt = keep(applicationContext, wanted, { keeping = it }) { result ->
+                                    halt = null
+                                    keeping = null
+                                    result.onSuccess { bytes ->
+                                        kept = wanted
+                                        keptBytes = bytes
+                                        prefs.edit { putString(KEPT, wanted.encode()); putLong(KEPT_BYTES, bytes) }
+                                    }.onFailure { say("The maps were not kept: ${it.message}") }
+                                }
+                            }
+                            val offers =
+                                if (keeping != null) {
+                                    listOf("Stop" to { halt?.invoke(); halt = null; keeping = null })
+                                } else {
+                                    listOfNotNull(("Keep the trip's maps" to keepAll).takeIf { wanted.isNotEmpty() }, ((if (sure) "Really delete" else "Delete") to forgetAll).takeIf { kept.isNotEmpty() })
+                                }
+                            Settings(shell, { now(model.timezone) }, remember { navigators() }, regions, offline(kept, keptBytes, wanted, keeping), offers, { new ->
                                 val moved = new.shift != shell.shift
                                 val unpinned = shell.at.pinned() != null && new.at.pinned() == null
                                 shell = new
@@ -410,6 +469,7 @@ class MainActivity : FragmentActivity() {
                                 }
                                 if (unpinned) model.unpinned()
                             }, close)
+                        }
                         else -> PackScreen(state, model::act, menu, pretend(shell, shown?.view?.watch?.regions.orEmpty()))
                     }
                 }

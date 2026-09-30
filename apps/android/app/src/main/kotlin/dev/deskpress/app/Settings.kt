@@ -42,7 +42,8 @@ private val STEPS = listOf("−1 day" to -86_400L, "−1 h" to -3_600L, "+1 h" t
 
 /**
  * What "Settings" shows: the choices the shell makes, not the pack. `maps` are the phone's own
- * apps that open a map, and `places` the pack's regions a pretend position can be put in.
+ * apps that open a map, `places` the pack's regions a pretend position can be put in, `offline`
+ * the line about the maps kept and `offers` the buttons under it.
  */
 @Composable
 fun Settings(
@@ -50,6 +51,8 @@ fun Settings(
     now: () -> LocalDateTime,
     maps: List<Pair<String, String>>,
     places: List<Region>,
+    offline: String,
+    offers: List<Pair<String, () -> Unit>>,
     set: (Shell) -> Unit,
     close: () -> Unit,
 ) {
@@ -69,6 +72,9 @@ fun Settings(
             Choice(apps.map { it.first }, apps.indexOfFirst { it.second == shell.navigator }.coerceAtLeast(0), across = false) {
                 set(shell.copy(navigator = apps[it].second))
             }
+            Text("MAPS OFFLINE", style = style("label", "ink-muted"))
+            Text(offline, style = style("body"))
+            if (offers.isNotEmpty()) Choice(offers.map { it.first }, -1) { offers[it].second() }
             Moment(shell, now, set)
             Text("PRETEND TO BE AT", style = style("label", "ink-muted"))
             val spots = listOf("Where I really am" to "") + places.map { it.id to "${it.lat},${it.lon}" }

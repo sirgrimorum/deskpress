@@ -5,6 +5,7 @@ import java.math.BigDecimal
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -18,6 +19,10 @@ fun distance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
     val a = sin(dp / 2).pow(2) + cos(p1) * cos(p2) * sin(dl / 2).pow(2)
     return 2 * EARTH_M * asin(sqrt(a))
 }
+
+/** A distance rounded to what the eye can use: whole tens of metres, or tenths of a kilometre. */
+fun metres(m: Double): String =
+    if (m < 995.0) "${(m / 10.0).roundToInt() * 10} m" else "${(m / 100.0).roundToInt() / 10.0} km"
 
 /**
  * The ids of the regions around `lat`, `lon`, the smallest first: a place inside a larger one

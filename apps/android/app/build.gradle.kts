@@ -23,6 +23,8 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.0.0"
+        // `ABIS` in the Makefile, the only ones the engine is built for: no other could run the app.
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
     buildFeatures {
@@ -31,7 +33,7 @@ android {
 
     sourceSets {
         getByName("main") {
-            // Written by scripts/android.sh, along with jniLibs: the UniFFI bindings.
+            // Written by `make bindings`, along with jniLibs: the UniFFI bindings.
             kotlin.srcDir("src/generated/kotlin")
             assets.srcDir(repo.resolve("examples"))
         }
@@ -57,6 +59,7 @@ dependencies {
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.documentfile)
     implementation(libs.genai.prompt)
+    implementation(libs.maplibre)
     implementation("net.java.dev.jna:jna:${libs.versions.jna.get()}@aar")
 
     testImplementation(libs.jna)
@@ -65,8 +68,8 @@ dependencies {
 }
 
 // Coverage of the code that is not drawing: the view model, the pack files, facts, sync,
-// calendar, location and theme. Screens, the activity and the generated bindings are left to
-// the e2e flows. The floor is the level measured when it was set: what stays uncovered needs a
+// calendar, location, maps and theme. Screens, the activity and the generated bindings are left to
+// the e2e flows, and keeping the maps offline to a phone. The floor is the level measured when it was set: what stays uncovered needs a
 // device or a composition (the calendar provider, the Keystore, a picked folder, the network,
 // the state a screen holds).
 kover {
@@ -88,6 +91,7 @@ kover {
                     "dev.deskpress.app.DocumentKt*",
                     "dev.deskpress.app.Pdf*",
                     "dev.deskpress.app.StyleKt*",
+                    "dev.deskpress.app.GuideKt*",
                     "dev.deskpress.app.ComposableSingletons*",
                     "dev.deskpress.app.BuildConfig",
                     "dev.deskpress.engine.*",

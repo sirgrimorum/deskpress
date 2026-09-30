@@ -71,8 +71,10 @@ class PackViewModel(
     // What actions kept, saved under the pack's id after each one.
     private val store = mutableMapOf<String, Value>()
     private var timer: Job? = null
-    // Where the device is, once it knows, and the regions of the pack around it.
-    private var position: Pair<Double, Double>? = null
+    private val _position = MutableStateFlow<Pair<Double, Double>?>(null)
+    /** Where the device is, once it knows: the regions and the full-screen map follow it. */
+    val position: StateFlow<Pair<Double, Double>?> = _position.asStateFlow()
+    // The regions of the pack around the device.
     private var inside = emptyList<String>()
     /** The clock set by hand, in seconds on top of `now`. */
     var shift = 0L
@@ -192,7 +194,7 @@ class PackViewModel(
                     "phone.call" -> call(cmd.args["number"].text())
                     "document.open" -> show(cmd.args["file"].text(), cmd.args["title"].text())
                     "location.get" -> {
-                        val at = position
+                        val at = _position.value
                         val then = cmd.args["then"].text()
                         if (at == null) unlocated()
                         else if (then.isNotEmpty()) act(then, point(at.first, at.second))
@@ -213,11 +215,7 @@ class PackViewModel(
                         if (lat != null && lon != null) map(lat, lon, cmd.args["label"].text())
                     }
                     "map.route" -> {
-                        val stops = (cmd.args["stops"] as? Value.Items)?.items.orEmpty().mapNotNull { s ->
-                            val lat = (s.field("lat") as? Value.Number)?.value
-                            val lon = (s.field("lon") as? Value.Number)?.value
-                            if (lat != null && lon != null) Stop(lat, lon) else null
-                        }
+                        val stops = (cmd.args["stops"] as? Value.Items)?.items.orEmpty().mapNotNull { s -> pin(s)?.let { Stop(it.lat, it.lon) } }
                         if (stops.isNotEmpty()) route(stops)
                     }
                     else -> if (cmd.name.endsWith(".sync")) refresh(cmd.name.removeSuffix(".sync"))
@@ -255,8 +253,8 @@ class PackViewModel(
     fun moved(lat: Double, lon: Double) {
         val regions = (_state.value as? PackState.Showing)?.view?.watch?.regions.orEmpty()
         val now = inside(regions, lat, lon)
-        val first = position == null
-        position = lat to lon
+        val first = _position.value == null
+        _position.value = lat to lon
         if (!first && now == inside) return
         inside = now
         redraw()
@@ -264,7 +262,7 @@ class PackViewModel(
 
     /** No position known any more: the pinned one was let go, and no real fix has come yet. */
     fun unpinned() {
-        position = null
+        _position.value = null
         inside = emptyList()
         redraw()
     }
@@ -280,7 +278,7 @@ class PackViewModel(
         val at = local.atZone(timezone)
         val others = zones.mapValues { at.withZoneSameInstant(it.value).toLocalDateTime() }
         val can = if (assistant == null) emptyList() else listOf("assistant")
-        return world(local, store, inside, position != null, others, can)
+        return world(local, store, inside, _position.value != null, others, can)
     }
 
     private fun update(call: suspend (LoadedPack) -> View) {

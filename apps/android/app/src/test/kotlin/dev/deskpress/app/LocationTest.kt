@@ -13,6 +13,15 @@ class LocationTest {
     }
 
     @Test
+    fun aDistanceIsSaidInTensOfMetresOrTenthsOfAKilometre() {
+        assertEquals("120 m", metres(123.0))
+        assertEquals("1.2 km", metres(1234.0))
+        // What would round to 1000 m is said in kilometres.
+        assertEquals("990 m", metres(994.0))
+        assertEquals("1.0 km", metres(995.0))
+    }
+
+    @Test
     fun theRegionsAroundAPointComeDeepestFirstAndTheOnesAwayAreLeftOut() {
         val town = Region("town", 0.0, 0.0, 5000.0)
         val square = Region("square", 0.0, 0.001, 100.0)

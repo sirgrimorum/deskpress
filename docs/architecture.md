@@ -2,7 +2,7 @@
 
 A pack describes an app. The **engine** turns the pack and the state of the world into a **screen
 tree**. A **renderer** draws that tree with the pack's theme. Nothing else is involved: no server, no
-account, and no network unless the pack asks for a sync.
+account, and no network unless the pack asks for a sync or an adult keeps the trip's maps.
 
 ```mermaid
 flowchart LR
@@ -156,10 +156,12 @@ id, and the timeline applies them every time it builds the day. Those actions ar
 engine answers itself rather than handing to the host. See
 [decision 0025](decisions/0025-the-day-in-hand.md).
 
-A map here is drawn, never fetched. The engine projects the day's places onto plain paper and the
-renderer draws the pins; a place may carry its own plan of pins over a picture the pack ships. No
-tiles, no tile server, nothing on the network. A map app is still one tap away for directions. See
-[decision 0026](decisions/0026-maps.md).
+A map here is drawn from the pack's own numbers. The engine projects the day's places, or a
+place's points, onto plain paper and the renderer draws the pins; a place may carry its own plan of
+pins over a picture the pack ships. Tiles are fetched only when an adult asks to keep the trip's
+maps, and the map drawn on them needs no network after that. A map app is still one tap away for
+directions. See decisions [0026](decisions/0026-maps.md) and
+[0031](decisions/0031-maps-to-guide-by.md).
 
 ## The theme
 
@@ -177,14 +179,15 @@ checks the whole pack with it; the host only writes what it gets back. See
 Everything that touches the device lives here, in Kotlin: reading and writing the picked files,
 loading the engine through UniFFI, feeding it the clock and location, persisting stored facts, and
 the tools: open a map, sync a calendar, fetch a module's data, watch geofences, unlock with a
-fingerprint, dial a number, show a pack file full screen, ask the phone's own model. For a calendar sync the engine says what the events are
+fingerprint, dial a number, show a pack file full screen, ask the phone's own model, keep the trip's maps offline and open a
+Map card full screen. For a calendar sync the engine says what the events are
 and what changed against what the host wrote before; the host writes only its own rows. See
 [decision 0021](decisions/0021-calendar.md).
 
 Some choices belong to the host and not to any pack: how big the text is drawn, which scales every
 type step over the theme; which of the phone's map apps `map.open` and `map.route` are sent to;
-and, for trying a moment out, a clock set by hand and a pretend place, flagged on every screen
-while on ([decision 0030](decisions/0030-trying-a-moment-and-the-day-as-a-route.md)). They live in
+which maps are kept offline; and, for trying a moment out, a clock set by hand and a pretend place,
+flagged on every screen while on ([decision 0030](decisions/0030-trying-a-moment-and-the-day-as-a-route.md)). They live in
 the shell preferences, so they hold whatever pack is open.
 
 ## The assistant
@@ -202,8 +205,9 @@ device. See [decision 0027](decisions/0027-the-assistant.md).
 
 The pack is a file on the device. The engine and the validator are local. With no `sync` in the
 pack, nothing the app does reaches the network itself: opening a map hands the place to a map app,
-and a calendar sync writes into an account calendar the phone syncs on its own. The one exception is
-the first question typed on a phone whose model is not downloaded yet, which the system fetches.
+and a calendar sync writes into an account calendar the phone syncs on its own. Two exceptions: the
+first question typed on a phone whose model is not downloaded yet, which the system fetches, and
+"Keep the trip's maps" in Settings, which fetches the tiles once ([decision 0031](decisions/0031-maps-to-guide-by.md)).
 
 A module can also sync its data, if the pack says so: by button or automatically, over the pack's
 own data or instead of it. The person approves the hosts once, a failed sync keeps the last good

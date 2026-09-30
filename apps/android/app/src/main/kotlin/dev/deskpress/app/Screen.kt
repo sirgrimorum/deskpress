@@ -72,7 +72,6 @@ import androidx.core.view.WindowCompat
 import dev.deskpress.engine.Finding
 import dev.deskpress.engine.Node
 import dev.deskpress.engine.Value
-import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -86,6 +85,9 @@ class Menu(
 
 /** The bytes of a file inside the pack, for the pictures a pack carries. */
 val LocalPackFile = staticCompositionLocalOf<(String) -> ByteArray?> { { null } }
+
+/** Opens a Map card full screen on a real map, where the host has one (decision 0031). */
+val LocalGuide = staticCompositionLocalOf<((Node) -> Unit)?> { null }
 
 /** The id of the theme drawn for the holder, if the file has one, and its tokens. */
 @Composable
@@ -274,6 +276,22 @@ private fun Pill(label: String, tap: () -> Unit) {
     }
 }
 
+/** A pack's chip, or one the full-screen map picks with; `on` fills it with the action colours. */
+@Composable
+internal fun Chip(label: String, on: Boolean, tap: (() -> Unit)?) {
+    val tokens = LocalTokens.current
+    Box(
+        Modifier.heightIn(min = tokens.size("touch.chip"))
+            .clip(RoundedCornerShape(tokens.size("radius.chip")))
+            .background(tokens.color(if (on) "action-bg" else "chip-bg"))
+            .then(if (tap != null) Modifier.clickable(role = Role.Button, onClick = tap) else Modifier)
+            .padding(horizontal = tokens.size("spacing.gap")),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, style = style("label", if (on) "action-ink" else "chip-ink"))
+    }
+}
+
 @Composable
 private fun More(menu: Menu, color: String) {
     var open by remember { mutableStateOf(false) }
@@ -374,19 +392,7 @@ internal fun Draw(node: Node, act: (String, Value) -> Unit) {
                 Text(prop("label"), Modifier.padding(tokens.size("spacing.pad-x")), style = style("action", "action-ink"))
             }
         }
-        "Chip" -> Row {
-            val shape = RoundedCornerShape(tokens.size("radius.chip"))
-            Box(
-                Modifier.heightIn(min = tokens.size("touch.chip"))
-                    .clip(shape)
-                    .background(tokens.color("chip-bg"))
-                    .then(touch)
-                    .padding(horizontal = tokens.size("spacing.gap")),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(prop("text"), style = style("label", "chip-ink"))
-            }
-        }
+        "Chip" -> Row { Chip(prop("text"), false, tap) }
         "Row" -> Line(prop("time"), prop("text"), prop("caption"), prop("state"), tap)
         "PhraseRow" ->
             Row(
@@ -549,18 +555,15 @@ private const val SCALE = 0.25f
 private fun fraction(v: Value?, key: String): Float =
     (v.field(key) as? Value.Number)?.value?.toFloat() ?: 0f
 
-/** A distance rounded to what the eye can use: whole tens of metres, or tenths of a kilometre. */
-private fun distance(m: Double): String =
-    if (m < 1000.0) "${(m / 10.0).roundToInt() * 10} m" else "${(m / 100.0).roundToInt() / 10.0} km"
-
 /**
  * A map the pack carries (decision 0026): pins where the pack puts them, joined in the order the
- * day visits them, over the pack's own picture when there is one. Nothing is fetched.
+ * pack gives, over its own picture when there is one. Pins with a position open a real map.
  */
 @Composable
 private fun Paper(node: Node) {
     val tokens = LocalTokens.current
     val pins = (node.props["points"] as? Value.Items)?.items.orEmpty()
+    val guide = LocalGuide.current?.takeIf { pins.any { pin(it) != null } }
     val path = (node.props["path"] as? Value.Items)?.items.orEmpty()
     val name = node.props["image"].text()
     val read = LocalPackFile.current
@@ -574,7 +577,10 @@ private fun Paper(node: Node) {
                 }
         }.value
     val shape = RoundedCornerShape(tokens.size("radius.card"))
-    Column(verticalArrangement = Arrangement.spacedBy(tokens.size("spacing.gap-xs"))) {
+    Column(
+        if (guide != null) Modifier.clickable(role = Role.Button) { guide(node) } else Modifier,
+        verticalArrangement = Arrangement.spacedBy(tokens.size("spacing.gap-xs")),
+    ) {
         BoxWithConstraints(
             Modifier.fillMaxWidth()
                 .aspectRatio(picture?.let { it.width.toFloat() / it.height } ?: 1.4f)
@@ -623,12 +629,13 @@ private fun Paper(node: Node) {
                         .height(tokens.size("border.base"))
                         .background(tokens.color("ink-muted")),
                 )
-                Text(distance(span * SCALE), style = style("label", "ink-muted"))
+                Text(metres(span * SCALE), style = style("label", "ink-muted"))
             }
         }
         if (node.props["caption"].text().isNotEmpty()) {
             Text(node.props["caption"].text(), style = style("body-s", "ink-muted"))
         }
+        if (guide != null) Text(word(node, "open"), style = style("label", "ink"))
     }
 }
 

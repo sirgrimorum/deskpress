@@ -223,10 +223,12 @@ class PackViewModelTest {
         model.moved(38.0, -9.0)
         runCurrent()
         assertEquals("complete", model.screen)
+        assertEquals(38.0 to -9.0, model.position.value)
         // A pin let go: nowhere known, so not away either.
         model.unpinned()
         runCurrent()
         assertEquals("suggestion", model.screen)
+        assertEquals(null, model.position.value)
         model.moved(38.0, -9.0)
         runCurrent()
         assertEquals("complete", model.screen)

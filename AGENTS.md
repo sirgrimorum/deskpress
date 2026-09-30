@@ -61,7 +61,7 @@ flowchart LR
   tokens, never packs.
 - **The host** (`apps/android`, Kotlin + Compose) owns the device: file picking with persisted SAF
   permission, storage of facts, the clock and location, and tools (map, calendar, geofence,
-  biometric, dialer, documents, HTTPS fetch with sealed secrets). Theme edits from the design system section are validated (contrast 4.5:1) and
+  biometric, dialer, documents, HTTPS fetch with sealed secrets, map tiles kept offline on a press). Theme edits from the design system section are validated (contrast 4.5:1) and
   written back to the loaded theme file, preserving comments and order.
 
 Every decision above has a record in `docs/decisions/`. Read the relevant one before changing the

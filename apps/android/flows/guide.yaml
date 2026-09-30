@@ -1,0 +1,21 @@
+# A place's points with a position open full screen on a real map to walk by. The flows never keep
+# the maps, so it draws on plain paper: the pins, the device's dot, and how far the one picked is.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T11:30"
+      at: "38.7248,-9.1139"
+- scrollUntilVisible:
+    element: "Lead the way"
+- tapOn: "Lead the way"
+- assertVisible: "Pick where to go next."
+# Every point with a position is a pin; one without is not on the map.
+- assertVisible: "The small cloister"
+- assertNotVisible: "The great Lisbon panorama"
+- tapOn: "The church of Madre de Deus"
+- assertVisible: "The church of Madre de Deus: 20 m."
+- tapOn: "Follow me"
+- tapOn: "Back"
+- assertVisible: "Now · visit"

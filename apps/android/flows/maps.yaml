@@ -14,6 +14,8 @@ appId: dev.deskpress.app
 - tapOn: "The day on a map"
 - assertVisible: "Museu Nacional do Azulejo"
 - assertVisible: "Cais do Sodre ferry terminal"
+# Its pins carry positions, so it opens on a real map too.
+- assertVisible: "Lead the way"
 # Every stop in order goes to a navigator; the emulator may have none, so only the button is checked.
 - assertVisible: "The whole day in the map app"
 - tapOn: "Back"
@@ -26,4 +28,6 @@ appId: dev.deskpress.app
 - scrollUntilVisible:
     element: "Gate 3, the Cacilhas boat"
 - assertVisible: "Ticket machines"
+# A plan's pins are fractions of a picture, not positions: no real map to open.
+- assertNotVisible: "Lead the way"
 - assertVisible: "The hall, from the street door"

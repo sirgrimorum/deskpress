@@ -13,6 +13,7 @@ fragment = "1.9.1"
 junit = "4.13.2"
 kover = "0.9.10"
 genai = "1.0.0-beta4"
+maplibre = "13.6.1"
 
 [libraries]
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
@@ -25,6 +26,8 @@ lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel
 lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
 documentfile = { module = "androidx.documentfile:documentfile", version.ref = "documentfile" }
 genai-prompt = { module = "com.google.mlkit:genai-prompt", version.ref = "genai" }
+# The OpenGL ES build: plain `android-sdk` runs only on phones with Vulkan.
+maplibre = { module = "org.maplibre.gl:android-sdk-opengl", version.ref = "maplibre" }
 coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 junit = { module = "junit:junit", version.ref = "junit" }
