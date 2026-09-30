@@ -28,14 +28,18 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -98,15 +102,16 @@ fun holder(state: PackState): Pair<String?, Tokens> {
     }
 }
 
-/** The screen the engine chose, in the theme the holder asked for. */
+/** The screen the engine chose, in the theme the holder asked for, under `pretend` when it says something. */
 @Composable
-fun PackScreen(state: PackState, act: (String, Value) -> Unit, menu: Menu) {
+fun PackScreen(state: PackState, act: (String, Value) -> Unit, menu: Menu, pretend: String) {
     val shown = state as? PackState.Showing
     val tokens = holder(state).second
     CompositionLocalProvider(LocalTokens provides tokens) {
         val nodes = shown?.view?.tree?.nodes.orEmpty()
         val frame = remember(nodes) { nodes.firstOrNull { it.kind == "Screen" } }
-        val body = remember(nodes, frame) { nodes.filter { it !== frame } }
+        // A Dialog sits over the list, not in it: a lazy item below the fold is never drawn.
+        val (dialogs, body) = remember(nodes, frame) { nodes.filter { it !== frame }.partition { it.kind == "Dialog" } }
         // The status bar icons sit on the top bar, or on the paper when there is none.
         val behind = tokens.color(if (frame != null) "bar-bg" else "paper")
         val view = LocalView.current
@@ -116,7 +121,12 @@ fun PackScreen(state: PackState, act: (String, Value) -> Unit, menu: Menu) {
                 behind.luminance() > 0.5f
         }
         Scaffold(
-            topBar = { Bar(frame, act, menu) },
+            topBar = {
+                Column {
+                    Bar(frame, act, menu)
+                    if (pretend.isNotEmpty()) Pretend(pretend, menu.settings.takeUnless { tokens.kid })
+                }
+            },
             bottomBar = { if (frame != null) Foot(frame) },
             containerColor = tokens.color("paper"),
         ) { padding ->
@@ -138,10 +148,25 @@ fun PackScreen(state: PackState, act: (String, Value) -> Unit, menu: Menu) {
                             items(body, key = { it.key }) { Draw(it, act) }
                             item { Box(Modifier.height(tokens.size("spacing.pad-bottom"))) }
                         }
+                        dialogs.forEach { Draw(it, act) }
                     }
             }
         }
     }
+}
+
+/** A strip that says the moment or the place is pretend, so it is not left on by mistake. */
+@Composable
+private fun Pretend(text: String, tap: (() -> Unit)?) {
+    val tokens = LocalTokens.current
+    Text(
+        if (tap != null) "$text Tap to change." else text,
+        Modifier.fillMaxWidth()
+            .background(tokens.color("alert"))
+            .then(if (tap != null) Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button, onClick = tap) else Modifier)
+            .padding(horizontal = tokens.size("spacing.margin"), vertical = tokens.size("spacing.gap-xs")),
+        style = style("label", "paper"),
+    )
 }
 
 /** What "Check the pack" shows: whether it loads, and every finding the validator made. */
@@ -379,7 +404,21 @@ internal fun Draw(node: Node, act: (String, Value) -> Unit) {
         "Check" -> Ticked(prop("text"), node.props["checked"] == Value.Bool(true), tap)
         "Field" -> Typed(node, act)
         "Group" -> Grouped(prop("title"), node.children, act)
+        "Dialog" -> Popup(prop("title"), prop("text"), prop("close")) { node.on["close"]?.let { act(it, Value.Null) } }
     }
+}
+
+/** A Dialog: the title small, the text large, over the screen until it is closed. */
+@Composable
+private fun Popup(title: String, text: String, label: String, close: () -> Unit) {
+    val tokens = LocalTokens.current
+    AlertDialog(
+        onDismissRequest = close,
+        title = { Text(title, style = style("body", "ink-muted")) },
+        text = { Text(text, Modifier.verticalScroll(rememberScrollState()), style = style("title")) },
+        confirmButton = { TextButton(close) { Text(label.ifEmpty { "✕" }, style = style("action", "ink")) } },
+        containerColor = tokens.color("card"),
+    )
 }
 
 /** A Group: a titled box around the nodes it holds, each drawn as it would be outside. */

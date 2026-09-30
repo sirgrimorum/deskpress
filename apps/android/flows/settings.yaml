@@ -1,4 +1,4 @@
-# The two choices the shell makes rather than the pack: how big the text is, which map app opens.
+# The choices the shell makes rather than the pack: how big the text is, which map app opens.
 appId: dev.deskpress.app
 ---
 - launchApp:
@@ -10,7 +10,8 @@ appId: dev.deskpress.app
 - assertVisible: "TEXT SIZE"
 - assertVisible: "MAPS OPEN IN"
 - tapOn: "Large"
-- tapOn: "Organic Maps"
+# Only the map apps on this phone are offered, and the phone asking is always one.
+- tapOn: "Ask"
 - tapOn: "Back"
 - assertVisible: "Now · visit"
 # Kept across a restart, like every shell choice.

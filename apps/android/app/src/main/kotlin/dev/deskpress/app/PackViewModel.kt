@@ -74,6 +74,8 @@ class PackViewModel(
     // Where the device is, once it knows, and the regions of the pack around it.
     private var position: Pair<Double, Double>? = null
     private var inside = emptyList<String>()
+    /** The clock set by hand, in seconds on top of `now`. */
+    var shift = 0L
     // The modules being fetched, and whether the person said no to fetching this session.
     private val syncing = mutableSetOf<String>()
     private var declined = false
@@ -85,8 +87,9 @@ class PackViewModel(
     var call: (number: String) -> Unit = {}
     var show: (file: String, title: String) -> Unit = { _, _ -> }
 
-    // A map at a point with a label, and what to do when a position is asked for with none yet.
+    // A map at a point, the day's stops as directions, and what to do asked with no position.
     var map: (lat: Double, lon: Double, label: String) -> Unit = { _, _, _ -> }
+    var route: (stops: List<Stop>) -> Unit = {}
     var unlocated: () -> Unit = {}
 
     // A calendar sync of a scope: the whole trip when empty, a date, or one event id.
@@ -209,6 +212,14 @@ class PackViewModel(
                         val lon = (cmd.args["lon"] as? Value.Number)?.value
                         if (lat != null && lon != null) map(lat, lon, cmd.args["label"].text())
                     }
+                    "map.route" -> {
+                        val stops = (cmd.args["stops"] as? Value.Items)?.items.orEmpty().mapNotNull { s ->
+                            val lat = (s.field("lat") as? Value.Number)?.value
+                            val lon = (s.field("lon") as? Value.Number)?.value
+                            if (lat != null && lon != null) Stop(lat, lon) else null
+                        }
+                        if (stops.isNotEmpty()) route(stops)
+                    }
                     else -> if (cmd.name.endsWith(".sync")) refresh(cmd.name.removeSuffix(".sync"))
                 }
             }
@@ -251,6 +262,13 @@ class PackViewModel(
         redraw()
     }
 
+    /** No position known any more: the pinned one was let go, and no real fix has come yet. */
+    fun unpinned() {
+        position = null
+        inside = emptyList()
+        redraw()
+    }
+
     /** What a calendar sync of `scope` would do, against the events `known` written before. */
     suspend fun plan(scope: String, known: Map<String, String>): Plan? {
         val pack = pack ?: return null
@@ -258,8 +276,7 @@ class PackViewModel(
         return withContext(io) { pack.calendar(world, scope, known) }
     }
 
-    private fun here(): World {
-        val local = now(timezone)
+    private fun here(local: LocalDateTime = clock()): World {
         val at = local.atZone(timezone)
         val others = zones.mapValues { at.withZoneSameInstant(it.value).toLocalDateTime() }
         val can = if (assistant == null) emptyList() else listOf("assistant")
@@ -282,7 +299,8 @@ class PackViewModel(
         val pack = pack ?: return
         if (module.isEmpty() && declined) return
         viewModelScope.launch {
-            val world = here()
+            // On the real clock: a stamp from the clock set by hand could lie in the future.
+            val world = here(now(timezone))
             val requests =
                 try {
                     withContext(io) { pack.requests(world, module) }.filter { it.module !in syncing }
@@ -305,8 +323,8 @@ class PackViewModel(
                     }
                     val reply = if (url == null) Reply(0, "no ${r.secret} to ask with") else withContext(io) { fetch(url) }
                     if (r.secret.isNotEmpty() && (reply.status == 401 || reply.status == 403)) forget(r.secret, host)
-                    val now = here()
-                    store.putAll(withContext(io) { pack.received(now, r, reply.status.toUShort(), reply.body) })
+                    val at = here(now(timezone))
+                    store.putAll(withContext(io) { pack.received(at, r, reply.status.toUShort(), reply.body) })
                 }
             } finally {
                 syncing -= modules.toSet()
@@ -323,18 +341,20 @@ class PackViewModel(
         val until = (_state.value as? PackState.Showing)?.view?.watch?.until
         if (until.isNullOrEmpty()) return
         // Measured on the zone's own clock, so a daylight saving change in between counts.
-        val wait = Duration.between(now(timezone).atZone(timezone), LocalDateTime.parse(until).atZone(timezone)).toMillis()
+        val wait = Duration.between(clock().atZone(timezone), LocalDateTime.parse(until).atZone(timezone)).toMillis()
         timer = viewModelScope.launch {
             delay(wait)
             redraw()
         }
     }
 
-    /** The screen again, for the same pack in a changed world. */
-    private fun redraw() = update { pack ->
+    /** The screen again, for the same pack in a changed world: a position, or the clock set by hand. */
+    fun redraw() = update { pack ->
         val world = here()
         withContext(io) { pack.screen(world) }
     }
+
+    private fun clock() = now(timezone).plusSeconds(shift)
 
     /** What actions kept, saved under the pack's id. */
     private suspend fun keep() = withContext(io) { facts?.write(packId, encodeFacts(store)) }
@@ -359,6 +379,9 @@ fun File.replace(bytes: ByteArray) {
 
 /** The suffix of a file being written, never read as one. */
 const val NEXT = ".next"
+
+/** One stop of the day's route, as `map.route` hands it over. */
+data class Stop(val lat: Double, val lon: Double)
 
 /** A position as the engine reads it: `{lat, lon}`. */
 fun point(lat: Double, lon: Double): Value =

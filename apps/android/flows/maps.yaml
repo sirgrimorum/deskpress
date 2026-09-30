@@ -14,6 +14,8 @@ appId: dev.deskpress.app
 - tapOn: "The day on a map"
 - assertVisible: "Museu Nacional do Azulejo"
 - assertVisible: "Cais do Sodre ferry terminal"
+# Every stop in order goes to a navigator; the emulator may have none, so only the button is checked.
+- assertVisible: "The whole day in the map app"
 - tapOn: "Back"
 - assertVisible: "On the way"
 # At the terminal, the place's own map. This pack carries no picture, so the pins are on paper.

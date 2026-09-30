@@ -142,12 +142,16 @@ mod tests {
 
     /// The travel template over a pack of one day.
     fn trip() -> Engine {
+        load(TRIP)
+    }
+
+    fn load(content: &str) -> Engine {
         let manifest = over(&format!(
             "{HEAD}conventions: {{hidden_prefixes: [source]}}
 "
         ))
         .unwrap();
-        let content = parse(TRIP).unwrap();
+        let content = parse(content).unwrap();
         Engine::load(Pack { manifest, content, theme: None }).unwrap().0
     }
 
@@ -514,6 +518,37 @@ packing: {check: true, items: [Hat, Bottle]}
         let chart = e.dispatch(&w, &mut Nav::default(), "chart", Value::Null).unwrap().view.tree;
         assert_eq!(chart.screen, "chart");
         assert_eq!(prop(&chart, "Map", "points").as_list().map(<[Value]>::len), Some(1));
+        // One stop is no route; a second place with an `at` makes the day one, in visit order.
+        let route = Value::String("The whole day in the map app".into());
+        let routes = |t: &Tree| t.nodes.iter().any(|n| at(n, "label") == Some(&route));
+        assert!(!routes(&chart));
+        let two =
+            load(&TRIP.replace("lot: {name: Lot,", "lot: {name: Lot, at: {lat: 38.6, lon: -9.6},"));
+        let mut nav = Nav::default();
+        assert!(routes(&two.dispatch(&w, &mut nav, "chart", Value::Null).unwrap().view.tree));
+        let sent = two.dispatch(&w, &mut nav, "route", Value::Null).unwrap().commands;
+        let stops = sent[0].args.get("stops").and_then(Value::as_list).unwrap();
+        let names: Vec<_> = stops.iter().map(|s| text(s.get("name"))).collect();
+        assert_eq!(
+            (sent[0].name.as_str(), names),
+            ("map.route", ["Lot", "Museum", "Lot"].map(String::from).to_vec())
+        );
+    }
+
+    #[test]
+    fn a_question_opens_its_answer_in_a_dialog_that_closes() {
+        let (e, w, mut nav) = (trip(), world("2026-04-11T11:30", "ana", &[]), Nav::default());
+        let dialogs =
+            |t: &Tree| said(t).into_iter().filter(|l| l.starts_with("Dialog")).collect::<Vec<_>>();
+        let ask = e.dispatch(&w, &mut nav, "ask", Value::Null).unwrap().view.tree;
+        assert_eq!((ask.screen.as_str(), dialogs(&ask).len()), ("ask", 0));
+        let now = carried(&ask, "What is happening now?");
+        let open = e.dispatch(&w, &mut nav, "show", now).unwrap().view.tree;
+        assert_eq!(dialogs(&open), ["Dialog What is happening now? 11:00 Museum"]);
+        let dialog = open.nodes.iter().find(|n| n.kind == "Dialog").unwrap();
+        assert_eq!(at(dialog, "close"), Some(&Value::String("Close".into())));
+        let closed = e.dispatch(&w, &mut nav, "close", Value::Null).unwrap().view.tree;
+        assert!(dialogs(&closed).is_empty());
     }
 
     #[test]

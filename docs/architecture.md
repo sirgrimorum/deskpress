@@ -181,9 +181,11 @@ fingerprint, dial a number, show a pack file full screen, ask the phone's own mo
 and what changed against what the host wrote before; the host writes only its own rows. See
 [decision 0021](decisions/0021-calendar.md).
 
-Two choices belong to the host and not to any pack: how big the text is drawn, which scales every
-type step over the theme, and which map app `map.open` is sent to. They live in the shell
-preferences, so they hold whatever pack is open.
+Some choices belong to the host and not to any pack: how big the text is drawn, which scales every
+type step over the theme; which of the phone's map apps `map.open` and `map.route` are sent to;
+and, for trying a moment out, a clock set by hand and a pretend place, flagged on every screen
+while on ([decision 0030](decisions/0030-trying-a-moment-and-the-day-as-a-route.md)). They live in
+the shell preferences, so they hold whatever pack is open.
 
 ## The assistant
 

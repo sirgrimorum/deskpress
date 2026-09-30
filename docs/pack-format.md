@@ -179,7 +179,7 @@ with canonical keys, whatever the pack calls them.
 | `timeline` | `day`, `block`, `next`, `days`, `tomorrow` | today's day with its blocks in force, its `choice`, `started` (a timed block has begun) and `time` (the time on the day's own clock); the last block whose time has come, until its `until`; the first one still to come; every day; the day after today, with `first`, its first timed block. A block is `{time, text, state, event, ...its map}`, where `event` is its calendar id, `{date}.{list}.{n}`: the list is `blocks`, `fixed`, `option-{id}` or `added`, and `n` its place in that list. The day is then rebuilt from the device's own edits, `plan.<event>` and `added.<date>` |
 | `choices` | `decision` | the first decision due and unanswered, else the first one due, else the next one coming: `{date, title, options, recommended, choice, due, answered}` plus the decision's own keys. Due from `when` at `at` until its day is over |
 | `people` | `holder`, `people` | the person holding the phone (the host's, else the one stored as `holder`; a valid stamp stored as `holder_until` sets the watch until it runs out), and everyone |
-| `places` | `place`, `here`, `away`, `chart` | where the current block happens; the place the device is inside, the block's own when it is one of them, else the smallest; and whether the device knows where it is and is out of the block place's region. Both places carry their `id` ([decision 0020](decisions/0020-location.md)). `chart` is the day on plain paper: `{points, path, span_m}`, null when no place the day names has an `at` ([decision 0026](decisions/0026-maps.md)) |
+| `places` | `place`, `here`, `away`, `chart` | where the current block happens; the place the device is inside, the block's own when it is one of them, else the smallest; and whether the device knows where it is and is out of the block place's region. Both places carry their `id` ([decision 0020](decisions/0020-location.md)). `chart` is the day on plain paper: `{points, path, route, span_m}`, `route` being every stop in order as `{lat, lon, name}`, null when no place the day names has an `at` ([decision 0026](decisions/0026-maps.md)) |
 | `alerts` | `alerts` | the ones showing now, most severe first: from `notify_from` (else the start of their day) to the end of their day |
 | `documents` | `documents` | all of them, each with `person` (the name of its `for`, from the `people` module listed before it) and `call` as `[{label, number}]`. None when a child holds the phone |
 | `climate` | `weather` | the weather for today at `place`, else `here` |
@@ -264,7 +264,9 @@ The commands the Android host runs: `device.unlock` (asks for the fingerprint or
 credential, then runs the action named in `then`), `phone.call` (opens the dialer with `number`),
 `document.open` (shows the pack's `file` full screen under `title`), `location.get` (runs the
 action named in `then` with the device's position as `$arg`, `{lat, lon}`), `map.open` (a map
-app at `lat`, `lon`, pinned with `label`), `climate.sync` (fetches the module's `sync` now,
+app at `lat`, `lon`, pinned with `label`), `map.route` (the `stops`, a list of `{lat, lon, name}`,
+in order as directions; the navigator named in Settings when it takes the link, else whatever the
+phone offers), `climate.sync` (fetches the module's `sync` now,
 decision 0022) and `calendar.sync` (writes the events within `scope`,
 an event id, a date, or the whole trip when left out, into a calendar the person picks once per
 pack, after showing what it would add, change and remove; decision 0021). `assistant.ask` takes
@@ -300,6 +302,7 @@ set here.
 | `Missing` | a fact nobody confirmed, drawn as a striped hole |
 | `Auto` | expands a mapping by the unknown key rule, one node per key; a list is a `Card` per item, and any other value one `Card`. `skip: [keys]` leaves keys out |
 | `Group` | a titled box around the components in its own `layout`; left out when nothing inside is drawn |
+| `Dialog` | `title` small and `text` large, over the screen, with `close` as the button's label; closing it sends `on_close`, which it needs. Give it an `if`, or it never goes |
 | `Screen` | the frame: `title` in the top bar, `on_back` as a round button, every other `on_<event>` as a pill labelled by the prop of that name; `foot_label`, `foot_time` and `foot` in the bottom bar; `alarm: true` signals an audible/haptic alert to the host |
 
 A component is a one-key mapping, `Kind: {props}`. A prop is an expression; a text with `{` in it

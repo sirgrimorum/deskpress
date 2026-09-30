@@ -9,6 +9,7 @@ import android.app.ActivityManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
 import android.content.pm.PackageManager.PERMISSION_GRANTED
 import android.location.LocationListener
 import android.location.LocationManager
@@ -74,6 +75,8 @@ private const val PACK = "one-day"
 private const val FOLDER = "folder"
 private const val SCALE = "scale"
 private const val NAVIGATOR = "navigator"
+private const val SHIFT = "shift"
+private const val AT = "at"
 
 /** The id of a question a launcher or the phone's assistant opened the app at (decision 0027). */
 private const val QUESTION = "dev.deskpress.question"
@@ -135,14 +138,17 @@ class MainActivity : FragmentActivity() {
         asked.value = intent.getStringExtra(QUESTION)
         // The e2e flows freeze the clock at a pack-local moment, the extra "now".
         val frozen = intent.getStringExtra("now")?.let(LocalDateTime::parse)
+        val now = { zone: ZoneId -> frozen ?: LocalDateTime.now(zone) }
         // And the device's position, the extra "at" as "lat,lon": under them nothing is tracked.
-        val pinned = intent.getStringExtra("at")?.split(",")?.mapNotNull(String::toDoubleOrNull)
+        val pinned = intent.getStringExtra("at")?.pinned()
         setContent {
             var folder by remember { mutableStateOf(prefs.getString(FOLDER, null)) }
             // The shell screen over the pack: "check", "design", "settings", or none.
             var page by rememberSaveable { mutableStateOf<String?>(null) }
             var shell by remember {
-                mutableStateOf(Shell(prefs.getFloat(SCALE, 1f), prefs.getString(NAVIGATOR, "").orEmpty()))
+                mutableStateOf(
+                    Shell(prefs.getFloat(SCALE, 1f), prefs.getString(NAVIGATOR, "").orEmpty(), prefs.getLong(SHIFT, 0), prefs.getString(AT, "").orEmpty()),
+                )
             }
             val picker = rememberLauncherForActivityResult(OpenDocumentTree()) { uri ->
                 if (uri != null) {
@@ -165,7 +171,6 @@ class MainActivity : FragmentActivity() {
                 }
             }
             val model = viewModel(key = folder ?: PACK) {
-                val now = { zone: ZoneId -> frozen ?: LocalDateTime.now(zone) }
                 val facts = Facts(File(filesDir, "facts"))
                 val picked = folder?.let(Uri::parse)
                 if (picked != null) {
@@ -173,7 +178,7 @@ class MainActivity : FragmentActivity() {
                 } else {
                     val overlay = Overlay(File(filesDir, "packs/$PACK"))
                     PackViewModel({ overlay.over(assets.pack(PACK)) }, now, facts = facts, write = overlay::write)
-                }
+                }.also { it.shift = shell.shift }
             }
 
             val scope = rememberCoroutineScope()
@@ -282,6 +287,7 @@ class MainActivity : FragmentActivity() {
                 model.call = this@MainActivity::dial
                 model.show = { file, title -> doc = file to title }
                 model.map = this@MainActivity::map
+                model.route = { navigate(Uri.parse(directions(it))) }
                 model.sync = { at ->
                     if (canCalendar()) begin(at)
                     else {
@@ -315,10 +321,12 @@ class MainActivity : FragmentActivity() {
             // A pack with regions asks once for the position, and follows it only while started.
             val fenced = (state as? PackState.Showing)?.view?.watch?.regions?.isNotEmpty() == true
             LaunchedEffect(fenced) { if (fenced && !located && frozen == null) ask.launch(LOCATION) }
-            LifecycleStartEffect(located, model, state is PackState.Showing, fenced) {
-                if (frozen != null && pinned?.size == 2) model.moved(pinned[0], pinned[1])
+            // A position pinned by the e2e extra, or by hand in the settings: then nothing is tracked.
+            val pin = (if (frozen != null) pinned else null) ?: shell.at.pinned()
+            LifecycleStartEffect(located, model, state is PackState.Showing, fenced, pin) {
+                pin?.let { model.moved(it.first, it.second) }
                 // Checked again at each start: the permission may have been granted in the settings.
-                val stop = if (canLocate() && frozen == null) track(model, fenced) else null
+                val stop = if (canLocate() && frozen == null && pin == null) track(model, fenced) else null
                 onStopOrDispose { stop?.invoke() }
             }
 
@@ -386,11 +394,23 @@ class MainActivity : FragmentActivity() {
                         page == "check" -> Check(state, close)
                         page == "design" -> Design(state, model::edit, { copy -> unwritten = copy; copier.launch(copy.file.substringAfterLast('/')) }, close)
                         page == "settings" ->
-                            Settings(shell, { new ->
+                            Settings(shell, { now(model.timezone) }, remember { navigators() }, shown?.view?.watch?.regions.orEmpty(), { new ->
+                                val moved = new.shift != shell.shift
+                                val unpinned = shell.at.pinned() != null && new.at.pinned() == null
                                 shell = new
-                                prefs.edit { putFloat(SCALE, new.scale); putString(NAVIGATOR, new.navigator) }
+                                prefs.edit {
+                                    putFloat(SCALE, new.scale)
+                                    putString(NAVIGATOR, new.navigator)
+                                    putLong(SHIFT, new.shift)
+                                    putString(AT, new.at)
+                                }
+                                if (moved) {
+                                    model.shift = new.shift
+                                    model.redraw()
+                                }
+                                if (unpinned) model.unpinned()
                             }, close)
-                        else -> PackScreen(state, model::act, menu)
+                        else -> PackScreen(state, model::act, menu, pretend(shell, shown?.view?.watch?.regions.orEmpty()))
                     }
                 }
             }
@@ -411,15 +431,28 @@ class MainActivity : FragmentActivity() {
         open(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", number, null)))
     }
 
-    /**
-     * A map app at `lat`, `lon` with a pin named `label`: the one the settings name, else whichever
-     * the phone offers. A named app that is not installed falls back to the phone's own choice.
-     */
+    /** A map app at `lat`, `lon` with a pin named `label`. */
     private fun map(lat: Double, lon: Double, label: String) {
-        val go = { Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lon?q=$lat,$lon(${Uri.encode(label)})")) }
+        val at = "${decimal(lat)},${decimal(lon)}"
+        navigate(Uri.parse("geo:$at?q=$at(${Uri.encode(label)})"))
+    }
+
+    /**
+     * `uri` in the map app the settings name, else whichever the phone offers. A named app that is
+     * gone, or that does not take this link, falls back to the phone's own choice.
+     */
+    private fun navigate(uri: Uri) {
+        val go = { Intent(Intent.ACTION_VIEW, uri) }
         val wanted = prefs.getString(NAVIGATOR, "").orEmpty()
         if (wanted.isEmpty() || !open(go().setPackage(wanted))) open(go())
     }
+
+    /** The phone's apps that open a map, as (label, package), by label. */
+    private fun navigators(): List<Pair<String, String>> =
+        packageManager.queryIntentActivities(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0")), MATCH_DEFAULT_ONLY)
+            .map { it.loadLabel(packageManager).toString() to it.activityInfo.packageName }
+            .distinctBy { it.second }
+            .sortedBy { it.first }
 
     private fun say(text: String) = Toast.makeText(this, text, Toast.LENGTH_LONG).show()
 

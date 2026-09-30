@@ -223,6 +223,13 @@ class PackViewModelTest {
         model.moved(38.0, -9.0)
         runCurrent()
         assertEquals("complete", model.screen)
+        // A pin let go: nowhere known, so not away either.
+        model.unpinned()
+        runCurrent()
+        assertEquals("suggestion", model.screen)
+        model.moved(38.0, -9.0)
+        runCurrent()
+        assertEquals("complete", model.screen)
         model.moved(38.7248, -9.1139)
         runCurrent()
         assertEquals("suggestion", model.screen)
@@ -265,6 +272,24 @@ class PackViewModelTest {
         model.act("map", Value.Null)
         runCurrent()
         assertEquals("Car 1.5 2.0", opened)
+    }
+
+    @Test
+    fun theDaysRouteGoesToTheHostAndAClockSetByHandRedraws() = runTest {
+        val start = LocalDateTime.parse("2026-04-11T10:45")
+        val model = PackViewModel({ example }, { start }, backgroundScope, StandardTestDispatcher(testScheduler))
+        var stops = emptyList<Stop>()
+        model.route = { stops = it }
+        runCurrent()
+        for (action in listOf("chart", "route", "back")) model.act(action, Value.Null)
+        runCurrent()
+        assertEquals(listOf(Stop(38.7248, -9.1139), Stop(38.7062, -9.1449)), stops)
+        assertEquals("moment", model.screen)
+        // The evening before the choice, and the screen follows without a tap.
+        model.shift = java.time.Duration.ofHours(9).plusMinutes(45).seconds
+        model.redraw()
+        runCurrent()
+        assertEquals("choose", model.screen)
     }
 
     @Test
@@ -420,6 +445,12 @@ class PackViewModelTest {
         answer.complete(true)
         runCurrent()
         assertEquals(4, urls.size)
+        // The clock set by hand leaves a sync on the real one: the real day, stamped now.
+        model.shift = 86_400
+        model.act("go", Value.Null)
+        runCurrent()
+        assertEquals("https://api.example.org/f?day=2026-04-11&k=s+1", urls.last())
+        assertEquals("2026-04-11T09:01", labels()[0])
     }
 
     @Test

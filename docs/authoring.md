@@ -111,6 +111,7 @@ get it: four lines, and the app speaks your language.
 
 ## Check it on the phone before you need it
 
-Load the pack, then set the phone's clock forward to a moment you care about and look at what comes
-up. It takes a minute and it is the only test that matters: at 08:40 on the day of the early train,
-is the answer on the screen the thing you would have asked for?
+Load the pack, then set a moment you care about in Settings, under THE MOMENT, and look at what
+comes up; PRETEND TO BE AT does the same for a place. It takes a minute and it is the only test
+that matters: at 08:40 on the day of the early train, is the answer on the screen the thing you
+would have asked for?

@@ -1,0 +1,32 @@
+# Trying a moment out on the phone: the clock set by hand runs on from there, a place is pretended
+# instead of the real position, and a strip says so on every screen until both go back.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T11:30"
+- assertVisible: "Now · visit"
+- tapOn: "Menu"
+- tapOn: "Settings"
+# A day on: the next day's question is up, though the frozen clock still says the 11th.
+- scrollUntilVisible:
+    element: "\\+1 day"
+- tapOn: "\\+1 day"
+- assertVisible: "THE MOMENT: PRETEND"
+- scrollUntilVisible:
+    element: "azulejo"
+- tapOn: "azulejo"
+- tapOn: "Back"
+- assertVisible: "Pretending: the clock is set by hand, at azulejo. Tap to change."
+- assertVisible: 'Sintra or the beach tomorrow\?'
+- tapOn: "Pretending.*"
+- scrollUntilVisible:
+    element: "Back to now"
+- tapOn: "Back to now"
+- scrollUntilVisible:
+    element: "Where I really am"
+- tapOn: "Where I really am"
+- tapOn: "Back"
+- assertNotVisible: "Pretending.*"
+- assertVisible: "Now · visit"

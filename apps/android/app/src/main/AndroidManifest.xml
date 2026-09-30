@@ -11,6 +11,14 @@
     <!-- A data sync fetches from the hosts the person allowed; the pack is read offline. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- The map apps Settings offers: only the ones on this phone. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+    </queries>
+
     <!-- No cloud backup: the facts, hosts and ledgers stay on this phone (decision 0015). -->
     <application
         android:allowBackup="false"

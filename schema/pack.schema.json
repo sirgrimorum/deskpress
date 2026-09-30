@@ -292,9 +292,13 @@
             "Chip",
             "Button",
             "Segmented",
+            "Check",
+            "Field",
+            "Map",
             "Missing",
             "Auto",
             "Group",
+            "Dialog",
             "Screen"
           ]
         },

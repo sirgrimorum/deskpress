@@ -6,7 +6,7 @@ use crate::validate::patterns::is_id;
 use crate::value::{Map, Value, quote, text};
 
 /// The components a layout can use. The set grows only with a shell release (decision 0005).
-pub const COMPONENTS: [&str; 16] = [
+pub const COMPONENTS: [&str; 17] = [
     "BigValue",
     "Label",
     "Card",
@@ -22,6 +22,7 @@ pub const COMPONENTS: [&str; 16] = [
     "Missing",
     "Auto",
     "Group",
+    "Dialog",
     "Screen",
 ];
 
@@ -461,6 +462,10 @@ impl Definer {
                 out.props.extend(prop.map(|p| (key.to_owned(), p)));
             }
         }
+        if kind == "Dialog" && props.get("on_close").is_none() {
+            self.r.error(format!("{at}.on_close"), "is needed, or nothing can close the Dialog");
+            ok = false;
+        }
         if group {
             // Inside, a repeating Group's item is also `group`, since a child's own `each` hides `item`.
             let named = each.is_some();
@@ -515,6 +520,14 @@ mod tests {
 
     fn layout(layout: &str) -> String {
         said(&format!("screens:\n  a: {{actions: {{go: [back]}}, layout: {layout}}}\n"))
+    }
+
+    #[test]
+    fn the_schema_lists_every_component() {
+        let schema = include_str!("../../../../schema/pack.schema.json");
+        for c in COMPONENTS {
+            assert!(schema.contains(&format!("\"{c}\"")), "{c} is not in the schema");
+        }
     }
 
     #[test]
@@ -754,6 +767,14 @@ mod tests {
             children: vec![],
         };
         assert_eq!(d.screens[0].1.layout, [button]);
+    }
+
+    #[test]
+    fn a_dialog_needs_a_way_to_close() {
+        assert_eq!(
+            layout("[{Dialog: {title: \"'x'\"}}]"),
+            "screens.a.layout[0].Dialog.on_close: is needed, or nothing can close the Dialog"
+        );
     }
 
     #[test]

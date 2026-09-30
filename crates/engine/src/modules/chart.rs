@@ -30,8 +30,9 @@ fn round(v: f64) -> Value {
 }
 
 /// The chart of these stops, in the order the day visits them: `points`, one pin per place;
-/// `path`, one `{x, y}` per stop, so a place visited twice is one pin and two stops; and
-/// `span_m`, how wide the drawing is on the ground, for a scale line. `Null` with no stops.
+/// `path`, one `{x, y}` per stop, so a place visited twice is one pin and two stops; `route`, one
+/// `{lat, lon, name}` per stop, a repeat in a row dropped, for a navigator; and `span_m`, how wide
+/// the drawing is on the ground, for a scale line. `Null` with no stops.
 pub(crate) fn chart(stops: &[Pin]) -> Value {
     if stops.is_empty() {
         return Value::Null;
@@ -49,7 +50,15 @@ pub(crate) fn chart(stops: &[Pin]) -> Value {
     };
     let mut points: Vec<Value> = Vec::new();
     let mut path: Vec<Value> = Vec::new();
-    for (stop, at) in stops.iter().zip(&uv) {
+    let mut route: Vec<Value> = Vec::new();
+    for (i, (stop, at)) in stops.iter().zip(&uv).enumerate() {
+        if i == 0 || stops[i - 1].id != stop.id {
+            let mut leg = Map::default();
+            leg.set("lat", Value::Number(stop.lat));
+            leg.set("lon", Value::Number(stop.lon));
+            leg.set("name", Value::String(stop.name.clone()));
+            route.push(Value::Map(leg));
+        }
         let (x, y) = paper(at);
         let mut step = Map::default();
         step.set("x", round(x));
@@ -67,6 +76,7 @@ pub(crate) fn chart(stops: &[Pin]) -> Value {
     let mut m = Map::default();
     m.set("points", Value::List(points));
     m.set("path", Value::List(path));
+    m.set("route", Value::List(route));
     m.set("span_m", Value::Number(across.round()));
     Value::Map(m)
 }
@@ -120,6 +130,20 @@ mod tests {
         assert_eq!(
             show(out.get("path")),
             r#"[{"x": 0.5, "y": 0.9}, {"x": 0.5, "y": 0.1}, {"x": 0.5, "y": 0.9}]"#
+        );
+    }
+
+    #[test]
+    fn the_route_is_every_stop_in_order_and_a_stay_in_a_row_is_one() {
+        let out = chart(&[
+            pin("a", 38.0, -9.0, ""),
+            pin("a", 38.0, -9.0, ""),
+            pin("b", 38.1, -9.2, ""),
+            pin("a", 38.0, -9.0, ""),
+        ]);
+        assert_eq!(
+            show(out.get("route")),
+            r#"[{"lat": 38, "lon": -9, "name": "A"}, {"lat": 38.1, "lon": -9.2, "name": "B"}, {"lat": 38, "lon": -9, "name": "A"}]"#
         );
     }
 

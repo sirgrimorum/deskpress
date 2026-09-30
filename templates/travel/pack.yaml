@@ -9,6 +9,7 @@
 ui:
   today: Today
   back: Back
+  close: Close
   days: The days
   now: Now
   next: Next
@@ -33,6 +34,7 @@ ui:
   call: Call
   map: Open in the map
   chart: The day on a map
+  route: The whole day in the map app
   on_the_way: On the way
   park: Save where the car is
   car: The car
@@ -261,9 +263,11 @@ screens:
     actions:
       back: [back]
       map: [{do: map.open, with: {lat: place.at.lat, lon: place.at.lon, label: place.name}}]
+      route: [{do: map.route, with: {stops: chart.route}}]
     layout:
       - Screen: {title: ui.chart, back: ui.back, on_back: back}
       - Map: {points: chart.points, path: chart.path, span: chart.span_m}
+      - Button: {if: count(chart.route) > 1, label: ui.route, on_tap: route}
       - Button: {if: place.at, label: ui.map, on_tap: map}
 
   # The questions the pack can answer, already answered, so a tap costs no call. Where the phone
@@ -274,12 +278,14 @@ screens:
     actions:
       back: [back]
       show: [{set: open, to: $arg}]
+      close: [{set: open, to: "''"}]
       type: [{set: typed, to: $arg}]
       say: [{set: reply, to: "''"}, {do: assistant.ask, with: {question: typed, facts: day, then: "'answered'"}}]
       answered: [{set: reply, to: $arg}]
     layout:
       - Screen: {title: ui.ask, back: ui.back, on_back: back}
-      - Row: {each: questions, text: item.ask, caption: "(item.id == open and item.answer) or ui.show_answer", value: item.id, on_tap: show}
+      - Row: {each: questions, text: item.ask, value: item.id, on_tap: show}
+      - Dialog: {each: questions, if: item.id == open, title: item.ask, text: item.answer, close: ui.close, on_close: close}
       - Field: {if: can.assistant, label: ui.ask_anything, value: typed, on_change: type}
       - Button: {if: can.assistant and typed, label: ui.ask_it, on_tap: say}
       - Card: {if: reply, title: ui.from_the_phone, text: reply}

@@ -1,6 +1,7 @@
 # 0027: the assistant
 
-Status: accepted, 2026-09-29.
+Status: accepted, 2026-09-29. Amended by [0030](0030-trying-a-moment-and-the-day-as-a-route.md):
+an answer opens in a `Dialog`, not in the question's row.
 
 ## Context
 

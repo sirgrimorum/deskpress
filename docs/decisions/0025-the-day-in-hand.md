@@ -1,6 +1,7 @@
 # 0025: the day in hand
 
-Status: accepted, 2026-09-29.
+Status: accepted, 2026-09-29. Amended by [0030](0030-trying-a-moment-and-the-day-as-a-route.md):
+Settings also pretends a clock and a place, and lists only the map apps on the phone.
 
 ## Context
 

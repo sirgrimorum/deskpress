@@ -1,5 +1,5 @@
 # The menu of questions the pack answers by itself: every answer is already in the view, so a tap
-# only shows it. The phone's own model is not covered here; a device without one has to be whole.
+# only opens it. The phone's own model is not covered: this flow passes on a device without one.
 appId: dev.deskpress.app
 ---
 - launchApp:
@@ -10,11 +10,15 @@ appId: dev.deskpress.app
     element: "Ask about the trip"
 - tapOn: "Ask about the trip"
 - assertVisible: "What is happening now?"
-- assertVisible: "Show the answer"
+# The list holds the questions only; a tap opens the answer large, over the list.
+- assertNotVisible: "11:15 Museu Nacional do Azulejo.*"
+- assertNotVisible: "Show the answer"
 # The pack writes questions of its own, and they come with the template's.
 - assertVisible: "Where are the toilets?"
 - tapOn: "What is happening now?"
 - assertVisible: "11:15 Museu Nacional do Azulejo, start on the top floor and come down."
+- tapOn: "Close"
+- assertNotVisible: "11:15 Museu Nacional do Azulejo.*"
 - tapOn: "Back"
 - assertVisible: "Now · visit"
 # Nothing is typed anywhere: with no model on this device there is no box to type in.
