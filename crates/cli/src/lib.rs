@@ -4,17 +4,26 @@ use std::io::Write;
 use std::path::Path;
 
 use deskpress_engine::engine::{Engine, Nav, Region, View, World};
-use deskpress_engine::tree::Tree;
-use deskpress_engine::value::{Map, Value, show};
+use deskpress_engine::tree::{Node, Tree};
+use deskpress_engine::value::{Map, Value, show, text};
 use deskpress_engine::{pack, validate, yaml};
+
+/// The reference a pack is written by, compiled in so it is the one this binary enforces.
+pub const REFERENCE: &str = concat!(
+    include_str!("../../../docs/pack-format.md"),
+    "\n",
+    include_str!("../../../docs/templates.md")
+);
 
 pub const USAGE: &str = "usage: deskpress <command>
 
 commands:
-  validate <pack>                            check a pack folder, or its pack.yaml, and list every problem
-  screen <pack> --at <time> [world]          print the screen for that moment and its watch, as JSON
-  act <pack> --at <time> [world] <action>... run actions in turn and print where they leave the screen
-  version                                    print the screen tree version
+  validate <pack>                                 check a pack folder, or its pack.yaml, and list every problem
+  screen <pack> --at <time> [world]               print the screen for that moment and its watch, as JSON
+  act <pack> --at <time> [world] <action>...      run actions in turn and print where they leave the screen
+  preview <pack> --at <time> [world] [action]...  print the screen after any actions, as text a person reads
+  reference                                       print the pack format and the templates, to write a pack by
+  version                                         print the screen tree version
 
 <time> is local to the pack, YYYY-MM-DDTHH:MM. [world] is any of --holder <person id>,
 --inside <place id>, --store <key>=<value> and --can <name>, the last three once per value. Any
@@ -27,16 +36,32 @@ pub fn run(args: &[String], out: &mut impl Write, err: &mut impl Write) -> u8 {
         [command] if command == "version" => {
             (0, format!("tree {}\n", deskpress_engine::TREE_VERSION), String::new())
         }
+        [command] if command == "reference" => (0, REFERENCE.to_owned(), String::new()),
         [command, target] if command == "validate" => validate(target),
-        [command, target, rest @ ..] if command == "screen" || command == "act" => {
-            screen(target, rest, command == "act")
+        [command, target, rest @ ..]
+            if ["screen", "act", "preview"].contains(&command.as_str()) =>
+        {
+            screen(target, rest, command)
         }
         _ => (2, String::new(), format!("{USAGE}\n")),
     };
     // A closed pipe is not worth a panic.
-    out.write_all(stdout.as_bytes())
-        .and_then(|()| err.write_all(stderr.as_bytes()))
+    out.write_all(plain(&stdout).as_bytes())
+        .and_then(|()| err.write_all(plain(&stderr).as_bytes()))
         .map_or(1, |()| code)
+}
+
+/// Text for a terminal: a pack's control characters, escape codes among them, shown, not obeyed.
+fn plain(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_control() && c != '\n' {
+            out.extend(c.escape_debug());
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// The pack at `target`, a folder or its manifest, or the exit code and message that say why not.
@@ -87,15 +112,16 @@ fn validate(target: &str) -> (u8, String, String) {
     (1, out, String::new())
 }
 
-/// `deskpress screen` and `deskpress act`: exit 0 with the JSON, 1 when the pack does not load or
+/// `deskpress screen`, `act` and `preview`: exit 0 with the screen, 1 when the pack does not load or
 /// an action is not on the screen, 2 when the arguments are wrong.
-fn screen(target: &str, args: &[String], act: bool) -> (u8, String, String) {
+fn screen(target: &str, args: &[String], command: &str) -> (u8, String, String) {
+    let act = command == "act";
     let usage = |message: String| (2, String::new(), format!("{message}\n\n{USAGE}\n"));
     let (mut world, actions) = match world(args) {
         Ok(parsed) => parsed,
         Err(message) => return usage(message),
     };
-    if actions.is_empty() == act {
+    if command != "preview" && actions.is_empty() == act {
         let message = if act { "act needs an action" } else { "screen takes no actions: use act" };
         return usage(message.to_owned());
     }
@@ -137,6 +163,9 @@ fn screen(target: &str, args: &[String], act: bool) -> (u8, String, String) {
             ]))
         }));
         view = out.view;
+    }
+    if command == "preview" {
+        return (0, preview(&view.tree.nodes), String::new());
     }
     let effects = act.then(|| {
         Map(vec![
@@ -190,7 +219,7 @@ fn value(src: &str) -> Value {
 }
 
 /// A node as JSON, with the nodes it holds.
-fn node(n: deskpress_engine::tree::Node) -> Value {
+fn node(n: Node) -> Value {
     let on = n.on.into_iter().map(|(k, v)| (k, Value::String(v)));
     Value::Map(Map(vec![
         ("key".to_owned(), Value::String(n.key)),
@@ -230,6 +259,81 @@ fn json(view: View, effects: Option<Map>) -> Value {
     ]);
     out.0.extend(effects.map(|e| e.0).unwrap_or_default());
     Value::Map(out)
+}
+
+/// The screen as a person reads it: one line per node, a Group's inside indented, the foot last.
+fn preview(nodes: &[Node]) -> String {
+    let mut out = String::new();
+    lines(nodes, 0, &mut out);
+    let screen = nodes.iter().find(|n| n.kind == "Screen");
+    let foot = screen.map(|s| says(s, &["foot_label", "foot_time", "foot"])).unwrap_or_default();
+    if foot.is_empty() { out } else { format!("{out}\n{foot}\n") }
+}
+
+/// The props that carry what a node shows, in the order it shows them.
+const SAYS: [&str; 7] = ["time", "title", "text", "caption", "translation", "hint", "state"];
+
+fn lines(nodes: &[Node], depth: usize, out: &mut String) {
+    for n in nodes {
+        let say = |key: &str| text(prop(n, key));
+        let line = match n.kind.as_str() {
+            "Screen" => {
+                let pills: Vec<String> =
+                    n.on.iter().map(|(e, _)| format!("[{}]", say(e))).collect();
+                format!("# {}  {}", say("title"), pills.join(" ")).trim_end().to_owned()
+            }
+            "BigValue" => format!("## {}", says(n, &SAYS)),
+            "Alert" => format!("! {}", says(n, &SAYS)),
+            "Dialog" => format!("> {}", says(n, &SAYS)),
+            "Button" => format!("[{}]", say("label")),
+            "Chip" => format!("({})", say("text")),
+            "Check" => {
+                let ticked = prop(n, "checked") == Some(&Value::Bool(true));
+                format!("[{}] {}", if ticked { "x" } else { " " }, say("text"))
+            }
+            "Missing" => format!("? {}", says(n, &SAYS)),
+            "Field" => format!(
+                "{}: [{}]",
+                say("label"),
+                Some(say("value")).filter(|v| !v.is_empty()).unwrap_or_else(|| say("hint"))
+            ),
+            "Segmented" => {
+                let chosen = prop(n, "value");
+                let item = |i: &Value| {
+                    let name = text(i.get("name").or(Some(i)));
+                    if Some(i) == chosen { format!("*{name}*") } else { name }
+                };
+                list(prop(n, "items")).iter().map(item).collect::<Vec<_>>().join(" | ")
+            }
+            "Map" => {
+                let names: Vec<String> =
+                    list(prop(n, "points")).iter().map(|p| text(p.get("name"))).collect();
+                format!("map: {}", joined([say("caption"), names.join(", ")]))
+            }
+            _ => says(n, &SAYS),
+        };
+        if !line.is_empty() {
+            *out += &format!("{}{line}\n", "  ".repeat(depth));
+        }
+        lines(&n.children, depth + 1, out);
+    }
+}
+
+fn prop<'a>(n: &'a Node, key: &str) -> Option<&'a Value> {
+    n.props.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+}
+
+/// The props named in `keys` that have something to show, joined.
+fn says(n: &Node, keys: &[&str]) -> String {
+    joined(keys.iter().map(|k| text(prop(n, k))))
+}
+
+fn joined(parts: impl IntoIterator<Item = String>) -> String {
+    parts.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ")
+}
+
+fn list(v: Option<&Value>) -> &[Value] {
+    v.and_then(Value::as_list).unwrap_or_default()
 }
 
 fn count(n: usize, word: &str) -> String {
@@ -299,6 +403,11 @@ mod tests {
     }
 
     #[test]
+    fn a_control_character_is_printed_escaped_and_a_newline_as_it_is() {
+        assert_eq!(plain("a\u{1b}[2J\tb\u{9b}\n"), "a\\u{1b}[2J\\tb\\u{9b}\n");
+    }
+
+    #[test]
     fn an_unknown_command_is_refused() {
         let (code, out, _) = call(&["explode"]);
         assert_eq!((code, out.as_str()), (2, ""));
@@ -306,7 +415,9 @@ mod tests {
 
     #[test]
     fn a_known_command_with_extra_arguments_is_refused() {
-        for args in [&["version", "extra"][..], &["validate"], &["validate", "a", "b"]] {
+        for args in
+            [&["version", "extra"][..], &["reference", "x"], &["validate"], &["validate", "a", "b"]]
+        {
             let (code, out, _) = call(args);
             assert_eq!((code, out.as_str()), (2, ""), "{args:?}");
         }
@@ -511,6 +622,14 @@ Rooted: loads. 0 warnings.
         assert_eq!(call(&["version"]), (0, "tree 4\n".to_owned(), String::new()));
     }
 
+    #[test]
+    fn reference_prints_the_pack_format_then_the_templates() {
+        let (code, out, err) = call(&["reference"]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert!(out.starts_with("# Pack format\n"), "{out}");
+        assert!(out.contains("\n# Templates\n"), "{out}");
+    }
+
     const MACHINE: &str = "modules:
   timeline:
 screens:
@@ -536,9 +655,9 @@ rules:
     }
 
     #[test]
-    fn screen_and_act_refuse_arguments_that_say_no_world() {
+    fn screen_act_and_preview_refuse_arguments_that_say_no_world() {
         let dir = machine("args");
-        let cases: [(&str, &[&str], &str); 7] = [
+        let cases: [(&str, &[&str], &str); 8] = [
             ("screen", &[], "--at <time> is needed: the moment to show, YYYY-MM-DDTHH:MM"),
             ("screen", &["--at"], "--at needs a value"),
             ("screen", &["--at", "x", "--store", "k"], "--store takes key=value, not k"),
@@ -546,6 +665,7 @@ rules:
             ("screen", &["--at", "x", "go"], "screen takes no actions: use act"),
             ("act", &["--at", "x"], "act needs an action"),
             ("act", &["go"], "--at <time> is needed: the moment to show, YYYY-MM-DDTHH:MM"),
+            ("preview", &["go"], "--at <time> is needed: the moment to show, YYYY-MM-DDTHH:MM"),
         ];
         for (command, args, message) in cases {
             let expected = (2, String::new(), format!("{message}\n\n{USAGE}\n"));
@@ -602,5 +722,74 @@ rules:
         let refused = at(&dir, "act", &["--at", "2026-04-11T10:30", "go", "stop"]);
         let message = "\"stop\" is not an action of the screen \"a\"\n".to_owned();
         assert_eq!(refused, (1, String::new(), message));
+    }
+
+    const SHOWN: &str = r#"modules:
+  timeline:
+screens:
+  a:
+    state:
+      options: [{name: Coast}, {name: Hills}, plain]
+      picked: {name: Hills}
+      pins: [{name: Pier, x: 0.1, y: 0.2}, {name: Fort, x: 0.5, y: 0.5}]
+    actions:
+      back: []
+      open: [{set: picked, to: $arg}]
+    layout:
+      - Screen: {title: "'The day'", back: "'Back'", on_back: back, foot_label: "'Next'", foot_time: "'12:00'", foot: "'Lunch'"}
+      - BigValue: {text: "'10:00'", caption: block.text}
+      - Label: {text: "''"}
+      - Row: {time: "'09:00'", text: "'Walk'", state: "'past'"}
+      - Alert: {title: "'Bags'", text: "'Lockers'"}
+      - Chip: {text: "'Whose phone?'"}
+      - Check: {text: "'Tickets'", checked: true}
+      - Check: {text: "'Water'", checked: "'yes'"}
+      - Missing: {title: "'Seats'", text: "'not booked yet'"}
+      - Field: {label: "'At what time'", value: "''", hint: "'09:00'"}
+      - Field: {label: "'Who'", value: "'Ana'", hint: "'a name'"}
+      - Segmented: {items: options, value: picked, on_tap: open}
+      - Map: {points: pins, caption: "'The port'"}
+      - Map: {points: "null"}
+      - Group:
+          title: "'Inside'"
+          layout:
+            - PhraseRow: {text: "'Hola'", translation: "'Hello'"}
+      - Button: {label: "'Go'", on_tap: open}
+      - Dialog: {title: "'A question'", text: "'Its answer'", on_close: open}
+rules:
+  - {screen: a}
+"#;
+
+    #[test]
+    fn preview_draws_each_kind_as_a_line_after_any_actions_with_the_foot_last() {
+        let pack = manifest(&format!("  name: P\n{SHOWN}"));
+        let dir = folder("preview", &[("pack.yaml", &pack), ("content.yaml", DAY)]);
+        let expected = "# The day  [Back]
+## 10:00 · x
+09:00 · Walk · past
+! Bags · Lockers
+(Whose phone?)
+[x] Tickets
+[ ] Water
+? Seats · not booked yet
+At what time: [09:00]
+Who: [Ana]
+Coast | *Hills* | plain
+map: The port · Pier, Fort
+map: 
+Inside
+  Hola · Hello
+[Go]
+> A question · Its answer
+
+Next · 12:00 · Lunch
+";
+        let (code, out, err) = at(&dir, "preview", &["--at", "2026-04-11T10:30"]);
+        assert_eq!((code, out.as_str(), err.as_str()), (0, expected, ""));
+        let (_, out, _) = at(&dir, "preview", &["--at", "2026-04-11T10:30", "open=plain"]);
+        assert!(out.contains("Coast | Hills | *plain*"), "{out}");
+        // No Screen, no foot.
+        let (_, out, _) = at(&machine("bare"), "preview", &["--at", "2026-04-11T10:30"]);
+        assert_eq!(out, "x  \n");
     }
 }

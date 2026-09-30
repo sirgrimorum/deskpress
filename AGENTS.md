@@ -36,7 +36,8 @@ flowchart LR
   `received` for the calendar and data syncs, `zones` for the clocks the host passes, and the free
   functions `edit_theme`, `encode_facts` and `decode_facts`. On the phone it is a native library reached through UniFFI
   (`crates/ffi`, phase 2), which generates typed Kotlin, later Swift, bindings. On the desk and in
-  the LLM plugin it is the `deskpress` binary (`crates/cli`), which prints trees as JSON.
+  the LLM plugin it is the `deskpress` binary (`crates/cli`), which prints trees as JSON, or as text
+  with `preview`.
 - **The main machine** is the pack's `rules`: ordered `when` guards, first true wins, the last rule
   has no guard. Any input change re-evaluates it. It picks a screen name.
 - **A screen machine** is a screen's `state` + `actions` + `layout`. Actions are lists of effects
@@ -105,13 +106,14 @@ SDK in the Makefile, Gradle in its wrapper, the app's libraries in
 | --- | --- |
 | `.github/` | CI workflows (gate, Android host), security audit, Dependabot, issue and PR templates |
 | `crates/engine` | yaml, expressions, loader, validator, definition, modules, the engine: the screen for a world and its watch, screen machines, the nav stack. Std only |
-| `crates/cli` | the `deskpress` binary: `validate`, `screen`, `act` |
+| `crates/cli` | the `deskpress` binary: `validate`, `screen`, `act`, `preview`, `reference` |
 | `crates/ffi` | the UniFFI bindings and their bindgen, the only crate that depends on UniFFI |
 | `apps/android` | the host: a ViewModel and the Compose renderer. See its README |
 | `Makefile` | every development task; `make check` is the one that must pass |
 | `templates/` | definitions a pack extends, bundled into the engine: `travel` |
 | `examples/one-day/` | a complete public example pack, invented on purpose |
-| `skills/write-a-deskpress-pack/` | what an LLM loads to write a pack; becomes a plugin |
+| `skills/write-a-deskpress-pack/` | what an LLM loads to write a pack: the plugin's one skill |
+| `.claude-plugin/` | the repo as a Claude Code plugin and its own marketplace (decision 0029) |
 | `schema/` | machine readable JSON schemas for the pack definition, the content and the theme |
 | `docs/` | `architecture.md`, `pack-format.md`, `templates.md`, `authoring.md`, `glossary.md`, `roadmap.md`, `decisions/` |
 | `content/` | **git ignored**: real packs. See `content/README.md` |

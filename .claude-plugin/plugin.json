@@ -1,0 +1,9 @@
+{
+  "name": "deskpress",
+  "description": "Write a deskpress pack from somebody's notes: the YAML that turns the deskpress shell into their own offline app. Validates and previews it with the deskpress CLI.",
+  "author": { "name": "Andres Espinosa" },
+  "homepage": "https://github.com/sirgrimorum/deskpress",
+  "repository": "https://github.com/sirgrimorum/deskpress",
+  "license": "MIT",
+  "keywords": ["deskpress", "pack", "offline", "yaml"]
+}

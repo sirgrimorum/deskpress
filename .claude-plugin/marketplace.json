@@ -1,0 +1,12 @@
+{
+  "name": "deskpress",
+  "description": "The deskpress authoring plugin: packs written from notes, checked by the engine that runs them.",
+  "owner": { "name": "Andres Espinosa" },
+  "plugins": [
+    {
+      "name": "deskpress",
+      "source": "./",
+      "description": "Write, validate and preview a deskpress pack from somebody's notes."
+    }
+  ]
+}

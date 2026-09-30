@@ -28,3 +28,16 @@ fn validate_passes_the_example_pack() {
     assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stdout));
     assert!(String::from_utf8_lossy(&output.stdout).ends_with(": loads. 0 warnings.\n"));
 }
+
+#[test]
+fn preview_opens_an_answer_in_the_example_pack() {
+    let example = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/one-day");
+    let output = deskpress(&["preview", example, "--at", "2026-04-11T11:30", "ask", "show=now"]);
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0), "{out}");
+    assert!(
+        out.starts_with("# Ask about the trip")
+            && out.contains("\n> What is happening now? · 11:15 "),
+        "{out}"
+    );
+}

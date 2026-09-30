@@ -485,6 +485,9 @@ places:
         for_kids: "Find the boat with three masts. There are four of them"
 ```
 
+A place shows through the blocks that name it with `place:`, or through `here` when it has an
+`at`; one with neither is a warning.
+
 A place may carry a `guide` script for the child the block names as its guide: `facts` to tell the
 family, a `question` with its `answer` behind a tap, and a `challenge`. Each key is optional.
 

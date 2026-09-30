@@ -18,6 +18,6 @@ phase that is not.
 | 10 | the shared trip: a log with photos, synced between the phones through a bucket the family owns | a photo logged on one phone shows on the other |
 | 11 ✓ | the assistant in three tiers (decision 0027): the pack's menu of questions answered from its own data, the phone's own model where there is one, and the questions a launcher offers outside the app | a person asks in their language and gets the pack's answer |
 | 12 ✓ | performance at scale, found in the phase 7 review (decision 0028): the calendar written in one batch, a picked folder listed with one query per directory, a key on the screen's list items, and the stored facts left where they are on the measurement | a trip of several hundred events syncs in about a second, and a large pack opens and draws as fast as the example |
-| 13 | the authoring plugin: the skill plus the CLI, packaged for LLM hosts | an LLM writes, validates and previews a pack end to end |
+| 13 ✓ | the authoring plugin: the skill plus the CLI, packaged for LLM hosts (decision 0029) | an LLM writes, validates and previews a pack end to end |
 | 14 ✓ | the public repo: remote, CI running gate and Android host tests, security audit, Dependabot, contribution files (decision 0024); releases kept out of CI for now | a push to the remote is checked |
 | 15 | web renderer for previews; iOS renderer; store builds | the same fixtures pass on every platform |

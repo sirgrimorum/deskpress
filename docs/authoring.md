@@ -56,14 +56,19 @@ what already runs.
 
 ## Writing a pack with an LLM
 
-This is the intended way, and `skills/write-a-deskpress-pack/SKILL.md` is the file to hand it: it
-carries the format, the rules and the failure modes in the order a model needs them.
+This is the intended way. In Claude Code, install the plugin:
 
-A prompt that works:
+```
+/plugin marketplace add sirgrimorum/deskpress
+/plugin install deskpress@deskpress
+```
 
-> Read `skills/write-a-deskpress-pack/SKILL.md`, then read every file in `./notes/`. Build a pack at
-> `./my-pack/`. Ask me about anything you cannot source from my notes instead of inventing it. Run
-> `deskpress validate ./my-pack` and fix what it reports.
+Its skill carries the rules and the failure modes in the order a model needs them, and has the
+`deskpress` binary installed, print the format, validate the pack and preview a moment of it. In
+another tool, hand it `skills/write-a-deskpress-pack/SKILL.md`. A prompt that works:
+
+> Read every file in `./notes/` and build a pack at `./my-pack/`. Ask me about anything you cannot
+> source from my notes instead of inventing it. Show me the morning of the first day.
 
 Three habits make the difference between a pack that reads like yours and one that reads like a
 brochure:

@@ -100,6 +100,7 @@ impl Checker<'_> {
             }
         }
         let place = text(read("place"));
+        self.shown.insert(place.clone());
         if !place.is_empty() && self.places.is_empty() {
             let message = format!(
                 "this pack has no places, so {} points at nothing and the screen keeps only the block's own text",

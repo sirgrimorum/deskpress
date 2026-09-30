@@ -68,6 +68,15 @@ its place says, the agenda, the night, and the phone handed to a child and back.
 | [examples/one-day/](examples/one-day/) | a whole pack, small enough to read in a minute |
 | [skills/write-a-deskpress-pack/](skills/write-a-deskpress-pack/) | the skill an LLM loads before writing a pack |
 
+## Write a pack with Claude Code
+
+The repo is a plugin. Install it, and the skill installs the `deskpress` binary when it is missing:
+
+```
+/plugin marketplace add sirgrimorum/deskpress
+/plugin install deskpress@deskpress
+```
+
 ## Status
 
 Early. The data contract and the design system are measured against a real pack; the engine is

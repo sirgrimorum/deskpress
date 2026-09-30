@@ -34,4 +34,5 @@ history.
 | [0026](0026-maps.md) | maps with nothing fetched: the day's chart, a place's plan, `road`, and the `Map` component | accepted |
 | [0027](0027-the-assistant.md) | the assistant in three tiers: the pack's menu of questions, the phone's own model, and shortcuts outside the app | accepted, amended by 0030 |
 | [0028](0028-performance-at-scale.md) | performance at scale: one calendar batch, one query per directory, a key per node; the stored facts measured and left where they are | accepted |
+| [0029](0029-the-authoring-plugin.md) | the authoring plugin: the repo as plugin and marketplace, the binary from git, `reference` and `preview` in the CLI, no MCP server yet | accepted |
 | [0030](0030-trying-a-moment-and-the-day-as-a-route.md) | a pretend clock and place in Settings, answers in a `Dialog`, the day's stops as a route, only the installed map apps | accepted |

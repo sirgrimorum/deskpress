@@ -72,6 +72,7 @@ pub fn validate(manifest: &Value, content: &Value, theme: Option<&Value>) -> Rep
         keymap: Keymap::of(manifest),
         hidden: Vec::new(),
         places: HashSet::new(),
+        shown: HashSet::new(),
         people: HashSet::new(),
         kids: false,
     };
@@ -88,6 +89,8 @@ struct Checker<'a> {
     keymap: Keymap<'a>,
     hidden: Vec<String>,
     places: HashSet<String>,
+    /// The places that show: some block names them, or `here` finds them by their `at`.
+    shown: HashSet<String>,
     people: HashSet<String>,
     kids: bool,
 }
@@ -144,6 +147,13 @@ impl Checker<'_> {
             self.places_map(places);
         }
         self.days(days);
+        let places = root("places").and_then(Value::as_map).map(Map::keys).into_iter().flatten();
+        for id in places.filter(|id| !self.shown.contains(*id)) {
+            let message = format!(
+                "no block names this place, so what it says never shows: add place: {id} to the blocks that happen there"
+            );
+            self.r.warn(format!("places.{id}"), message);
+        }
         if let Some(alerts) = root("alerts") {
             self.alerts(alerts);
         }
@@ -253,7 +263,10 @@ impl Checker<'_> {
                 );
             }
             match read("at") {
-                Some(Value::Map(coords)) => self.coordinates(&at, coords),
+                Some(Value::Map(coords)) => {
+                    self.shown.insert(id.to_owned());
+                    self.coordinates(&at, coords);
+                }
                 Some(_) => {
                     self.r.error(format!("{at}.at"), "has to be a mapping with lat, lon and radius_m");
                 }
@@ -976,15 +989,18 @@ mod tests {
         ] {
             assert!(s.contains(needle), "wanted {needle:?} in:\n{s}");
         }
-        assert!(!s.contains("places.fine"), "{s}");
+        // No block names fine or old, but fine has an `at`, so only old never shows.
+        let unnamed = "places.old: no block names this place, so what it says never shows: add place: old to the blocks that happen there";
+        assert!(s.contains(unnamed) && !s.contains("places.fine"), "{s}");
         says("days: []\nplaces: [a]", "places: has to be a mapping of place id to place");
 
         // No coordinates is a warning: the pack still loads.
         let r = with("", &day_and("places:\n  home: {name: Home}\n"), None);
         let s = said(&r);
         assert!(r.ok(), "{s}");
-        assert_eq!(r.warnings.len(), 1);
+        assert_eq!(r.warnings.len(), 2);
         assert!(s.starts_with("places.home: no coordinates"), "{s}");
+        assert!(s.contains("places.home: no block names this place"), "{s}");
     }
 
     #[test]
@@ -1215,6 +1231,12 @@ days:
         };
         let asked = "    decision: {when: 2026-04-01, at: '21:00', decides: [2026-04-11]}\n";
         clean("", &day(two, asked), None);
+        // A place only an option's block or a fixed one names is named all the same.
+        let places = "places:\n  cove: {name: Cove}\n  pier: {name: Pier}\n";
+        let tagged = two.replace("'Coast.'", "'Coast.', {place: cove}");
+        let fixed = format!("{asked}    fixed: [['08:00', 'Out.', {{place: pier}}]]\n{places}");
+        let s = said(&with("", &day(&tagged, &fixed), None));
+        assert!(s.contains("places.pier: no coordinates") && !s.contains("no block names"), "{s}");
 
         let one = two.lines().next().unwrap().to_owned() + "\n";
         says(&day(&one, asked), "one option is not an option");
