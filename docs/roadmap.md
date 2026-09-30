@@ -21,3 +21,6 @@ phase that is not.
 | 13 ✓ | the authoring plugin: the skill plus the CLI, packaged for LLM hosts (decision 0029) | an LLM writes, validates and previews a pack end to end |
 | 14 ✓ | the public repo: remote, CI running gate and Android host tests, security audit, Dependabot, contribution files (decision 0024); releases kept out of CI for now | a push to the remote is checked |
 | 15 | web renderer for previews; iOS renderer; store builds | the same fixtures pass on every platform |
+| 16 | maps to look at inside the app: a map library and tiles downloaded at will while there is network, from today or the night before; the navigator stays for getting there | a park's points show on a real map with the phone offline |
+| 17 | the day rearranged on one page: blocks dragged and dropped, each as tall as it lasts, the travel between two blocks a locked block that changes when they move or swap, not when one is resized | a day is reordered by hand and the travel between follows |
+| 18 | Android coverage near 100%: the screens under Compose tests on the JVM, the activity's logic moved into tested code, the Kover exclusions down to the generated bindings | the Kover floor at 95 or more, and every class still left out named with its reason |
