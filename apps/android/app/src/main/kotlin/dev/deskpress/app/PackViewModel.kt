@@ -92,6 +92,11 @@ class PackViewModel(
     // A calendar sync of a scope: the whole trip when empty, a date, or one event id.
     var sync: (scope: String) -> Unit = {}
 
+    // The phone's own model, where it has one: a question and the only facts it may answer from,
+    // and what it said. Null on a phone without one, and then `can.assistant` is false and the
+    // pack shows no box to type in.
+    var assistant: (suspend (question: String, facts: Value) -> String)? = null
+
     // Whether the pack may fetch from these hosts, a secret by its name for the host it goes to
     // (null when there is none), and forgetting one the server turned down: the activity asks the
     // person and keeps both. A secret goes only to the host it was given for.
@@ -190,6 +195,15 @@ class PackViewModel(
                         else if (then.isNotEmpty()) act(then, point(at.first, at.second))
                     }
                     "calendar.sync" -> sync(cmd.args["scope"].text())
+                    // The orders are the host's; the pack's words go in as data (decision 0027).
+                    "assistant.ask" -> {
+                        val ask = assistant
+                        val then = cmd.args["then"].text()
+                        if (ask != null && then.isNotEmpty()) {
+                            val said = ask(cmd.args["question"].text(), cmd.args["facts"] ?: Value.Null)
+                            act(then, Value.Text(said))
+                        }
+                    }
                     "map.open" -> {
                         val lat = (cmd.args["lat"] as? Value.Number)?.value
                         val lon = (cmd.args["lon"] as? Value.Number)?.value
@@ -198,6 +212,28 @@ class PackViewModel(
                     else -> if (cmd.name.endsWith(".sync")) refresh(cmd.name.removeSuffix(".sync"))
                 }
             }
+        }
+    }
+
+    /**
+     * Opens the pack's questions at `id`, as a launcher shortcut asks for. A screen with no way
+     * there is left as it is.
+     */
+    fun ask(id: String) {
+        val pack = pack ?: return
+        viewModelScope.launch {
+            val world = here()
+            val out =
+                try {
+                    withContext(io) {
+                        pack.dispatch(world, "ask", Value.Null)
+                        pack.dispatch(world, "show", Value.Text(id))
+                    }
+                } catch (e: CallException.Refused) {
+                    return@launch
+                }
+            _state.value = attempt { show(out.view, warnings, theme) }
+            watch()
         }
     }
 
@@ -226,7 +262,8 @@ class PackViewModel(
         val local = now(timezone)
         val at = local.atZone(timezone)
         val others = zones.mapValues { at.withZoneSameInstant(it.value).toLocalDateTime() }
-        return world(local, store, inside, position != null, others)
+        val can = if (assistant == null) emptyList() else listOf("assistant")
+        return world(local, store, inside, position != null, others, can)
     }
 
     private fun update(call: suspend (LoadedPack) -> View) {

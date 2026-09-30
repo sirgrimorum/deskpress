@@ -17,8 +17,8 @@ commands:
   version                                    print the screen tree version
 
 <time> is local to the pack, YYYY-MM-DDTHH:MM. [world] is any of --holder <person id>,
---inside <place id> and --store <key>=<value>, the last two once per value. Any --inside means
-the device is located; --inside '' says it is inside none. An action is a name,
+--inside <place id>, --store <key>=<value> and --can <name>, the last three once per value. Any
+--inside means the device is located; --inside '' says it is inside none. An action is a name,
 or name=<value> to send it a value. A value is YAML, like 3, true, b or [a, b].";
 
 /// Runs one command and returns the exit code.
@@ -167,6 +167,7 @@ fn world(args: &[String]) -> Result<(World, Vec<String>), String> {
                 world.located = true;
                 world.inside.extend(Some(v.clone()).filter(|v| !v.is_empty()));
             }
+            "--can" => world.can.push(v.clone()),
             "--store" => {
                 let Some((key, v)) = v.split_once('=') else {
                     return Err(format!("--store takes key=value, not {v}"));
@@ -192,6 +193,7 @@ fn value(src: &str) -> Value {
 fn node(n: deskpress_engine::tree::Node) -> Value {
     let on = n.on.into_iter().map(|(k, v)| (k, Value::String(v)));
     Value::Map(Map(vec![
+        ("key".to_owned(), Value::String(n.key)),
         ("kind".to_owned(), Value::String(n.kind)),
         ("props".to_owned(), Value::Map(Map(n.props))),
         ("on".to_owned(), Value::Map(Map(on.collect()))),
@@ -565,14 +567,24 @@ rules:
 
     #[test]
     fn screen_prints_the_tree_and_its_watch_as_json() {
-        let world =
-            ["--at", "2026-04-11T10:30", "--store", "x=1", "--holder", "rita", "--inside", ""];
+        let world = [
+            "--at",
+            "2026-04-11T10:30",
+            "--store",
+            "x=1",
+            "--holder",
+            "rita",
+            "--inside",
+            "",
+            "--can",
+            "assistant",
+        ];
         let content = format!("{DAY}places:\n  home: {{at: {{lat: 1, lon: 2}}}}\n");
         let modules = MACHINE.replace("  timeline:\n", "  timeline:\n  places:\n");
         let pack = manifest(&format!("  name: M\n{modules}"));
         let dir = folder("screen", &[("pack.yaml", &pack), ("content.yaml", &content)]);
         let (code, out, err) = at(&dir, "screen", &world);
-        let expected = r#"{"version": 4, "screen": "a", "nodes": [{"kind": "Label", "props": {"text": "x  1"}, "on": {"tap": "go"}, "children": []}], "theme": "", "kid": false, "watch": {"until": "2026-04-12T00:00", "regions": [{"id": "home", "lat": 1, "lon": 2, "radius_m": 100}]}}"#;
+        let expected = r#"{"version": 4, "screen": "a", "nodes": [{"key": "0", "kind": "Label", "props": {"text": "x  1"}, "on": {"tap": "go"}, "children": []}], "theme": "", "kid": false, "watch": {"until": "2026-04-12T00:00", "regions": [{"id": "home", "lat": 1, "lon": 2, "radius_m": 100}]}}"#;
         assert_eq!((code, out.as_str(), err.as_str()), (0, format!("{expected}\n").as_str(), ""));
     }
 

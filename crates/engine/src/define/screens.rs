@@ -6,7 +6,7 @@ use crate::validate::patterns::is_id;
 use crate::value::{Map, Value, quote, text};
 
 /// The components a layout can use. The set grows only with a shell release (decision 0005).
-pub const COMPONENTS: [&str; 13] = [
+pub const COMPONENTS: [&str; 16] = [
     "BigValue",
     "Label",
     "Card",
@@ -16,6 +16,9 @@ pub const COMPONENTS: [&str; 13] = [
     "Chip",
     "Button",
     "Segmented",
+    "Check",
+    "Field",
+    "Map",
     "Missing",
     "Auto",
     "Group",
@@ -341,6 +344,17 @@ impl Definer {
         out
     }
 
+    /// A value read as a prop: `{expr}` text fills in, a list is taken as written, the rest is an
+    /// expression.
+    pub(super) fn prop(&mut self, at: &str, v: &Value) -> Option<Prop> {
+        match v {
+            Value::String(s) if s.contains('{') => self.template(at, s).map(Prop::Template),
+            // A list is taken as it is written, like `skip: [time, text]`.
+            Value::List(_) => Some(Prop::Expr(Expr::Literal(v.clone()))),
+            _ => self.expr(at, v).map(Prop::Expr),
+        }
+    }
+
     /// A text whose `{expr}` pieces are expressions.
     fn template(&mut self, at: &str, src: &str) -> Option<Vec<Piece>> {
         let mut pieces = Vec::new();
@@ -442,14 +456,7 @@ impl Definer {
                     out.on.push((event.to_owned(), action));
                 }
             } else {
-                let prop = match v {
-                    Value::String(s) if s.contains('{') => {
-                        self.template(&here, s).map(Prop::Template)
-                    }
-                    // A list is taken as it is written, like `skip: [time, text]`.
-                    Value::List(_) => Some(Prop::Expr(Expr::Literal(v.clone()))),
-                    _ => self.expr(&here, v).map(Prop::Expr),
-                };
+                let prop = self.prop(&here, v);
                 ok &= prop.is_some();
                 out.props.extend(prop.map(|p| (key.to_owned(), p)));
             }
@@ -606,7 +613,7 @@ mod tests {
         assert_eq!(
             effect("{do: back, if: nope}"),
             "screens.a.actions.go[0].if: column 1: \"nope\" is not a name here. \
-             Known: now, content, ui, store, params, n, $arg"
+             Known: now, content, ui, store, can, questions, params, n, $arg"
         );
     }
 
@@ -635,7 +642,7 @@ mod tests {
         assert_eq!(
             effect("{store: \"choice.{day.date}\", value: 1}"),
             "screens.a.actions.go[0].store: column 1: \"day\" is not a name here. \
-             Known: now, content, ui, store, params, n, $arg"
+             Known: now, content, ui, store, can, questions, params, n, $arg"
         );
         let d = def(
             "screens: {a: {actions: {go: [{store: \"{now.date}.{now.time}!\", value: $arg}]}}}",
@@ -663,7 +670,7 @@ mod tests {
             effect("{open: b, with: {Day: now.date, x: nope}}"),
             "screens.a.actions.go[0].with.Day: \"Day\" is not a name: lowercase letters, digits and underscores\n\
              screens.a.actions.go[0].with.x: column 1: \"nope\" is not a name here. \
-             Known: now, content, ui, store, params, n, $arg"
+             Known: now, content, ui, store, can, questions, params, n, $arg"
         );
         let d = def(
             "screens:\n  a: {actions: {go: [{open: b, with: {day: now.date}}, {open: a}]}}\n  b:\n",
@@ -707,7 +714,7 @@ mod tests {
 
     #[test]
     fn props_are_expressions_or_templates_and_events_name_actions() {
-        let known = "Known: now, content, ui, store, params";
+        let known = "Known: now, content, ui, store, can, questions, params";
         assert_eq!(
             layout("[{Button: {on_tap: stay}}]"),
             "screens.a.layout[0].Button.on_tap: \"stay\" is not an action of this screen: go"
@@ -751,7 +758,7 @@ mod tests {
 
     #[test]
     fn a_group_holds_a_layout_and_calls_its_item_group_inside() {
-        let known = "Known: now, content, ui, store, params";
+        let known = "Known: now, content, ui, store, can, questions, params";
         let empty = "screens.a.layout[0].Group.layout: has to be a list of the components it holds";
         for props in ["{title: \"'x'\"}", "{layout: []}", "{layout: x}"] {
             assert_eq!(layout(&format!("[{{Group: {props}}}]")), empty);

@@ -1,0 +1,23 @@
+# The two choices the shell makes rather than the pack: how big the text is, which map app opens.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T11:30"
+- tapOn: "Menu"
+- tapOn: "Settings"
+- assertVisible: "TEXT SIZE"
+- assertVisible: "MAPS OPEN IN"
+- tapOn: "Large"
+- tapOn: "Organic Maps"
+- tapOn: "Back"
+- assertVisible: "Now · visit"
+# Kept across a restart, like every shell choice.
+- launchApp:
+    stopApp: true
+    arguments:
+      now: "2026-04-11T11:30"
+- tapOn: "Menu"
+- tapOn: "Settings"
+- assertVisible: "MAPS OPEN IN"

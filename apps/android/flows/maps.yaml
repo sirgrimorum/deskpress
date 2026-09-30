@@ -1,0 +1,27 @@
+# The maps a pack carries and nothing fetched: the road a walk passes, the day's places on plain
+# paper, and the terminal's own map at the ferry.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T10:45"
+- assertVisible: "On the way"
+- assertVisible: "Largo da Graca"
+- assertVisible: "The miradouro is one street to the left."
+- scrollUntilVisible:
+    element: "The day on a map"
+- tapOn: "The day on a map"
+- assertVisible: "Museu Nacional do Azulejo"
+- assertVisible: "Cais do Sodre ferry terminal"
+- tapOn: "Back"
+- assertVisible: "On the way"
+# At the terminal, the place's own map. This pack carries no picture, so the pins are on paper.
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T18:45"
+- scrollUntilVisible:
+    element: "Gate 3, the Cacilhas boat"
+- assertVisible: "Ticket machines"
+- assertVisible: "The hall, from the street door"

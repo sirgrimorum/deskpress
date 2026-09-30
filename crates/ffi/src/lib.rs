@@ -83,6 +83,8 @@ fn sorted(m: HashMap<String, Value>) -> Map {
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct Node {
+    /// What tells this node from its siblings across a redraw, for the renderer to key a list by.
+    pub key: String,
     pub kind: String,
     pub props: HashMap<String, Value>,
     /// Event to the action to dispatch, like `tap` to `confirm`.
@@ -94,6 +96,7 @@ pub struct Node {
 impl From<tree::Node> for Node {
     fn from(n: tree::Node) -> Self {
         Node {
+            key: n.key,
             kind: n.kind,
             props: values(Map(n.props)),
             on: n.on.into_iter().collect(),
@@ -145,6 +148,15 @@ pub struct Region {
 pub struct View {
     pub tree: Tree,
     pub watch: Watch,
+    /// The questions to offer the launcher and the phone's assistant, by the id that opens one.
+    pub shortcuts: Vec<Shortcut>,
+}
+
+/// A question the phone may offer outside the app. The words only: the answer stays in the app.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Shortcut {
+    pub id: String,
+    pub ask: String,
 }
 
 impl From<engine::View> for View {
@@ -156,7 +168,8 @@ impl From<engine::View> for View {
             radius_m: r.radius_m,
         });
         let watch = Watch { until: v.watch.until, regions: regions.collect() };
-        View { tree: v.tree.into(), watch }
+        let shortcuts = v.shortcuts.into_iter().map(|s| Shortcut { id: s.id, ask: s.ask });
+        View { tree: v.tree.into(), watch, shortcuts: shortcuts.collect() }
     }
 }
 
@@ -260,6 +273,8 @@ pub struct World {
     pub located: bool,
     pub store: HashMap<String, Value>,
     pub zones: HashMap<String, String>,
+    /// What this host can do beyond the shell itself, read as `can.assistant`.
+    pub can: Vec<String>,
 }
 
 impl From<World> for engine::World {
@@ -269,7 +284,8 @@ impl From<World> for engine::World {
             w.zones.into_iter().map(|(z, t)| (z, data::Value::String(t))).collect();
         zones.sort_by(|a, b| a.0.cmp(&b.0));
         let zones = Map(zones);
-        engine::World { now, holder, inside, located, store: sorted(w.store), zones }
+        let store = sorted(w.store);
+        engine::World { now, holder, inside, located, store, zones, can: w.can }
     }
 }
 
@@ -497,7 +513,7 @@ rules:
     fn world(now: &str) -> World {
         let (holder, inside) = (String::new(), vec![]);
         let (store, zones) = (HashMap::new(), HashMap::new());
-        World { now: now.into(), holder, inside, located: false, store, zones }
+        World { now: now.into(), holder, inside, located: false, store, zones, can: vec![] }
     }
 
     fn text(value: &str) -> Value {
@@ -523,25 +539,30 @@ rules:
     #[test]
     fn a_valid_pack_loads_with_its_warnings_and_draws_its_outline() {
         let day = "days:\n  - {date: 2026-04-11, title: Arrive}\n";
-        let pack = load("pack.yaml".into(), files("", day)).unwrap();
+        let ask =
+            "questions:\n  first: {ask: What is first?, answer: \"'Arrive'\", shortcut: true}\n";
+        let pack = load("pack.yaml".into(), files(ask, day)).unwrap();
         assert_eq!(pack.warnings().len(), 1);
         assert_eq!(pack.timezone(), "UTC");
         assert_eq!(pack.id(), "t");
         assert_eq!(pack.theme(), Value::Null);
         let view = pack.screen(world("2026-04-11T10:00")).unwrap();
         assert_eq!((view.tree.version, view.tree.screen.as_str()), (tree_version(), "outline"));
-        let node = |kind: &str, props: &[(&str, &str)]| Node {
+        let node = |key: &str, kind: &str, props: &[(&str, &str)]| Node {
+            key: key.into(),
             kind: kind.into(),
             props: props.iter().map(|(k, v)| ((*k).to_owned(), text(v))).collect(),
             on: HashMap::new(),
             children: vec![],
         };
         let expected = vec![
-            node("Title", &[("text", "Test")]),
-            node("Row", &[("text", "Arrive"), ("caption", "2026-04-11")]),
+            node("name", "Title", &[("text", "Test")]),
+            node("2026-04-11", "Row", &[("text", "Arrive"), ("caption", "2026-04-11")]),
         ];
         assert_eq!(view.tree.nodes, expected);
         assert_eq!(view.watch, Watch { until: "2026-04-12T00:00".into(), regions: vec![] });
+        let first = Shortcut { id: "first".into(), ask: "What is first?".into() };
+        assert_eq!(view.shortcuts, vec![first]);
         assert_eq!((view.tree.theme.as_str(), view.tree.kid), ("", false));
     }
 

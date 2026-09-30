@@ -1,6 +1,6 @@
 people:
   - {id: rita,  name: Rita,  adult: true}
-  - {id: tomas, name: Tomas, adult: false}
+  - {id: tomas, name: Tomas, adult: false, language: pt}
 
 documents:
   - id: insurance_rita
@@ -19,14 +19,16 @@ days:
     blocks:
       - ["", "Nothing before 10:00. The ferry back is the only fixed hour."]
       - ["10:30", "Walk up through Graca. Shade on the left side of the street.",
-         {type: walking, duration: 40 min}]
+         {type: walking, duration: 40 min,
+          road: [{at: "10:45", name: Largo da Graca, what: "The miradouro is one street to the left."},
+                 {name: The steep stretch, what: "Stairs first, then the street flattens out."}]}]
       - ["11:15", "Museu Nacional do Azulejo, start on the top floor and come down.",
          {type: visit, place: azulejo, guide: tomas, until: "13:00", ticket: sheets.bookings.azulejo,
           source_note: "Opening hours checked on the museum site"}]
       - ["13:15", "Lunch in the museum cloister. It is the cheap one, not the famous one.",
          {type: meal}]
       - ["18:40", "Ferry from Cais do Sodre. Last one that connects is 19:10, do not wait for it.",
-         {type: transfer, place: cais_do_sodre, locked: true, until: "19:15"}]
+         {type: transfer, place: cais_do_sodre, locked: true, until: "19:15", leave: 25}]
   # The next day is still open: two plans, asked the evening before.
   - date: 2026-04-12
     title: Sintra or the beach
@@ -83,6 +85,14 @@ places:
       where: "Ribeira das Naus, on the water side"
       price: "[to confirm]"
       verified: 2026-03-02
+    # The terminal itself, drawn as fractions of the picture. This example ships no picture, so
+    # the pins show on plain paper.
+    plan:
+      caption: "The hall, from the street door"
+      points:
+        - {name: Ticket machines, x: 0.2, y: 0.3, kind: tickets}
+        - {name: "Gate 3, the Cacilhas boat", x: 0.75, y: 0.55, kind: gate}
+        - {name: Toilets, x: 0.45, y: 0.85, kind: toilets}
 
 alerts:
   - id: ferry_last_connection
@@ -101,6 +111,15 @@ climate:
     - {place: azulejo, date: 2026-04-11, summary: "Warm for April, and dry inside the museum"}
 
 sheets:
+  # `check: true` turns the items into rows to tick off, each one remembered on the device.
+  packing:
+    check: true
+    items:
+      - Sun hat for each of them
+      - The two water bottles
+      - Coins for the museum lockers
+      - Charger and the short cable
+    note: "Two changes each. The guesthouse has a washing line."
   bookings:
     - id: azulejo
       what: "Museum, one adult one child"

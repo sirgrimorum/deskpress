@@ -211,6 +211,12 @@ impl Checker<'_> {
             if read("adult") == Some(&Value::Bool(false)) && truthy(id) {
                 self.kids = true;
             }
+            let language = text(read("language"));
+            if !language.is_empty() && !is_language(&language) {
+                let message =
+                    format!("{} is not a language tag, like es or pt-BR", quote(&language));
+                self.r.error(format!("{at}.language"), message);
+            }
             let family = text(read("theme"));
             let dashed = format!("{family}-");
             if !family.is_empty()
@@ -279,7 +285,11 @@ impl Checker<'_> {
             if let Some(points) = points {
                 self.points(&at, points);
             }
-            let known = ["name", "kind", "at", "safe", "during", "parking", "points", "verified"];
+            if let Some(plan) = read("plan") {
+                self.plan(&at, plan);
+            }
+            let known =
+                ["name", "kind", "at", "safe", "during", "parking", "points", "plan", "verified"];
             self.free_keys(&at, place, &known, "place");
         }
     }
@@ -299,6 +309,49 @@ impl Checker<'_> {
             let message =
                 format!("{} is not a radius in metres between 25 and 20000", show(radius));
             self.r.error(format!("{at}.at.radius_m"), message);
+        }
+    }
+
+    /// A place's own map: pins in the picture's coordinates, and the picture when there is one
+    /// (decision 0026).
+    fn plan(&mut self, at: &str, plan: &Value) {
+        let keymap = self.keymap;
+        let at = format!("{at}.plan");
+        let Some(plan) = plan.as_map() else {
+            self.r.error(&at, "has to be a mapping: the pins, and an image to put them on");
+            return;
+        };
+        let image = keymap.field(plan, "plan", "image");
+        if image.is_some() && patterns::leaves(&text(image)) {
+            let message = format!("{} leaves the pack folder", show(image));
+            self.r.error(format!("{at}.image"), message);
+        }
+        let Some(pins) = keymap.field(plan, "plan", "points") else {
+            self.r.warn(&at, "no points, so the map of this place has nothing on it");
+            return;
+        };
+        let Some(pins) = pins.as_list() else {
+            self.r.error(format!("{at}.points"), "has to be a list of pins");
+            return;
+        };
+        let fraction =
+            |v: Option<&Value>| matches!(v, Some(Value::Number(n)) if (0.0..=1.0).contains(n));
+        for (i, pin) in pins.iter().enumerate() {
+            let at = format!("{at}.points[{i}]");
+            let Some(pin) = pin.as_map() else {
+                self.r.error(&at, "has to be a mapping with a name and where it sits");
+                continue;
+            };
+            if !truthy(keymap.field(pin, "point", "name")) {
+                self.r.error(&at, "a pin needs a name: it is what the person reads on the map");
+            }
+            for axis in ["x", "y"] {
+                let v = keymap.field(pin, "point", axis);
+                if !fraction(v) {
+                    let message = format!("{} is not a fraction of the picture, 0 to 1", show(v));
+                    self.r.error(format!("{at}.{axis}"), message);
+                }
+            }
         }
     }
 
@@ -875,7 +928,8 @@ mod tests {
   - {id: Rita, name: Rita}
   - {id: tomas, name: Tomas, adult: false, theme: tomas}
   - {id: tomas}
-  - {id: ana, name: Ana, theme: ana}
+  - {id: leo, name: Leo, language: PT}
+  - {id: ana, name: Ana, theme: ana, language: pt-BR}
 ",
         );
         let theme = palette("").replace("  plain:", "  ana-light:");
@@ -886,7 +940,8 @@ mod tests {
         assert!(s.contains("people[3].theme: \"tomas\" is not a theme in the theme file"), "{s}");
         assert!(s.contains("people[4].id: \"tomas\" is used twice"), "{s}");
         assert!(s.contains("people[4]: a person with no name shows up as their id"), "{s}");
-        assert!(!s.contains("people[5]"), "{s}");
+        assert!(s.contains("people[5].language: \"PT\" is not a language tag"), "{s}");
+        assert!(!s.contains("people[6]"), "{s}");
         says("days: []\npeople: {a: 1}", "people: has to be a list");
     }
 
@@ -969,6 +1024,73 @@ places:
     }
 
     #[test]
+    fn a_places_own_map_is_pins_on_a_picture_of_it() {
+        let content = day_and(
+            "places:
+  gare:
+    name: Gare
+    at: {lat: 1, lon: 1}
+    plan:
+      image: ../../private/gare.png
+      points:
+        - text
+        - {name: Platform 1, x: 0.2, y: 0.8}
+        - {x: 1.4, y: -1}
+  dock:
+    name: Dock
+    at: {lat: 1, lon: 1}
+    plan: {image: maps/dock.png}
+  slip:
+    name: Slip
+    at: {lat: 1, lon: 1}
+    plan: {points: 3}
+  pier:
+    name: Pier
+    at: {lat: 1, lon: 1}
+    plan: nothing
+",
+        );
+        let s = said(&with("", &content, None));
+        for needle in [
+            "places.gare.plan.image: \"../../private/gare.png\" leaves the pack folder",
+            "places.gare.plan.points[0]: has to be a mapping with a name and where it sits",
+            "places.gare.plan.points[2]: a pin needs a name",
+            "places.gare.plan.points[2].x: 1.4 is not a fraction of the picture, 0 to 1",
+            "places.gare.plan.points[2].y: -1 is not a fraction of the picture, 0 to 1",
+            "places.dock.plan: no points, so the map of this place has nothing on it",
+            "places.slip.plan.points: has to be a list of pins",
+            "places.pier.plan: has to be a mapping: the pins, and an image to put them on",
+        ] {
+            assert!(s.contains(needle), "wanted {needle:?} in:\n{s}");
+        }
+        assert!(!s.contains("gare.plan.points[1]"), "{s}");
+    }
+
+    #[test]
+    fn the_road_a_block_takes_is_named_stretches_in_order() {
+        let content = "days:
+  - date: 2026-04-11
+    title: x
+    blocks:
+      - ['10:00', 'x', {type: driving, duration: 30 min, road: [{at: '10:20', name: The bridge}]}]
+      - ['11:00', 'x', {type: driving, duration: 30 min, road: [text, {what: A castle}, {name: A pass, at: noon}]}]
+      - ['12:00', 'x', {type: driving, duration: 30 min, road: 3}]
+";
+        let s = said(&with("", content, None));
+        let at = "days.2026-04-11.blocks[1].road";
+        for needle in [
+            format!("{at}[0]: has to be a mapping with a name and what to look for"),
+            format!("{at}[1]: a stretch of road needs a name"),
+            format!("{at}[2].at: \"noon\" is not a time, HH:MM"),
+            "blocks[2].road: has to be a list: what the road passes, in the order it passes it"
+                .into(),
+        ] {
+            assert!(s.contains(&needle), "wanted {needle:?} in:\n{s}");
+        }
+        assert!(!s.contains("blocks[0]"), "{s}");
+    }
+
+    #[test]
     fn a_day_needs_a_real_date_once_and_a_title() {
         says("days:\n  - {blocks: [['10:00', 'x']]}", "days[0]: a day needs a date");
         says(
@@ -1034,9 +1156,9 @@ days:
     title: x
     blocks:
       - ['10:00', 'x', {type: visit, place: azulejo, guide: rita, for: [rita], until: '11:00', locked: true}]
-      - ['12:00', 'x', {type: zzz, place: nowhere, guide: nobody, for: nobody, until: '11:00', locked: 'yes'}]
+      - ['12:00', 'x', {type: zzz, place: nowhere, guide: nobody, for: nobody, until: '11:00', locked: 'yes', leave: soon}]
       - ['13:00', 'x', {type: meal, until: noon, for: [rita, ~]}]
-      - ['23:00', 'x', {until: '01:00', until_zone: Asia/Tokyo}]
+      - ['23:00', 'x', {until: '01:00', until_zone: Asia/Tokyo, leave: 20}]
 ";
         let s = said(&with("", content, None));
         let at = "days.2026-04-11.blocks[1]";
@@ -1047,6 +1169,7 @@ days:
             format!("{at}.for: \"nobody\" is not one of the people in this pack"),
             format!("{at}.until: 11:00 is not after the block's own time, 12:00"),
             format!("{at}.locked: is true or false"),
+            format!("{at}.leave: is a whole number of minutes"),
             "blocks[2].until: \"noon\" is not a time, HH:MM".into(),
             "blocks[2].for: \"\" is not one of the people".into(),
         ] {

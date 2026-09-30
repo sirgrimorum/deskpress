@@ -141,6 +141,41 @@ impl Checker<'_> {
                 "is true or false: an hour that cannot move, or one that can",
             );
         }
+        let minutes = |l: &Value| matches!(l, Value::Number(n) if n.fract() == 0.0 && *n > 0.0);
+        if read("leave").is_some_and(|l| !minutes(l)) {
+            self.r.error(
+                format!("{bat}.leave"),
+                "is a whole number of minutes: how long before its time you have to set off",
+            );
+        }
+        if let Some(road) = read("road") {
+            self.road(bat, road);
+        }
+    }
+
+    /// What a moving block passes on the way, in the order it passes it (decision 0026).
+    fn road(&mut self, bat: &str, road: &Value) {
+        let keymap = self.keymap;
+        let at = format!("{bat}.road");
+        let Some(steps) = road.as_list() else {
+            self.r.error(&at, "has to be a list: what the road passes, in the order it passes it");
+            return;
+        };
+        for (i, step) in steps.iter().enumerate() {
+            let at = format!("{at}[{i}]");
+            let Some(step) = step.as_map() else {
+                self.r.error(&at, "has to be a mapping with a name and what to look for");
+                continue;
+            };
+            if !truthy(keymap.field(step, "road", "name")) {
+                self.r.error(&at, "a stretch of road needs a name");
+            }
+            let when = text(keymap.field(step, "road", "at"));
+            if !when.is_empty() && !is_time(&when) {
+                let message = format!("{} is not a time, HH:MM", quote(&when));
+                self.r.error(format!("{at}.at"), message);
+            }
+        }
     }
 
     /// A reference to a person, checked only when the pack lists people.

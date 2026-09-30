@@ -21,6 +21,9 @@ pub struct Tree {
 /// One component and its props. A renderer knows the closed set of kinds and nothing about packs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Node {
+    /// What tells this node from its siblings across a redraw: where it sits in the layout, and
+    /// for a repeated component the item's own `event` or `id` (decision 0028).
+    pub key: String,
     pub kind: String,
     pub props: Vec<(String, Value)>,
     /// Event to the action it runs, like `("tap", "confirm")`.
@@ -30,21 +33,37 @@ pub struct Node {
 }
 
 impl Node {
-    fn new(kind: &str, props: &[(&str, String)]) -> Self {
+    fn new(key: &str, kind: &str, props: &[(&str, String)]) -> Self {
         let props =
             props.iter().map(|(k, v)| ((*k).to_owned(), Value::String(v.clone()))).collect();
-        Node { kind: kind.to_owned(), props, on: Vec::new(), children: Vec::new() }
+        let (key, kind) = (key.to_owned(), kind.to_owned());
+        Node { key, kind, props, on: Vec::new(), children: Vec::new() }
     }
+}
+
+/// Appends `node`, keeping the keys of one list apart: a pack may repeat an id, and a renderer
+/// that keys a list by a repeated key refuses to draw it.
+fn keyed(mut node: Node, nodes: &mut Vec<Node>) {
+    let taken = |nodes: &Vec<Node>, key: &str| nodes.iter().any(|n| n.key == key);
+    if taken(nodes, &node.key) {
+        let mut again = 2;
+        while taken(nodes, &format!("{}#{again}", node.key)) {
+            again += 1;
+        }
+        node.key = format!("{}#{again}", node.key);
+    }
+    nodes.push(node);
 }
 
 /// What a pack with no rules shows: its name, then one row per day.
 pub fn outline(pack: &Pack) -> Tree {
     let keymap = Keymap::of(&pack.manifest);
     let days = pack.content.as_map().and_then(|c| keymap.root(c, "days"));
-    let mut nodes = vec![Node::new("Title", &[("text", pack.name().unwrap_or_default())])];
+    let mut nodes = vec![Node::new("name", "Title", &[("text", pack.name().unwrap_or_default())])];
     for day in days.and_then(Value::as_list).unwrap_or_default() {
         let read = |key| text(keymap.read(day, "day", key));
-        nodes.push(Node::new("Row", &[("text", read("title")), ("caption", read("date"))]));
+        let props = &[("text", read("title")), ("caption", read("date"))];
+        keyed(Node::new(&read("date"), "Row", props), &mut nodes);
     }
     Tree {
         version: TREE_VERSION,
@@ -88,19 +107,19 @@ pub fn build(name: &str, screen: &Screen, scope: &mut Map, conventions: &Convent
 /// The nodes of `layout` over `scope`. While a component repeats its item is `item`, and a Group's
 /// is `group` too; both are back to what they were afterwards.
 fn draw(layout: &[Component], scope: &mut Map, conventions: &Conventions, nodes: &mut Vec<Node>) {
-    for c in layout {
+    for (i, c) in layout.iter().enumerate() {
         let Some(each) = &c.each else {
-            node(c, scope, conventions, nodes);
+            node(c, &i.to_string(), scope, conventions, nodes);
             continue;
         };
         let names: &[&str] = if c.kind == "Group" { &["item", "group"] } else { &["item"] };
         let before: Vec<Option<Value>> = names.iter().map(|n| scope.get(n).cloned()).collect();
         let items = each.eval(scope).into_owned();
-        for item in items.as_list().unwrap_or_default() {
+        for (at, item) in items.as_list().unwrap_or_default().iter().enumerate() {
             for name in names {
                 scope.set(name, item.clone());
             }
-            node(c, scope, conventions, nodes);
+            node(c, &format!("{i}.{}", identity(item, at)), scope, conventions, nodes);
         }
         for (name, before) in names.iter().zip(before) {
             match before {
@@ -111,7 +130,20 @@ fn draw(layout: &[Component], scope: &mut Map, conventions: &Conventions, nodes:
     }
 }
 
-fn node(c: &Component, scope: &mut Map, conventions: &Conventions, nodes: &mut Vec<Node>) {
+/// What tells one repeated item from another across a redraw: the fact it is keyed by, else where
+/// it sits in the list.
+fn identity(item: &Value, at: usize) -> String {
+    let own = ["event", "id"].iter().find_map(|k| item.get(k).map(|v| text(Some(v))));
+    own.filter(|own| !own.is_empty()).unwrap_or_else(|| at.to_string())
+}
+
+fn node(
+    c: &Component,
+    key: &str,
+    scope: &mut Map,
+    conventions: &Conventions,
+    nodes: &mut Vec<Node>,
+) {
     if c.when.as_ref().is_some_and(|w| !truthy(Some(&w.eval(scope)))) {
         return;
     }
@@ -122,17 +154,19 @@ fn node(c: &Component, scope: &mut Map, conventions: &Conventions, nodes: &mut V
         let mut children = Vec::new();
         draw(&c.children, scope, conventions, &mut children);
         if !children.is_empty() {
-            nodes.push(Node { kind: c.kind.clone(), props, on: c.on.clone(), children });
+            let (key, kind) = (key.to_owned(), c.kind.clone());
+            keyed(Node { key, kind, props, on: c.on.clone(), children }, nodes);
         }
         return;
     }
     let read = Reader { scope, conventions };
     if c.kind == "Auto" {
         let prop = |key: &str| props.iter().find(|(k, _)| k == key).map(|(_, v)| v);
-        read.auto(prop("value"), prop("skip"), nodes);
+        read.auto(key, prop("value"), prop("skip"), nodes);
         return;
     }
-    read.push(Node { kind: c.kind.clone(), props, on: c.on.clone(), children: Vec::new() }, nodes);
+    let (key, kind) = (key.to_owned(), c.kind.clone());
+    read.push(Node { key, kind, props, on: c.on.clone(), children: Vec::new() }, nodes);
 }
 
 /// What a node needs to be drawn as the pack format says: path references resolved, a value to
@@ -159,13 +193,15 @@ impl Reader<'_> {
                 node.props[i].1 = Value::String(body);
             }
         }
-        nodes.push(node);
+        keyed(node, nodes);
     }
 
     /// The unknown key rule over the entries of a mapping, leaving out the keys in `skip`. A list
     /// is a card per item, and any other value one card.
-    fn auto(&self, value: Option<&Value>, skip: Option<&Value>, nodes: &mut Vec<Node>) {
-        let card = |text: &Value| Node {
+    fn auto(&self, own: &str, value: Option<&Value>, skip: Option<&Value>, nodes: &mut Vec<Node>) {
+        // One component draws a card per entry, so each one is keyed by the entry it draws.
+        let card = |at: String, text: &Value| Node {
+            key: format!("{own}.{at}"),
             kind: "Card".to_owned(),
             props: vec![("text".to_owned(), text.clone())],
             on: Vec::new(),
@@ -174,9 +210,10 @@ impl Reader<'_> {
         match value {
             None | Some(Value::Null | Value::Map(_)) => {}
             Some(Value::List(items)) => {
-                return items.iter().for_each(|i| self.push(card(i), nodes));
+                let cards = items.iter().enumerate();
+                return cards.for_each(|(at, i)| self.push(card(at.to_string(), i), nodes));
             }
-            Some(one) => return self.push(card(one), nodes),
+            Some(one) => return self.push(card(String::new(), one), nodes),
         }
         let skip = skip.and_then(Value::as_list).unwrap_or_default();
         let skipped = |k: &str| skip.iter().any(|s| text(Some(s)) == k);
@@ -199,10 +236,14 @@ impl Reader<'_> {
                 ("title".to_owned(), Value::String(stem.replace('_', " "))),
                 ("text".to_owned(), v.clone()),
             ];
-            self.push(
-                Node { kind: kind.to_owned(), props, on: Vec::new(), children: Vec::new() },
-                nodes,
-            );
+            let node = Node {
+                key: format!("{own}.{key}"),
+                kind: kind.to_owned(),
+                props,
+                on: Vec::new(),
+                children: Vec::new(),
+            };
+            self.push(node, nodes);
         }
     }
 
@@ -268,7 +309,8 @@ mod tests {
     }
 
     fn row(text: &str, caption: &str) -> Node {
-        Node::new("Row", &[("text", text.to_owned()), ("caption", caption.to_owned())])
+        let props = &[("text", text.to_owned()), ("caption", caption.to_owned())];
+        Node::new(caption, "Row", props)
     }
 
     #[test]
@@ -277,7 +319,7 @@ mod tests {
             Pack { manifest: Value::Null, content: Value::Map(Map::default()), theme: None };
         for p in [empty, pack("pack: {}", "days: x"), pack("pack: {}", "- 1")] {
             let tree = outline(&p);
-            assert_eq!(tree.nodes, [Node::new("Title", &[("text", String::new())])]);
+            assert_eq!(tree.nodes, [Node::new("name", "Title", &[("text", String::new())])]);
             assert_eq!((tree.version, tree.screen.as_str()), (TREE_VERSION, "outline"));
         }
     }
@@ -289,7 +331,7 @@ mod tests {
             "dias:\n  - {fecha: 2026-04-11, titulo: Arrive}\n  - {fecha: 2026-04-12}\n  - x\n",
         );
         let expected = vec![
-            Node::new("Title", &[("text", "Trip".to_owned())]),
+            Node::new("name", "Title", &[("text", "Trip".to_owned())]),
             row("Arrive", "2026-04-11"),
             row("", "2026-04-12"),
             row("", ""),
@@ -314,7 +356,8 @@ mod tests {
         let (def, r) = define(&manifest);
         assert!(r.errors.is_empty(), "{:?}", r.errors);
         let screen = def.screen("a").unwrap();
-        let chip = |t: &str| Node {
+        let chip = |at: usize, t: &str| Node {
+            key: format!("1.{at}"),
             kind: "Chip".into(),
             props: vec![("text".into(), Value::String(format!("#{t}")))],
             on: vec![("tap".into(), "go".into())],
@@ -332,12 +375,15 @@ n: 3",
         );
         let tree = build("a", screen, &mut scope, &Conventions::of(&Value::Null));
         let n = Node {
+            key: "3".into(),
             kind: "Row".into(),
             props: vec![("text".into(), Value::Number(3.0))],
             on: vec![],
             children: vec![],
         };
-        assert_eq!(tree.nodes, [chip("a"), chip("c"), n]);
+        // A node is keyed by where it sits in the layout, a repeated one by where the item sits
+        // when it has no id of its own, so the one left out takes its key with it (decision 0028).
+        assert_eq!(tree.nodes, [chip(0, "a"), chip(2, "c"), n]);
         assert_eq!((tree.version, tree.screen.as_str()), (TREE_VERSION, "a"));
         // `item` is gone once the component is drawn.
         assert_eq!(scope.keys().collect::<Vec<_>>(), ["store"]);
@@ -346,8 +392,23 @@ n: 3",
 tags: x",
         );
         let tree = build("a", screen, &mut scope, &Conventions::of(&Value::Null));
-        assert_eq!(tree.nodes[0], Node::new("Label", &[("text", "hi".to_owned())]));
+        assert_eq!(tree.nodes[0], Node::new("0", "Label", &[("text", "hi".to_owned())]));
         assert_eq!(tree.nodes.len(), 2);
+    }
+
+    #[test]
+    fn a_repeated_id_does_not_repeat_a_key() {
+        let manifest =
+            parse("screens:\n  a:\n    layout:\n      - Row: {each: store.rows, text: item.id}\n")
+                .unwrap();
+        let (def, r) = define(&manifest);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        // A block is keyed by its `event`, which wins over an `id` the item also carries.
+        let store = "store: {rows: [{event: e1, id: z}, {id: a}, {id: a}, {id: a}, {id: b}]}";
+        let mut scope = parse(store).unwrap().as_map().cloned().unwrap();
+        let tree = build("a", def.screen("a").unwrap(), &mut scope, &Conventions::of(&Value::Null));
+        let keys: Vec<&str> = tree.nodes.iter().map(|n| n.key.as_str()).collect();
+        assert_eq!(keys, ["0.e1", "0.a", "0.a#2", "0.a#3", "0.b"]);
     }
 
     #[test]
@@ -371,14 +432,18 @@ tags: x",
         let store = "store: {people: [{id: a, name: Ann}, {id: b, name: Ben}], docs: [{for: a, title: Card}]}";
         let mut scope = parse(store).unwrap().as_map().cloned().unwrap();
         let tree = build("a", def.screen("a").unwrap(), &mut scope, &Conventions::of(&Value::Null));
-        let group = |title: &str, children: Vec<Node>| Node {
+        let group = |key: &str, title: &str, children: Vec<Node>| Node {
             children,
-            ..Node::new("Group", &[("title", title.to_owned())])
+            ..Node::new(key, "Group", &[("title", title.to_owned())])
         };
-        let label = |t: &str| Node::new("Label", &[("text", t.to_owned())]);
-        let card = Node::new("Row", &[("text", "Card".to_owned())]);
-        // Inside, `item` is the group's again once a child's own `each` is done.
-        let want = [group("Ann", vec![card, label("Ann")]), group("Ben", vec![label("Ben")])];
+        let label = |t: &str| Node::new("1", "Label", &[("text", t.to_owned())]);
+        let card = Node::new("0.0", "Row", &[("text", "Card".to_owned())]);
+        // Inside, `item` is the group's again once a child's own `each` is done. A repeated item
+        // with an id of its own is keyed by it, and a child's key is its own among its siblings.
+        let want = [
+            group("0.a", "Ann", vec![card, label("Ann")]),
+            group("0.b", "Ben", vec![label("Ben")]),
+        ];
         assert_eq!(tree.nodes, want);
         assert_eq!(scope.keys().collect::<Vec<_>>(), ["store"]);
     }

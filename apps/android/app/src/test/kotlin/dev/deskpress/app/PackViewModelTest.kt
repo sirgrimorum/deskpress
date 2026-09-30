@@ -67,6 +67,32 @@ class PackViewModelTest {
     private val PackViewModel.screen
         get() = (state.value as PackState.Showing).view.tree.screen
 
+    /** A pack with one question, and a screen that asks it in the person's own words. */
+    private val asking =
+        mapOf(
+            "pack.yaml" to
+                """
+                pack: {id: t, name: T, language: en, timezone: UTC, content: c.yaml}
+                questions:
+                  now: {ask: What now?, answer: "'a walk'", shortcut: true}
+                screens:
+                  home:
+                    actions:
+                      ask: [{open: ask}]
+                  ask:
+                    state: {typed: "", reply: ""}
+                    actions:
+                      show: [{set: typed, to: ${'$'}arg}]
+                      say: [{do: assistant.ask, with: {question: typed, facts: questions, then: "'said'"}}]
+                      said: [{set: reply, to: ${'$'}arg}]
+                    layout:
+                      - Label: {text: "{typed}|{reply}|{can.assistant}"}
+                rules:
+                  - {screen: home}
+                """.trimIndent() + "\n",
+            "c.yaml" to "days: []\n",
+        )
+
     @Test
     fun itStartsLoadingThenHoldsWhatTheEngineSaid() = runTest {
         val model = model({ emptyMap() }, "2026-04-11T09:00")
@@ -239,6 +265,37 @@ class PackViewModelTest {
         model.act("map", Value.Null)
         runCurrent()
         assertEquals("Car 1.5 2.0", opened)
+    }
+
+    @Test
+    fun aQuestionIsOfferedOutsideTheAppAndOpensTheScreenAtIt() = runTest {
+        val model = model({ asking }, "2026-04-11T11:30")
+        runCurrent()
+        val view = { (model.state.value as PackState.Showing).view }
+        assertEquals(listOf("now" to "What now?"), view().shortcuts.map { it.id to it.ask })
+        // What a launcher shortcut does: open the questions and show that one.
+        model.ask("now")
+        runCurrent()
+        assertEquals(listOf("now||"), view().tree.nodes.map { it.props["text"].text() })
+    }
+
+    @Test
+    fun theQuestionTypedGoesToThePhonesOwnModelWithOnlyTheFactsThePackChose() = runTest {
+        val model = model({ asking }, "2026-04-11T11:30")
+        runCurrent()
+        val label = { ((model.state.value as PackState.Showing).view.tree.nodes[0].props["text"]).text() }
+        // No model on this phone: `can.assistant` is false and asking does nothing.
+        model.act("ask", Value.Null)
+        model.act("show", Value.Text("is it far?"))
+        model.act("say", Value.Null)
+        runCurrent()
+        assertEquals("is it far?||", label())
+        var asked = "" to ""
+        model.assistant = { question, facts -> asked = question to facts.json(); "about ten minutes" }
+        model.act("say", Value.Null)
+        runCurrent()
+        assertEquals("is it far?|about ten minutes|true", label())
+        assertEquals("is it far?" to """[{"id":"now","ask":"What now?","answer":"a walk","shortcut":true}]""", asked)
     }
 
     @Test

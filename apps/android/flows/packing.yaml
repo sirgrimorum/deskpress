@@ -1,0 +1,18 @@
+# A sheet that asks to be checked: its items are lines to tick off, and the rest of it still draws.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T11:30"
+- tapOn: "Today"
+- scrollUntilVisible:
+    element: "packing"
+- tapOn: "packing"
+- assertVisible: "Sun hat for each of them"
+- assertVisible: "Coins for the museum lockers"
+- assertVisible: "Two changes each.*"
+- tapOn: "Sun hat for each of them"
+- tapOn: "Back"
+- tapOn: "packing"
+- assertVisible: "Sun hat for each of them"

@@ -37,6 +37,11 @@ data class Tokens(
 
     /** A size like `radius.card` or `touch.min`, in dp. */
     fun size(name: String): Dp = sizes.getValue(name).dp
+
+    /** Every type step at `factor` of its size: the shell's text size setting, over the theme. */
+    fun scaled(factor: Float): Tokens =
+        if (factor == 1f) this
+        else copy(type = type.mapValues { (_, t) -> t.copy(size = t.size * factor, line = t.line * factor) })
 }
 
 /** The tokens of the pack being drawn, the built-in theme until one is loaded. */

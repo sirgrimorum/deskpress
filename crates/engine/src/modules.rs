@@ -2,6 +2,8 @@
 //! would change. Every module hands out canonical keys, whatever the pack calls them.
 
 mod calendar;
+mod chart;
+pub(crate) mod plan;
 
 use std::cmp::Reverse;
 
@@ -188,6 +190,11 @@ impl<'a> Run<'a> {
             let kind = self.keymap.value("type", Some(kind));
             m.set("type", Value::String(kind));
         }
+        // What the road passes, each stretch through the `road` context (decision 0026).
+        if let Some(road) = m.get("road").and_then(Value::as_list) {
+            let road: Vec<Value> = road.iter().map(|r| self.keymap.canon(r, "road")).collect();
+            m.set("road", Value::List(road));
+        }
         m
     }
 
@@ -242,6 +249,13 @@ impl<'a> Run<'a> {
             add(&format!("option-{}", id(option)), self.read(option, "option", "blocks"));
             blocks.sort_by_key(|b| text(b.get("time")));
         }
+        // What the person did to the day on the device: blocks added, moved, resized or dropped.
+        let extra = plan::added(&self.world.store, &date);
+        let touched = !extra.is_empty();
+        blocks.extend(extra);
+        if plan::replan(&self.world.store, &mut blocks) || touched {
+            blocks.sort_by_key(|b| text(b.get("time")));
+        }
         let mut m = self.canon(day, "day");
         m.set("blocks", Value::List(blocks.iter().cloned().map(Value::Map).collect()));
         if self.read(day, "day", "options").is_some() {
@@ -277,12 +291,22 @@ impl<'a> Run<'a> {
             let (mut map, timed) = self.day(days, today);
             let started = timed.iter().any(|b| self.begins(&date, b) <= now);
             let mut current = None;
-            for b in timed {
+            for mut b in timed {
                 let at = self.begins(&date, &b);
                 if at <= now {
                     current = Some(b);
                 } else if next == Value::Null {
-                    self.until.push(at);
+                    self.until.push(at.clone());
+                    // The set-off notice costs one timer, and its guard reads the pack's clock.
+                    let off = plan::whole(b.get("leave"));
+                    if off > 0 {
+                        let set_off = shift(&at, -off);
+                        self.until.push(set_off.clone());
+                        let local = shift(&format!("{date}T{}", text(b.get("time"))), -off)[11..]
+                            .to_owned();
+                        b.set("leave_at", Value::String(local));
+                        b.set("leaving", Value::Bool(set_off <= now));
+                    }
                     next = Value::Map(b);
                 }
             }
@@ -399,16 +423,17 @@ impl<'a> Run<'a> {
         let find = |id: &str| {
             let place = places?.get(id)?;
             let mut m = self.canon(place, "place");
-            for kind in ["during", "parking"] {
+            for kind in ["during", "parking", "plan"] {
                 if let Some(v) = m.get(kind).map(|v| self.keymap.canon(v, kind)) {
                     m.set(kind, v);
                 }
             }
-            let points = m.get("points").and_then(Value::as_list);
-            let points: Option<Vec<Value>> =
-                points.map(|l| l.iter().map(|p| self.keymap.canon(p, "point")).collect());
-            if let Some(points) = points {
-                m.set("points", Value::List(points));
+            self.pointed(&mut m);
+            // A terminal map is a plan of its own, with pins in the picture's coordinates.
+            if let Some(plan) = m.get("plan").and_then(Value::as_map) {
+                let mut plan = plan.clone();
+                self.pointed(&mut plan);
+                m.set("plan", Value::Map(plan));
             }
             m.set("id", Value::String(id.to_owned()));
             Some(Value::Map(m))
@@ -430,6 +455,36 @@ impl<'a> Run<'a> {
         self.set("place", place);
         self.set("here", here);
         self.set("away", Value::Bool(away));
+        // The day's chart: the places its blocks name, in visit order, on plain paper.
+        let blocks = self.scope.get("day").and_then(|d| d.get("blocks"));
+        let stops: Vec<chart::Pin> = blocks
+            .and_then(Value::as_list)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|b| {
+                let id = text(b.get("place"));
+                let raw = places?.get(&id)?;
+                let circle = region(&id, self.read(raw, "place", "at")?)?;
+                let name = text(self.read(raw, "place", "name"));
+                let state = if id == at {
+                    "now"
+                } else if inside.contains(&id) {
+                    "here"
+                } else {
+                    ""
+                };
+                Some(chart::Pin { id, name, lat: circle.lat, lon: circle.lon, state })
+            })
+            .collect();
+        self.set("chart", chart::chart(&stops));
+    }
+
+    /// The `points` of a mapping, each through the `point` context.
+    fn pointed(&self, m: &mut Map) {
+        if let Some(l) = m.get("points").and_then(Value::as_list) {
+            let points: Vec<Value> = l.iter().map(|p| self.keymap.canon(p, "point")).collect();
+            m.set("points", Value::List(points));
+        }
     }
 
     /// The alerts showing now, most severe first. One shows from `notify_from`, else from the
@@ -472,22 +527,43 @@ impl<'a> Run<'a> {
                 self.content.iter().filter(|(k, _)| !self.used.iter().any(|r| r == k)).collect()
             }
         };
-        let sheet = |(key, value): (&str, &Value)| {
-            let title = Value::String(key.replace('_', " "));
-            record([
-                ("id", Value::String(key.to_owned())),
-                ("title", title),
-                ("value", value.clone()),
-            ])
+        let store = &self.world.store;
+        // The `items` of a checked sheet, each with the `fact` that ticks it, named by its place.
+        let ticks = |id: &str, value: &Value| {
+            let tick = |(n, item): (usize, &Value)| {
+                let key = format!("tick.{id}.{n}");
+                record([
+                    ("fact", Value::String(key.clone())),
+                    ("text", Value::String(text(Some(item)))),
+                    ("done", Value::Bool(truthy(store.get(&key)))),
+                ])
+            };
+            let items = value.get("items").and_then(Value::as_list).unwrap_or_default();
+            Value::List(items.iter().enumerate().map(tick).collect())
         };
-        self.set("sheets", Value::List(entries.into_iter().map(sheet).collect()));
+        // `check` and `items` stay out of `value`, so the unknown key rule does not draw them.
+        let sheet = |(key, value): (&str, &Value)| {
+            let mut m = Map::default();
+            m.set("id", Value::String(key.to_owned()));
+            m.set("title", Value::String(key.replace('_', " ")));
+            match value.as_map().filter(|_| value.get("check") == Some(&Value::Bool(true))) {
+                Some(own) => {
+                    let rest = own.0.iter().filter(|(k, _)| !TICKED.contains(&k.as_str()));
+                    m.set("value", Value::Map(Map(rest.cloned().collect())));
+                    m.set("ticks", ticks(key, value));
+                }
+                None => m.set("value", value.clone()),
+            }
+            Value::Map(m)
+        };
+        let sheets = Value::List(entries.into_iter().map(sheet).collect());
+        self.set("sheets", sheets);
     }
 
     /// Every document, with `person` the name of the one it is `for` and `call` as
     /// `[{label, number}]`. None while a child holds the phone: they carry ids of real people.
     fn documents(&mut self, data: Option<&Value>) {
-        let holder = self.scope.get("holder");
-        if holder.and_then(|h| h.get("adult")) == Some(&Value::Bool(false)) {
+        if self.scope.get("holder").and_then(|h| h.get("adult")) == Some(&Value::Bool(false)) {
             self.set("documents", Value::List(Vec::new()));
             return;
         }
@@ -568,6 +644,9 @@ impl<'a> Run<'a> {
     }
 }
 
+/// The keys a checked sheet keeps to itself: the opt-in and the list it ticks off.
+const TICKED: [&str; 2] = ["check", "items"];
+
 /// A mapping of these fields, in this order.
 fn record<const N: usize>(fields: [(&str, Value); N]) -> Value {
     Value::Map(Map(fields.map(|(k, v)| (k.to_owned(), v)).to_vec()))
@@ -621,6 +700,7 @@ mod tests {
             located: true,
             store: Map(store.collect()),
             zones: Map::default(),
+            can: vec![],
         }
     }
 
@@ -666,6 +746,20 @@ mod tests {
         run("choices", "", DAYS, &world(now, store), "")
     }
 
+    /// A world whose stored facts are whole values, as a timeline edit writes them.
+    fn planned(now: &str, store: &str) -> World {
+        World {
+            store: parse(store).unwrap().as_map().cloned().unwrap_or_default(),
+            ..world(now, &[])
+        }
+    }
+
+    /// One block you have to set off for.
+    const LEAVE: &str = "days: [{date: 2026-04-11, blocks: [[\"10:30\", Ferry, {leave: 20}]]}]\n";
+
+    /// One you set off for before its own midnight.
+    const REDEYE: &str = "days: [{date: 2026-04-11, blocks: [[\"00:10\", Flight, {leave: 20}]]}]\n";
+
     fn pair(a: String, b: String) -> (String, String) {
         (a, b)
     }
@@ -687,7 +781,7 @@ mod tests {
     fn sheets(manifest: &str, content: &str, modules: &[&str]) -> Out {
         let (manifest, content) = (parse(manifest).unwrap(), parse(content).unwrap());
         let content = content.as_map().cloned().unwrap_or_default();
-        let w = world("2026-04-11T10:00", &[]);
+        let w = world("2026-04-11T10:00", &[("tick.packing.0", "yes")]);
         let mut r = Run::new(Keymap::of(&manifest), &content, &w, Map::default());
         for module in modules {
             let (name, from, _) = *MODULES.iter().find(|(n, ..)| n == module).unwrap();
@@ -714,6 +808,51 @@ mod tests {
         assert_eq!(out.each("sheets", "id"), "bookings phrases");
         let odd = sheets("", "sheets: [x]\n", &["sheets"]);
         assert_eq!(odd.at("sheets"), "[]");
+    }
+
+    #[test]
+    fn a_day_carries_the_blocks_the_person_added_moved_and_dropped() {
+        let added = "added.2026-04-11: [{time: \"09:00\", text: Coffee}]";
+        let one = run("timeline", "", DAYS, &planned("2026-04-11T08:00", added), "");
+        assert_eq!(one.each("day.blocks", "text"), "A note Coffee Walk Museum Ferry");
+        let store = format!(
+            "{added}\nplan.2026-04-11.blocks.1: {{shift: 60}}\nplan.2026-04-11.blocks.3: {{off: true}}"
+        );
+        let out = run("timeline", "", DAYS, &planned("2026-04-11T08:00", &store), "");
+        assert_eq!(out.each("day.blocks", "text"), "A note Coffee Museum Walk");
+    }
+
+    #[test]
+    fn a_block_you_set_off_for_says_when_and_the_watch_waits_for_that_minute() {
+        // Without `leave` a block says nothing about setting off.
+        assert_eq!(timeline("2026-04-11T09:00", &[]).at("next.leave_at"), "nothing");
+        let early = run("timeline", "", LEAVE, &world("2026-04-11T09:00", &[]), "");
+        assert_eq!([early.at("next.leave_at"), early.at("next.leaving")], ["\"10:10\"", "false"]);
+        assert!(early.until.contains(&"2026-04-11T10:10".to_owned()), "{:?}", early.until);
+        let now = run("timeline", "", LEAVE, &world("2026-04-11T10:15", &[]), "");
+        assert_eq!(now.at("next.leaving"), "true");
+        // The hour to go crosses back over midnight rather than stopping at it.
+        let red = run("timeline", "", REDEYE, &world("2026-04-11T00:00", &[]), "");
+        assert_eq!([red.at("next.leave_at"), red.at("next.leaving")], ["\"23:50\"", "true"]);
+    }
+
+    #[test]
+    fn a_sheet_asking_to_be_checked_lists_its_items_with_what_is_done() {
+        let content = "sheets: {packing: {check: true, items: [Hat, Bottle], note: Two}, phrases: {hi: hola}}";
+        let rows = concat!(
+            r#"[{"id": "packing", "title": "packing", "value": {"note": "Two"}, "ticks": ["#,
+            r#"{"fact": "tick.packing.0", "text": "Hat", "done": true}, "#,
+            r#"{"fact": "tick.packing.1", "text": "Bottle", "done": false}]}, "#,
+            // A sheet that did not ask has no list of its own, and keeps every key it wrote.
+            r#"{"id": "phrases", "title": "phrases", "value": {"hi": "hola"}}]"#
+        );
+        assert_eq!(sheets("", content, &["sheets"]).at("sheets"), rows);
+        // Asking with nothing to tick off is an empty list, not a card of leftover keys.
+        let bare = sheets("", "sheets: {packing: {check: true}}", &["sheets"]);
+        assert_eq!(
+            bare.at("sheets"),
+            r#"[{"id": "packing", "title": "packing", "value": {}, "ticks": []}]"#
+        );
     }
 
     #[test]
@@ -851,15 +990,19 @@ mod tests {
 
     #[test]
     fn keys_come_out_canonical_through_the_keymap() {
-        let manifest = "keymap:\n  root: {days: dias}\n  day: {date: fecha, title: titulo}\n  block: {place: lugar}\n";
-        let content =
-            "dias:\n  - {fecha: 2026-04-11, titulo: Hola, blocks: [['10:00', x, {lugar: p}]]}\n";
+        let manifest = "keymap:\n  root: {days: dias}\n  day: {date: fecha, title: titulo}\n  block: {place: lugar}\n  road: {name: nombre}\n";
+        let content = "dias:
+  - fecha: 2026-04-11
+    titulo: Hola
+    blocks: [['10:00', x, {lugar: p, road: [{nombre: El puente, what: Mira}]}]]
+";
         let out = run("timeline", manifest, content, &world("2026-04-11T10:00", &[]), "");
         assert_eq!(
             pair(out.at("day.date"), out.at("day.title")),
             strs(r#""2026-04-11""#, r#""Hola""#)
         );
         assert_eq!(out.at("block.place"), r#""p""#);
+        assert_eq!(out.at("block.road"), r#"[{"name": "El puente", "what": "Mira"}]"#);
     }
 
     #[test]
@@ -1001,9 +1144,35 @@ mod tests {
         assert!(out.regions.is_empty());
         let out = run("places", "", content, &w, "block: {place: odd}");
         assert_eq!(out.at("place"), r#"{"id": "odd"}"#);
-        let out = run("places", "", "", &w, "");
+        // A pack with no places at all: nothing to be at, and no chart of the day either.
+        let out = run("places", "", "", &w, "day: {blocks: [{place: gone}]}");
         assert_eq!(pair(out.at("place"), out.at("here")), strs("null", "null"));
         assert!(out.regions.is_empty());
+        assert_eq!(out.at("chart"), "null");
+    }
+
+    #[test]
+    fn the_day_is_charted_from_the_places_its_blocks_name() {
+        let keymap = "keymap: {plan: {image: imagen}, point: {name: nombre}}";
+        let content = "places:
+  azulejo: {name: Museum, at: {lat: 38.7, lon: -9.1}}
+  cais: {name: Ferry, at: {lat: 38.71, lon: -9.14}, plan: {imagen: hall.png, points: [{nombre: Gate, x: 0.5, y: 0.5}]}}
+  odd: {name: Nowhere}
+  half: {name: Half, at: {lat: 1}}
+";
+        let scope = "block: {place: azulejo}
+day: {blocks: [{place: azulejo}, {place: odd}, {place: half}, {place: cais}, {place: azulejo}]}";
+        let out = run("places", keymap, content, &world("2026-04-11T10:00", &[]), scope);
+        assert_eq!(out.each("chart.points", "name"), "Museum Ferry");
+        assert_eq!(out.each("chart.points", "state"), "now here");
+        // Neither a place without coordinates nor one with half of them is a pin, and the place
+        // visited twice is one pin and two stops.
+        assert_eq!(out.at("chart.path").matches("\"x\"").count(), 3);
+        // The device is inside cais, so that is `here`, and its own map comes out canonical.
+        assert_eq!(
+            out.at("here.plan"),
+            r#"{"image": "hall.png", "points": [{"name": "Gate", "x": 0.5, "y": 0.5}]}"#
+        );
     }
 
     #[test]

@@ -4,6 +4,10 @@ plugins {
     alias(libs.plugins.kover)
 }
 
+composeCompiler {
+    stabilityConfigurationFiles.add(layout.projectDirectory.file("compose-stability.conf"))
+}
+
 // The repo root: the examples ship as assets, and the JVM tests load the desk build of the engine.
 val repo: File = rootDir.resolve("../..")
 
@@ -52,6 +56,7 @@ dependencies {
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.documentfile)
+    implementation(libs.genai.prompt)
     implementation("net.java.dev.jna:jna:${libs.versions.jna.get()}@aar")
 
     testImplementation(libs.jna)
@@ -62,18 +67,24 @@ dependencies {
 // Coverage of the code that is not drawing: the view model, the pack files, facts, sync,
 // calendar, location and theme. Screens, the activity and the generated bindings are left to
 // the e2e flows. The floor is the level measured when it was set: what stays uncovered needs a
-// device (the calendar provider, the Keystore, a picked folder, the network).
+// device or a composition (the calendar provider, the Keystore, a picked folder, the network,
+// the state a screen holds).
 kover {
     reports {
         filters {
             excludes {
                 classes(
                     "dev.deskpress.app.MainActivity*",
+                    "dev.deskpress.app.Assistant",
+                    "dev.deskpress.app.Assistant\$Companion",
                     "dev.deskpress.app.Asking*",
                     "dev.deskpress.app.Syncing*",
                     "dev.deskpress.app.Menu",
                     "dev.deskpress.app.ScreenKt*",
+                    "dev.deskpress.app.SettingsKt*",
+                    "dev.deskpress.app.Shell",
                     "dev.deskpress.app.DesignKt*",
+                    "dev.deskpress.app.ContentRows",
                     "dev.deskpress.app.DocumentKt*",
                     "dev.deskpress.app.Pdf*",
                     "dev.deskpress.app.StyleKt*",
@@ -85,6 +96,6 @@ kover {
             }
         }
         // Just under what the tests reach, so a change that leaves new code untested fails here.
-        verify { rule { minBound(78) } }
+        verify { rule { minBound(82) } }
     }
 }

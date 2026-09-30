@@ -81,7 +81,7 @@ names them that way here too.
 
 The rest of `pack.yaml` says how the app behaves: which modules read the content, which
 screen shows when, and what can happen on each screen. A pack may also start from a template with
-`pack.extends: travel` and only override what differs: `modules`, `derive`, `screens` and `ui`
+`pack.extends: travel` and only override what differs: `modules`, `derive`, `questions`, `screens` and `ui`
 merge by key, the pack's entry winning; the pack's `rules` are tried before the template's; any
 other section replaces the template's. See [templates.md](templates.md).
 
@@ -176,14 +176,14 @@ with canonical keys, whatever the pack calls them.
 
 | module | names | what they hold |
 | --- | --- | --- |
-| `timeline` | `day`, `block`, `next`, `days`, `tomorrow` | today's day with its blocks in force, its `choice`, `started` (a timed block has begun) and `time` (the time on the day's own clock); the last block whose time has come, until its `until`; the first one still to come; every day; the day after today, with `first`, its first timed block. A block is `{time, text, state, event, ...its map}`, where `event` is its calendar id, `{date}.{list}.{n}`: the list is `blocks`, `fixed` or `option-{id}`, and `n` its place in that list |
+| `timeline` | `day`, `block`, `next`, `days`, `tomorrow` | today's day with its blocks in force, its `choice`, `started` (a timed block has begun) and `time` (the time on the day's own clock); the last block whose time has come, until its `until`; the first one still to come; every day; the day after today, with `first`, its first timed block. A block is `{time, text, state, event, ...its map}`, where `event` is its calendar id, `{date}.{list}.{n}`: the list is `blocks`, `fixed`, `option-{id}` or `added`, and `n` its place in that list. The day is then rebuilt from the device's own edits, `plan.<event>` and `added.<date>` |
 | `choices` | `decision` | the first decision due and unanswered, else the first one due, else the next one coming: `{date, title, options, recommended, choice, due, answered}` plus the decision's own keys. Due from `when` at `at` until its day is over |
 | `people` | `holder`, `people` | the person holding the phone (the host's, else the one stored as `holder`; a valid stamp stored as `holder_until` sets the watch until it runs out), and everyone |
-| `places` | `place`, `here`, `away` | where the current block happens; the place the device is inside, the block's own when it is one of them, else the smallest; and whether the device knows where it is and is out of the block place's region. Both places carry their `id` ([decision 0020](decisions/0020-location.md)) |
+| `places` | `place`, `here`, `away`, `chart` | where the current block happens; the place the device is inside, the block's own when it is one of them, else the smallest; and whether the device knows where it is and is out of the block place's region. Both places carry their `id` ([decision 0020](decisions/0020-location.md)). `chart` is the day on plain paper: `{points, path, span_m}`, null when no place the day names has an `at` ([decision 0026](decisions/0026-maps.md)) |
 | `alerts` | `alerts` | the ones showing now, most severe first: from `notify_from` (else the start of their day) to the end of their day |
 | `documents` | `documents` | all of them, each with `person` (the name of its `for`, from the `people` module listed before it) and `call` as `[{label, number}]`. None when a child holds the phone |
 | `climate` | `weather` | the weather for today at `place`, else `here` |
-| `sheets` | `sheets` | every tree under `sheets` as `{id, title, value}`, the title the key with `_` as spaces; with no `sheets` root, every root key no other module reads |
+| `sheets` | `sheets` | every tree under `sheets` as `{id, title, value}`, the title the key with `_` as spaces; with no `sheets` root, every root key no other module reads. A sheet saying `check: true` also gets `ticks`, one `{fact, text, done}` per item, and keeps `check` and `items` out of `value` |
 
 A block's `state` is `note` (no time), `now`, `past`, `locked`, or `next` (still to come), for
 the agenda. A block's `type` comes out canonical through `keymap.values.type`, and a place's
@@ -196,6 +196,36 @@ a `for` that does not name the person holding the phone is left out of the day.
 Each day runs on its own clock when it names a `zone` (see [days](#days)): today is the first day
 whose date is the date there, and a block has begun when its time there has come. The host passes
 the local time of each zone the pack names (`Engine::zones`), so the engine needs no zone rules.
+
+### Questions
+
+What the pack can answer about itself, keyed by id. Read after `derive` and before the rules, so an
+answer sees everything a screen sees ([decision 0027](decisions/0027-the-assistant.md)).
+
+```yaml
+questions:
+  now:
+    ask: {en: What is happening now?, pt: O que esta acontecendo agora?}
+    answer: "{block.time} {block.text}"
+    shortcut: true
+  toilets:
+    ask: Where are the toilets?
+    answer: place.toilets
+    when: place.toilets
+```
+
+| key | what it is |
+| --- | --- |
+| `ask` | the words the person would say: one text, or one per language tag |
+| `answer` | an expression, or a text with `{expr}` pieces, exactly as a screen's prop is |
+| `when` | offered only while this holds. Absent means always |
+| `shortcut` | offer it to the phone's launcher and assistant too. Absent means no |
+
+The screen reads `questions`, a list of `{id, ask, answer, shortcut}` already answered, and a
+question whose `when` is false is not in it. The words are the first language the question speaks
+of the holder's and then the pack's, matching `pt-BR` to `pt`, falling back to the text a pack with
+one language wrote. `questions` merges by key like `ui`, so a pack extending a template replaces
+one question and keeps the rest.
 
 ### Rules
 
@@ -223,6 +253,13 @@ Effects:
 | `module.action` | a module's action, like `calendar.sync` or `map.open`. Goes to the host as a command |
 | `{do: module.action, with: {key: expr}}` | the same, in mapping form, so it can take an `if` and pass values to the host command |
 
+The `timeline` actions are the exception: the engine answers them itself, as stored facts, and no
+command reaches the host ([decision 0025](decisions/0025-the-day-in-hand.md)). `timeline.move` and
+`timeline.grow` take `{block, by}`, an `event` id and whole minutes, and shift or stretch it;
+`timeline.swap` takes `{block, side}`, `'up'` or `'down'`, and gives each of the two the other's
+hour; `timeline.drop` and `timeline.restore` take `{block}`; `timeline.add` takes `{date, time,
+text}`. Arguments that make no sense write nothing.
+
 The commands the Android host runs: `device.unlock` (asks for the fingerprint or the device
 credential, then runs the action named in `then`), `phone.call` (opens the dialer with `number`),
 `document.open` (shows the pack's `file` full screen under `title`), `location.get` (runs the
@@ -230,7 +267,11 @@ action named in `then` with the device's position as `$arg`, `{lat, lon}`), `map
 app at `lat`, `lon`, pinned with `label`), `climate.sync` (fetches the module's `sync` now,
 decision 0022) and `calendar.sync` (writes the events within `scope`,
 an event id, a date, or the whole trip when left out, into a calendar the person picks once per
-pack, after showing what it would add, change and remove; decision 0021).
+pack, after showing what it would add, change and remove; decision 0021). `assistant.ask` takes
+`question` and `facts` and runs the action named in `then` with the model's words as `$arg`: empty
+on a phone with no model of its own, and empty when it fails, so the pack shows nothing. The orders
+are the host's and the pack's facts go under them as data, never as part of them
+([decision 0027](decisions/0027-the-assistant.md)).
 
 Any mapping effect takes `if: expr` and is skipped when it is false. `$arg` is the value the
 component sent: any component with an `on_tap` sends its `value` prop. After the effects run, the rules decide again
@@ -247,12 +288,15 @@ set here.
 | `BigValue` | the answer, at the top, large |
 | `Label` | a line of small text |
 | `Card` | a titled box with a body; `kid: true` in kid mode becomes a kid box |
-| `Row` | `text` and `caption`, with `time` in a fixed column; `state` (a block's `now`, `past`, `locked`) tints it |
+| `Row` | `text` and `caption`, with `time` in a fixed column; `state` (a block's `now`, `past`, `locked`, or `picked`) tints it |
 | `PhraseRow` | `text` (the phrase there) in bold, its `translation`, and a `hint` above the phrase |
 | `Alert` | a warning, by severity |
 | `Chip` | a small tag |
 | `Button` | an action |
 | `Segmented` | two or three `items` of equal width; the one equal to `value` is filled, and a tap sends its item |
+| `Check` | a line to tick off: `text`, and `checked` for the box. A tap sends its `value` |
+| `Field` | a line to type on: `label` above, `hint` when empty; every keystroke sends the typed text as `on_change` |
+| `Map` | pins at their fractions of a drawing: `points` as `{name, x, y, state}` with `x` and `y` from 0 to 1, `path` joining them in order, `image` a picture the pack carries, `caption`, and `span` metres as a scale line |
 | `Missing` | a fact nobody confirmed, drawn as a striped hole |
 | `Auto` | expands a mapping by the unknown key rule, one node per key; a list is a `Card` per item, and any other value one `Card`. `skip: [keys]` leaves keys out |
 | `Group` | a titled box around the components in its own `layout`; left out when nothing inside is drawn |
@@ -294,7 +338,7 @@ literal  := number | "'" text "'" | true | false | null
 
 Functions:
 - One argument: `count` is the length of a list, a mapping or a text; `empty` is whether that length is zero; `first` and `last` are the ends of a list, and null for anything else.
-- Two arguments: `later(stamp, minutes)` adds a whole number of minutes to an ISO timestamp and returns the new timestamp string.
+- Two arguments: `later(stamp, minutes)` adds a whole number of minutes to an ISO timestamp and returns the new timestamp string; `at(value, key)` indexes a mapping by key and a list by number, and is null for anything else. It is how a pack reads a key it cannot spell out, since the grammar builds no text.
 A name or key that is not there is null. An expression is at most 128 tokens; past that, split it
 with `derive`.
 
@@ -303,7 +347,8 @@ A text prop may be a template instead: every `{expr}` inside it is replaced by i
 
 Names an expression can read: `now` (`now.date`, `now.time` and `now.stamp`, local to the pack's
 timezone), what the modules expose, what `derive` defines, the screen's `state` and `params`,
-`content` for the raw data, `ui` for the shell's labels, and `store` for stored facts. Anything else
+`content` for the raw data, `ui` for the shell's labels, `store` for stored facts, and `can` for
+what this device can do, like `can.assistant` on a phone that carries a model. Anything else
 is a load error with the path and the column.
 
 Comparing the clock with a literal, like `now.time >= '18:00'`, tells the engine when the answer
@@ -350,7 +395,9 @@ The third element is what turns a line of text into a real moment:
 | `until` | closes the moment before the next block starts | the next block closes it |
 | `zone` | the clock of this block, like a flight's departure | the day's `zone` |
 | `until_zone` | the clock of `until`, like a flight's arrival; `until` may then read earlier than the time, and ends the next day when that falls before the block | the block's zone |
-| `locked` | an hour that cannot move: a booked train, a timed entry | the hour is treated as soft |
+| `locked` | an hour that cannot move: a booked train, a timed entry. A resize before it stops here | the hour is treated as soft |
+| `leave` | whole minutes: how long before its time you have to set off. While this block is `next` it gains `leave_at`, the hour to go, and `leaving`, whether that hour has come | no notice |
+| `road` | what a moving block passes, in order: a list of `{at, name, what}`, `at` a time when it has one | nothing between the two places |
 | `language` | which branch of your phrase sheets applies here | no phrase sheet |
 
 ### The thirteen types
@@ -450,6 +497,20 @@ family, a `question` with its `answer` behind a tap, and a `challenge`. Each key
 Only points with `for_kids` appear, and that text is what shows. A point without it is not a gap to
 fill: there was nothing there to offer them.
 
+A place may also carry a `plan`, its own map: named pins in the picture's own coordinates, and the
+picture when the pack ships one ([decision 0026](decisions/0026-maps.md)). `x` and `y` run from 0 to
+1, left to right and top to bottom, and `image` is a path inside the pack, like a document's `file`.
+Without an image the pins draw on plain paper, which is often enough.
+
+```yaml
+    plan:
+      caption: "The hall, from the street door"
+      image: maps/terminal.png        # optional
+      points:
+        - {name: Ticket machines, x: 0.2, y: 0.3, kind: tickets}
+        - {name: "Gate 3", x: 0.75, y: 0.55, kind: gate}
+```
+
 `verified` never renders as a card. It is the date somebody checked the fact, and the screen uses it
 for one thing: if the fact is older than a month, the card carries that date in small type.
 
@@ -457,13 +518,14 @@ for one thing: if the fact is older than a month, the card carries that date in 
 
 ```yaml
 people:
-  - {id: rita,  name: Rita,  adult: true,  theme: rita}
+  - {id: rita,  name: Rita,  adult: true,  theme: rita,  language: pt}
   - {id: tomas, name: Tomas, adult: false, theme: tomas}
 ```
 
 `adult` decides the mode, and it is not a setting anyone can flip. `theme` names the theme drawn
-while that person holds the phone. Who is holding the phone is
-chosen once and changed on the handoff screen.
+while that person holds the phone, and `language`, a tag like `pt-BR`, picks the words a question is
+offered in while they hold it, falling back to the pack's. Who is holding the phone is chosen once
+and changed on the handoff screen.
 
 ## alerts
 
@@ -565,7 +627,14 @@ sheets:
       what: "Museum, one adult one child"
       code: "MNA-20418"
       when: 2026-04-11T11:15
+  packing:
+    check: true                       # the items become lines to tick off
+    items: [Sun hat, The water bottles, Coins for the lockers]
+    note: "Two changes each."         # everything else still draws as a card
 ```
+
+A ticked line is remembered as `tick.<sheet>.<n>` on the device. The sheet's rows carry that key as
+`fact`, so a pack ticks one with `{store: "{$arg}", value: "not at(store, $arg)"}`.
 
 ## The theme file
 

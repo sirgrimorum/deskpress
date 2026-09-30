@@ -1,0 +1,30 @@
+# Moving the day about: an hour shifts and the day keeps it, and a block of your own joins in time
+# order. Nothing is written back to the pack: every edit is a fact of its own.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T11:30"
+- tapOn: "Today"
+- scrollUntilVisible:
+    element: "Move the day about"
+- tapOn: "Move the day about"
+- assertVisible: "Pick an hour to move."
+- tapOn: "Lunch in the museum cloister.*"
+- tapOn: "15 minutes later"
+- assertVisible: "13:30"
+- scrollUntilVisible:
+    element: "Add something"
+- tapOn: "Add something"
+- tapOn: "At what time"
+- inputText: "16:00"
+- tapOn: "What is it"
+- inputText: "Ice cream by the river"
+- tapOn: "Add it"
+- assertVisible: "Ice cream by the river"
+- tapOn: "Back"
+- assertVisible: "13:30"
+- assertVisible: "Ice cream by the river"
+# The ferry is a locked hour, so it stays where the pack put it.
+- assertVisible: "18:40"

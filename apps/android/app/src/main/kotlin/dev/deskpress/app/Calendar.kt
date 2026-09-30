@@ -1,8 +1,13 @@
 package dev.deskpress.app
 
+import android.content.ContentProviderOperation
+import android.content.ContentProviderResult
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
+import android.content.OperationApplicationException
+import android.os.RemoteException
+import android.provider.CalendarContract
 import android.provider.CalendarContract.Calendars
 import android.provider.CalendarContract.Events
 import android.provider.CalendarContract.Reminders
@@ -57,41 +62,89 @@ fun millis(stamp: String, zone: ZoneId): Long = LocalDateTime.parse(stamp).atZon
 fun minutes(event: Event): Long? =
     event.reminder.takeIf { it.isNotEmpty() }?.let { Duration.between(LocalDateTime.parse(it), LocalDateTime.parse(event.start)).toMinutes() }
 
+/** What a write settled: the row each event ended at, the rows it dropped, and why it stopped. */
+data class Wrote(
+    val rows: Map<String, Long> = emptyMap(),
+    val removed: List<Long> = emptyList(),
+    val failed: RuntimeException? = null,
+)
+
 /** The rows of one calendar, as `apply` needs them. A row outside `calendar` is never touched. */
 interface Rows {
-    fun insert(calendar: Long, event: Event): Long
-
-    /** False when the row is gone, deleted by the person in their calendar app. */
-    fun update(calendar: Long, row: Long, event: Event): Boolean
-
-    fun delete(calendar: Long, row: Long)
+    /**
+     * Everything in one go (decision 0028): the rows of `remove` gone, then each event written at
+     * its row, or at a new one where it has none. A failure reports what it settled before it.
+     */
+    fun write(calendar: Long, remove: List<Long>, write: List<Pair<Event, Long?>>): Wrote
 }
 
-/** The ledger after a sync, and why it stopped short, if it did. */
+/** One thing a batch asks of the calendar, decided here and translated by the host. */
+sealed interface Op {
+    data class Remove(val row: Long) : Op
+
+    /** The event at a new row, its reminder pointing back at it. */
+    data class Add(val event: Event) : Op
+
+    /** The event over the row it had, if that row is still there. */
+    data class Change(val event: Event, val row: Long) : Op
+
+    /** The reminders of a row that was already there: the old ones gone, the new one in their place. */
+    data class Remind(val event: Event, val row: Long) : Op
+}
+
+/** What the provider answered for one operation: the row an insert wrote, else the rows it touched. */
+data class Done(val row: Long? = null, val rows: Int = 0)
+
+/** What the first batch left over: the rows it settled, the events to write again, and the ops for both. */
+data class Next(val rows: Map<String, Long>, val again: List<Event>, val ops: List<Op>)
+
+/** The first batch: the rows the plan drops, then every event at its row or at a new one. */
+fun batch(remove: List<Long>, write: List<Pair<Event, Long?>>): List<Op> =
+    remove.map(Op::Remove) + write.map { (event, row) -> if (row == null) Op.Add(event) else Op.Change(event, row) }
+
+/**
+ * What the first batch settled, `done` being its answer to each of `write`, the removes dropped: a
+ * new row is kept, a row that survived gets its reminders, and a row the person deleted in their
+ * own calendar app is written again. The second batch adds first, so `again` lines up with it.
+ */
+fun next(write: List<Pair<Event, Long?>>, done: List<Done>): Next {
+    val rows = mutableMapOf<String, Long>()
+    val again = mutableListOf<Event>()
+    val remind = mutableListOf<Op>()
+    for ((at, pair) in write.withIndex()) {
+        val (event, row) = pair
+        when {
+            row == null -> rows[event.id] = checkNotNull(done[at].row)
+            done[at].rows == 0 -> again += event
+            else -> {
+                rows[event.id] = row
+                remind += Op.Remind(event, row)
+            }
+        }
+    }
+    return Next(rows, again, again.map(Op::Add) + remind)
+}
+
+/** The rows the second batch wrote, for the events it added again. */
+fun wrote(again: List<Event>, done: List<Done>): Map<String, Long> =
+    again.mapIndexed { at, event -> event.id to checkNotNull(done[at].row) }.toMap()
+
+/** The ledger after a sync, and why it did not happen, if it did not. */
 data class Applied(val ledger: Ledger, val failed: RuntimeException? = null)
 
 /**
- * Writes `plan` into the ledger's calendar. What was written before a failure stays in the
- * ledger, so the next sync changes those rows instead of writing them twice.
+ * Writes `plan` into the ledger's calendar in one batch. The ledger keeps exactly what the write
+ * settled, so a sync that stops half way never writes the same event twice on the next one.
  */
 fun apply(plan: Plan, ledger: Ledger, rows: Rows): Applied {
     val links = ledger.links.toMutableMap()
-    val failed =
-        try {
-            for (id in plan.remove) {
-                links[id]?.let { rows.delete(ledger.calendar, it.row) }
-                links.remove(id)
-            }
-            for (event in plan.add + plan.change) {
-                val old = links[event.id]
-                val row = if (old != null && rows.update(ledger.calendar, old.row, event)) old.row else rows.insert(ledger.calendar, event)
-                links[event.id] = Link(row, event.fingerprint)
-            }
-            null
-        } catch (e: RuntimeException) {
-            e
-        }
-    return Applied(ledger.copy(links = links), failed)
+    val remove = plan.remove.mapNotNull { id -> links[id]?.row?.let { id to it } }
+    val events = plan.add + plan.change
+    val written = rows.write(ledger.calendar, remove.map { it.second }, events.map { it to links[it.id]?.row })
+    val removed = written.removed.toSet()
+    for ((id, row) in remove) if (row in removed) links.remove(id)
+    for (event in events) written.rows[event.id]?.let { links[event.id] = Link(it, event.fingerprint) }
+    return Applied(ledger.copy(links = links), written.failed)
 }
 
 /** The calendars this phone lets the app write to, as (id, name), the account after the name. */
@@ -118,36 +171,71 @@ class ContentRows(private val resolver: ContentResolver, private val zone: ZoneI
         put(Events.DESCRIPTION, event.notes)
     }
 
-    private fun remind(row: Long, event: Event) {
-        resolver.delete(Reminders.CONTENT_URI, "${Reminders.EVENT_ID} = ?", arrayOf("$row"))
-        val minutes = minutes(event) ?: return
-        val values = ContentValues().apply {
-            put(Reminders.EVENT_ID, row)
-            put(Reminders.MINUTES, minutes)
-            put(Reminders.METHOD, Reminders.METHOD_ALERT)
+    private fun uri(row: Long) = ContentUris.withAppendedId(Events.CONTENT_URI, row)
+
+    private fun remind(minutes: Long) = ContentProviderOperation.newInsert(Reminders.CONTENT_URI)
+        .withValue(Reminders.MINUTES, minutes)
+        .withValue(Reminders.METHOD, Reminders.METHOD_ALERT)
+
+    private fun gone(row: Long) = ContentProviderOperation.newDelete(Reminders.CONTENT_URI)
+        .withSelection("${Reminders.EVENT_ID} = ?", arrayOf("$row")).build()
+
+    /** One op as provider operations, its own first: a reminder of a new event points back at `at`. */
+    private fun operations(calendar: Long, op: Op, at: Int): List<ContentProviderOperation> {
+        val mine = "${Events.CALENDAR_ID} = $calendar"
+        return when (op) {
+            is Op.Remove ->
+                listOf(ContentProviderOperation.newDelete(uri(op.row)).withSelection(mine, null).build())
+            is Op.Add -> {
+                val values = values(op.event).apply { put(Events.CALENDAR_ID, calendar) }
+                val row = ContentProviderOperation.newInsert(Events.CONTENT_URI).withValues(values).build()
+                val minutes = minutes(op.event)
+                if (minutes == null) listOf(row)
+                else listOf(row, remind(minutes).withValueBackReference(Reminders.EVENT_ID, at).build())
+            }
+            // A row the person deleted in their own calendar app is no longer alive, and no rows change.
+            is Op.Change -> {
+                val alive = "$mine AND ${Events.DELETED} = 0"
+                listOf(ContentProviderOperation.newUpdate(uri(op.row)).withValues(values(op.event)).withSelection(alive, null).build())
+            }
+            is Op.Remind -> {
+                val minutes = minutes(op.event)
+                if (minutes == null) listOf(gone(op.row))
+                else listOf(gone(op.row), remind(minutes).withValue(Reminders.EVENT_ID, op.row).build())
+            }
         }
-        resolver.insert(Reminders.CONTENT_URI, values)
     }
 
-    override fun insert(calendar: Long, event: Event): Long {
-        val values = values(event).apply { put(Events.CALENDAR_ID, calendar) }
-        val row = resolver.insert(Events.CONTENT_URI, values)?.let(ContentUris::parseId) ?: error("the calendar refused ${event.id}")
-        remind(row, event)
-        return row
+    /** One trip to the calendar provider, with the answer to each op, in the order they were asked. */
+    private fun run(calendar: Long, plan: List<Op>): List<Done> {
+        val ops = mutableListOf<ContentProviderOperation>()
+        val where = mutableListOf<Int>()
+        for (op in plan) {
+            where += ops.size
+            ops += operations(calendar, op, ops.size)
+        }
+        val results: Array<ContentProviderResult> =
+            try {
+                resolver.applyBatch(CalendarContract.AUTHORITY, ArrayList(ops))
+            } catch (e: OperationApplicationException) {
+                throw IllegalStateException("the calendar refused the batch", e)
+            } catch (e: RemoteException) {
+                throw IllegalStateException("the calendar did not answer", e)
+            }
+        return where.map { Done(results[it].uri?.let(ContentUris::parseId), results[it].count ?: 0) }
     }
 
-    private fun mine(calendar: Long) = "${Events.CALENDAR_ID} = $calendar"
-
-    override fun update(calendar: Long, row: Long, event: Event): Boolean {
-        val uri = ContentUris.withAppendedId(Events.CONTENT_URI, row)
-        val alive = "${mine(calendar)} AND ${Events.DELETED} = 0"
-        if (resolver.update(uri, values(event), alive, null) == 0) return false
-        remind(row, event)
-        return true
-    }
-
-    override fun delete(calendar: Long, row: Long) {
-        resolver.delete(ContentUris.withAppendedId(Events.CONTENT_URI, row), mine(calendar), null)
+    /** The one place a calendar failure becomes data: what the batches settled, and what stopped them. */
+    override fun write(calendar: Long, remove: List<Long>, write: List<Pair<Event, Long?>>): Wrote {
+        var settled = Wrote()
+        return try {
+            val next = next(write, run(calendar, batch(remove, write)).drop(remove.size))
+            settled = Wrote(next.rows, remove)
+            if (next.ops.isEmpty()) settled
+            else settled.copy(rows = next.rows + wrote(next.again, run(calendar, next.ops)))
+        } catch (e: RuntimeException) {
+            settled.copy(failed = e)
+        }
     }
 }
 

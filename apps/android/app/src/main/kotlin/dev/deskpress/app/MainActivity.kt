@@ -36,6 +36,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,6 +46,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.content.edit
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.LifecycleStartEffect
@@ -53,12 +56,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.deskpress.engine.CallException
 import dev.deskpress.engine.Edit
 import dev.deskpress.engine.Plan
+import dev.deskpress.engine.Shortcut
 import java.io.File
 import java.io.IOException
 import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -67,6 +72,11 @@ private const val PACK = "one-day"
 
 /** The folder the person picked, kept across runs with its read and write permission. */
 private const val FOLDER = "folder"
+private const val SCALE = "scale"
+private const val NAVIGATOR = "navigator"
+
+/** The id of a question a launcher or the phone's assistant opened the app at (decision 0027). */
+private const val QUESTION = "dev.deskpress.question"
 
 private val LOCATION = arrayOf(ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION)
 
@@ -89,18 +99,51 @@ private sealed interface Asking {
 }
 
 class MainActivity : FragmentActivity() {
+    private val prefs by lazy { getSharedPreferences("shell", MODE_PRIVATE) }
+
+    // The question a shortcut asked for, until the screen has opened at it.
+    private val asked = MutableStateFlow<String?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        asked.value = intent.getStringExtra(QUESTION)
+    }
+
+    /**
+     * Offers these questions to the launcher and the phone's assistant. The words only: what the
+     * pack answers is drawn in the app and never handed over (decision 0027).
+     */
+    private fun offer(questions: List<Shortcut>) {
+        val room = ShortcutManagerCompat.getMaxShortcutCountPerActivity(this)
+        val shortcuts = questions.take(room).map { q ->
+            val open = Intent(this, MainActivity::class.java)
+                .setAction(Intent.ACTION_VIEW)
+                .putExtra(QUESTION, q.id)
+            ShortcutInfoCompat.Builder(this, "ask.${q.id}")
+                .setShortLabel(q.ask)
+                .setLongLabel(q.ask)
+                .setIntent(open)
+                .build()
+        }
+        runCatching { ShortcutManagerCompat.setDynamicShortcuts(this, shortcuts) }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        asked.value = intent.getStringExtra(QUESTION)
         // The e2e flows freeze the clock at a pack-local moment, the extra "now".
         val frozen = intent.getStringExtra("now")?.let(LocalDateTime::parse)
         // And the device's position, the extra "at" as "lat,lon": under them nothing is tracked.
         val pinned = intent.getStringExtra("at")?.split(",")?.mapNotNull(String::toDoubleOrNull)
-        val prefs = getSharedPreferences("shell", MODE_PRIVATE)
         setContent {
             var folder by remember { mutableStateOf(prefs.getString(FOLDER, null)) }
-            // The shell screen over the pack: "check", "design", or none.
+            // The shell screen over the pack: "check", "design", "settings", or none.
             var page by rememberSaveable { mutableStateOf<String?>(null) }
+            var shell by remember {
+                mutableStateOf(Shell(prefs.getFloat(SCALE, 1f), prefs.getString(NAVIGATOR, "").orEmpty()))
+            }
             val picker = rememberLauncherForActivityResult(OpenDocumentTree()) { uri ->
                 if (uri != null) {
                     // Write access when the folder gives it, else read only: edits then offer a copy.
@@ -252,6 +295,21 @@ class MainActivity : FragmentActivity() {
                 }
             }
 
+            // The phone's own model where there is one (decision 0027), else no assistant at all.
+            DisposableEffect(model) {
+                var own: Assistant? = null
+                val setup = scope.launch {
+                    val found = Assistant.on() ?: return@launch
+                    own = found
+                    model.assistant = found::ask
+                }
+                onDispose {
+                    setup.cancel()
+                    model.assistant = null
+                    own?.close()
+                }
+            }
+
             val state by model.state.collectAsStateWithLifecycle()
 
             // A pack with regions asks once for the position, and follows it only while started.
@@ -285,48 +343,82 @@ class MainActivity : FragmentActivity() {
             // Runs when the alarm screen comes up, not on every draw of it.
             LaunchedEffect(alarm) { if (alarm) soundAlarm() }
 
+            // The questions the pack offers outside the app, and the one a shortcut opened it at.
+            val offers = shown?.view?.shortcuts.orEmpty()
+            LaunchedEffect(offers) { offer(offers) }
+            val question by asked.collectAsStateWithLifecycle()
+            LaunchedEffect(question, model) {
+                question?.let {
+                    model.ask(it)
+                    asked.value = null
+                }
+            }
+
             val dark = isSystemInDarkTheme()
-            MaterialTheme(if (dark) darkColorScheme() else lightColorScheme()) {
-                val close = { page = null }
-                if (page != null) BackHandler(onBack = close)
-                val open = doc
-                when (val s = syncing) {
-                    is Syncing.Pick -> PickCalendar(s.calendars, { id ->
-                        syncing = null
-                        confirm(s.scope, Ledger(id))
-                    }) { syncing = null }
-                    is Syncing.Confirm -> ConfirmSync(s.plan, { write(s.plan, s.ledger) }) { syncing = null }
-                    null -> {}
-                }
-                when (val a = asking) {
-                    is Asking.Hosts -> AllowHosts(a.hosts) { asking = null; a.answer.complete(it) }
-                    is Asking.Secret -> AskSecret(a.name, a.host) { asking = null; a.answer.complete(it) }
-                    null -> {}
-                }
-                when {
-                    open != null -> Document(state, open.second, { file(folder, open.first) }) { doc = null }
-                    page == "check" -> Check(state, close)
-                    page == "design" -> Design(state, model::edit, { copy -> unwritten = copy; copier.launch(copy.file.substringAfterLast('/')) }, close)
-                    else -> PackScreen(state, model::act, Menu({ picker.launch(null) }, { page = "check" }, { page = "design" }))
+            // A picture a pack carries, for the maps it draws. Unreadable is no picture.
+            val packFile = remember(folder) {
+                { path: String -> runCatching { file(folder, path) }.getOrNull() }
+            }
+            CompositionLocalProvider(LocalShell provides shell, LocalPackFile provides packFile) {
+                MaterialTheme(if (dark) darkColorScheme() else lightColorScheme()) {
+                    val close = { page = null }
+                    if (page != null) BackHandler(onBack = close)
+                    val open = doc
+                    val menu =
+                        remember(picker) {
+                            Menu({ picker.launch(null) }, { page = "check" }, { page = "design" }, { page = "settings" })
+                        }
+                    when (val s = syncing) {
+                        is Syncing.Pick -> PickCalendar(s.calendars, { id ->
+                            syncing = null
+                            confirm(s.scope, Ledger(id))
+                        }) { syncing = null }
+                        is Syncing.Confirm -> ConfirmSync(s.plan, { write(s.plan, s.ledger) }) { syncing = null }
+                        null -> {}
+                    }
+                    when (val a = asking) {
+                        is Asking.Hosts -> AllowHosts(a.hosts) { asking = null; a.answer.complete(it) }
+                        is Asking.Secret -> AskSecret(a.name, a.host) { asking = null; a.answer.complete(it) }
+                        null -> {}
+                    }
+                    when {
+                        open != null -> Document(state, open.second, { file(folder, open.first) }) { doc = null }
+                        page == "check" -> Check(state, close)
+                        page == "design" -> Design(state, model::edit, { copy -> unwritten = copy; copier.launch(copy.file.substringAfterLast('/')) }, close)
+                        page == "settings" ->
+                            Settings(shell, { new ->
+                                shell = new
+                                prefs.edit { putFloat(SCALE, new.scale); putString(NAVIGATOR, new.navigator) }
+                            }, close)
+                        else -> PackScreen(state, model::act, menu)
+                    }
                 }
             }
         }
     }
 
+    /** Starts `intent`, and says whether the phone had anything to take it. */
+    private fun open(intent: Intent): Boolean =
+        try {
+            startActivity(intent)
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        }
+
     /** The dialer with `number` typed in: the person presses call. A tablet has no dialer. */
     private fun dial(number: String) {
-        try {
-            startActivity(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", number, null)))
-        } catch (_: ActivityNotFoundException) {
-        }
+        open(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", number, null)))
     }
 
-    /** A map app at `lat`, `lon` with a pin named `label`. Without one, nothing opens. */
+    /**
+     * A map app at `lat`, `lon` with a pin named `label`: the one the settings name, else whichever
+     * the phone offers. A named app that is not installed falls back to the phone's own choice.
+     */
     private fun map(lat: Double, lon: Double, label: String) {
-        try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lon?q=$lat,$lon(${Uri.encode(label)})")))
-        } catch (_: ActivityNotFoundException) {
-        }
+        val go = { Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lon?q=$lat,$lon(${Uri.encode(label)})")) }
+        val wanted = prefs.getString(NAVIGATOR, "").orEmpty()
+        if (wanted.isEmpty() || !open(go().setPackage(wanted))) open(go())
     }
 
     private fun say(text: String) = Toast.makeText(this, text, Toast.LENGTH_LONG).show()

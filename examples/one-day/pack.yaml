@@ -20,3 +20,12 @@ conventions:
 # A label of the template, said this pack's way.
 ui:
   days: The days of this trip
+
+# One question of this pack's own, in the two languages the family reads. The template's
+# questions come with it and are answered the same way.
+questions:
+  toilets:
+    ask: {en: Where are the toilets?, pt: Onde ficam as casas de banho?}
+    answer: place.points
+    when: place.points
+    shortcut: true

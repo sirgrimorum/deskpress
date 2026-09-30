@@ -64,7 +64,7 @@ private val SAMPLES =
     )
 
 private fun node(kind: String, vararg props: Pair<String, String>) =
-    Node(kind, props.associate { (k, v) -> k to Value.Text(v) }, emptyMap(), emptyList())
+    Node(kind, kind, props.associate { (k, v) -> k to Value.Text(v) }, emptyMap(), emptyList())
 
 /**
  * The design system of the pack, live: every token of the holder's theme and each component

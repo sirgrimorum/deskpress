@@ -102,4 +102,13 @@ class ThemeTest {
         assertEquals(Type(40f, 44f, 400, pixel = true), kid.type("hero"))
         assertEquals(BUILT_IN.type("body"), kid.type("body"))
     }
+
+    @Test
+    fun `the text size setting stretches every step and leaves the rest alone`() {
+        val plain = BUILT_IN.type("body")
+        assertEquals(BUILT_IN, BUILT_IN.scaled(1f))
+        val big = BUILT_IN.scaled(2f)
+        assertEquals(Type(plain.size * 2, plain.line * 2, plain.weight, plain.tracking), big.type("body"))
+        assertEquals(BUILT_IN.size("spacing.margin"), big.size("spacing.margin"))
+    }
 }

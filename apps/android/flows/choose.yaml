@@ -17,6 +17,8 @@ appId: dev.deskpress.app
 - tapOn: "Apply"
 - assertVisible: "TONIGHT"
 - tapOn: "Today"
+- scrollUntilVisible:
+    element: "Change the plan"
 - tapOn: "Change the plan"
 - assertVisible: 'Sintra or the beach tomorrow\?'
 - assertVisible: "Warm enough for the sand.*"

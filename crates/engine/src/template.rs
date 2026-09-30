@@ -10,7 +10,7 @@ const TEMPLATES: [(&str, &str); 1] =
 
 /// The sections merged by key: the pack's entry replaces the template's where it stands, and a
 /// new one is added at the end.
-const BY_KEY: [&str; 4] = ["modules", "derive", "screens", "ui"];
+const BY_KEY: [&str; 5] = ["modules", "derive", "questions", "screens", "ui"];
 
 /// `manifest` over the template it extends, or as it is when it extends none. A section of the
 /// wrong shape is kept as the pack wrote it, for the validator to report.
@@ -68,8 +68,8 @@ mod tests {
     use crate::define::define;
     use crate::engine::{Engine, Nav, World};
     use crate::pack::Pack;
-    use crate::tree::Node;
-    use crate::value::Map;
+    use crate::tree::{Node, Tree};
+    use crate::value::{Map, text};
     use crate::yaml::parse;
 
     fn over(pack: &str) -> Result<Value, String> {
@@ -160,6 +160,7 @@ mod tests {
             located: false,
             store: Map(store.collect()),
             zones: Map::default(),
+            can: vec![],
         }
     }
 
@@ -187,8 +188,8 @@ days:
     blocks:
       - ["", "A note"]
       - ["10:00", "Park", {type: parking, place: lot}]
-      - ["11:00", "Museum", {type: visit, place: museum, guide: leo, until: "12:00"}]
-      - ["13:00", "Drive", {type: driving, place: lot, duration: 40 min, tolls: none, until: "13:40"}]
+      - ["11:00", "Museum", {type: visit, place: museum, guide: leo, until: "12:00", leave: 20}]
+      - ["13:00", "Drive", {type: driving, place: lot, duration: 40 min, tolls: none, until: "13:40", road: [{at: "13:10", name: Bridge, what: Toll}]}]
   - date: 2026-04-12
     title: Two
     sleeps_at: Home
@@ -216,11 +217,97 @@ places:
       points: [{name: Hall, for_kids: Count the lions}]
       source_web: x
     guide: {facts: [Look up, Count the doors], question: How old is it?, answer: Very old, challenge: Find the lion}
+    plan:
+      caption: The hall
+      image: maps/museum.png
+      points: [{name: Hall, x: 0.5, y: 0.25}]
 documents:
   - {id: card, title: Card, for: ana, file: files/card.pdf, call: {Desk: "+1 555 0100"}, fields: {Number: A1}}
   - {id: pass, title: Pass, file: files/pass.pdf}
 phrases: {hi: hola}
+packing: {check: true, items: [Hat, Bottle]}
 "#;
+
+    /// One prop of a node.
+    fn at<'a>(n: &'a Node, key: &str) -> Option<&'a Value> {
+        n.props.iter().find(|(p, _)| p == key).map(|(_, v)| v)
+    }
+
+    /// Every node as `kind title text`, for the screens whose answer is not the node's text.
+    fn said(tree: &Tree) -> Vec<String> {
+        let say = |n: &Node, k: &str| text(at(n, k));
+        let line = |n: &Node| format!("{} {} {}", n.kind, say(n, "title"), say(n, "text"));
+        tree.nodes.iter().map(line).collect()
+    }
+
+    /// The `value` a tapping node carries, found by what it says.
+    fn carried(tree: &Tree, says: &str) -> Value {
+        let (lines, mine) = (said(tree), |v: &Value| text(Some(v)) == says);
+        let node = tree.nodes.iter().find(|n| at(n, "text").is_some_and(mine));
+        assert!(node.is_some(), "no node says {says:?} in {lines:?}");
+        at(node.unwrap(), "value").cloned().unwrap()
+    }
+
+    /// The day the pack shows after these facts were stored.
+    fn after(e: &Engine, now: &str, facts: &Map) -> Tree {
+        let w = World { store: facts.clone(), ..world(now, "", &[]) };
+        e.screen(&w, &mut Nav::default()).unwrap().tree
+    }
+
+    #[test]
+    fn a_block_you_set_off_for_says_when_and_then_says_to_go() {
+        let e = trip();
+        let lines =
+            |now: &str| said(&e.screen(&world(now, "", &[]), &mut Nav::default()).unwrap().tree);
+        assert!(lines("2026-04-11T10:30").contains(&"Label  Set off at 10:40".to_owned()));
+        assert!(lines("2026-04-11T10:45").contains(&"Alert Set off now Museum".to_owned()));
+        // Once the museum has started there is nothing to set off for.
+        assert!(!lines("2026-04-11T11:30").iter().any(|l| l.contains("Set off")));
+    }
+
+    #[test]
+    fn a_packing_list_is_ticked_off_row_by_row_and_remembered() {
+        let (e, mut nav) = (trip(), Nav::default());
+        let w = world("2026-04-11T12:30", "", &[]);
+        let agenda = e.screen(&w, &mut nav).unwrap().tree;
+        let out = e.dispatch(&w, &mut nav, "sheet", carried(&agenda, "packing")).unwrap();
+        assert_eq!(said(&out.view.tree)[1..], ["Check  Hat", "Check  Bottle"]);
+        let hat = carried(&out.view.tree, "Hat");
+        let out = e.dispatch(&w, &mut nav, "tick", hat.clone()).unwrap();
+        assert_eq!(out.store, Map(vec![("tick.packing.0".to_owned(), Value::Bool(true))]));
+        // Tapping the same row again takes the tick off.
+        let w = World { store: out.store, ..w };
+        let out = e.dispatch(&w, &mut nav, "tick", hat).unwrap();
+        assert_eq!(out.store, Map(vec![("tick.packing.0".to_owned(), Value::Bool(false))]));
+    }
+
+    #[test]
+    fn the_night_screen_moves_tomorrow_about_and_the_day_comes_back_changed() {
+        let (e, mut nav) = (trip(), Nav::default());
+        let night = world("2026-04-11T21:30", "", &[]);
+        let out = e.dispatch(&night, &mut nav, "adjust", Value::Null).unwrap();
+        let dinner = carried(&out.view.tree, "Dinner");
+        e.dispatch(&night, &mut nav, "pick", dinner.clone()).unwrap();
+        let out = e.dispatch(&night, &mut nav, "later", Value::Null).unwrap();
+        // The pack is untouched: the new hour comes from the fact, every time the day is built.
+        assert_eq!(said(&after(&e, "2026-04-11T21:30", &out.store))[1], "BigValue  19:15");
+        let out = e.dispatch(&night, &mut nav, "drop", Value::Null).unwrap();
+        let gone = said(&after(&e, "2026-04-11T21:30", &out.store));
+        assert!(!gone.iter().any(|l| l.contains("Dinner")), "{gone:?}");
+    }
+
+    #[test]
+    fn a_block_added_at_night_joins_tomorrow_in_time_order() {
+        let (e, mut nav) = (trip(), Nav::default());
+        let night = world("2026-04-11T21:30", "", &[]);
+        e.dispatch(&night, &mut nav, "adjust", Value::Null).unwrap();
+        e.dispatch(&night, &mut nav, "add", Value::Null).unwrap();
+        e.dispatch(&night, &mut nav, "set_time", Value::String("08:00".into())).unwrap();
+        e.dispatch(&night, &mut nav, "set_what", Value::String("Bread".into())).unwrap();
+        let out = e.dispatch(&night, &mut nav, "keep", Value::Null).unwrap();
+        // Eight is before the dinner, so it becomes tomorrow's first hour.
+        assert_eq!(said(&after(&e, "2026-04-11T21:30", &out.store))[1], "BigValue  08:00");
+    }
 
     #[test]
     fn the_travel_template_picks_a_screen_for_every_moment_of_a_day() {
@@ -330,11 +417,18 @@ phrases: {hi: hola}
 
     #[test]
     fn the_moment_shows_the_answer_of_its_type_and_what_the_pack_added() {
+        // The hero is the first big answer on the screen, whatever stands above it.
+        let hero = |t: &[String]| {
+            t.iter()
+                .find(|l| l.starts_with("BigValue") || l.starts_with("Missing"))
+                .unwrap()
+                .clone()
+        };
         let (_, parking) = shown("2026-04-11T10:30", "", &[]);
-        assert_eq!(parking[3], "Missing [to confirm]");
+        assert_eq!(hero(&parking), "Missing [to confirm]");
         assert!(parking.contains(&"Card North side".to_owned()), "{parking:?}");
         let (_, driving) = shown("2026-04-11T13:30", "", &[]);
-        assert_eq!(driving[3], "BigValue 40 min");
+        assert_eq!(hero(&driving), "BigValue 40 min");
         let parking = "Missing where: North side\nprice: [to confirm]";
         assert!(driving.contains(&parking.to_owned()), "{driving:?}");
         assert!(driving.contains(&"Card none".to_owned()), "{driving:?}");
@@ -399,6 +493,27 @@ phrases: {hi: hola}
             (car[0].name.as_str(), car[0].args.get("lon")),
             ("map.open", Some(&Value::Number(2.0)))
         );
+    }
+
+    #[test]
+    fn a_place_draws_its_own_pins_the_road_says_what_it_passes_and_the_chart_opens() {
+        let e = trip();
+        let prop = |t: &Tree, kind: &str, key: &str| {
+            let node = t.nodes.iter().find(|n| n.kind == kind).expect(kind);
+            node.props.iter().find(|(p, _)| p == key).map(|(_, v)| v.clone()).expect(key)
+        };
+        // A place with a plan draws its pins over the picture the pack ships.
+        let w = world("2026-04-11T11:30", "ana", &[]);
+        let visit = e.screen(&w, &mut Nav::default()).unwrap().tree;
+        assert_eq!(prop(&visit, "Map", "image"), Value::String("maps/museum.png".into()));
+        assert_eq!(prop(&visit, "Map", "caption"), Value::String("The hall".into()));
+        // A moving block lists what it passes, in the order it passes it.
+        let (_, drive) = shown("2026-04-11T13:20", "ana", &[]);
+        assert!(drive.contains(&"Row Bridge".to_owned()), "{drive:?}");
+        // The chart is the day's own places, and nothing is fetched to draw them.
+        let chart = e.dispatch(&w, &mut Nav::default(), "chart", Value::Null).unwrap().view.tree;
+        assert_eq!(chart.screen, "chart");
+        assert_eq!(prop(&chart, "Map", "points").as_list().map(<[Value]>::len), Some(1));
     }
 
     #[test]

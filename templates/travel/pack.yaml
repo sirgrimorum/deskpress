@@ -32,6 +32,8 @@ ui:
   open_file: Open the file
   call: Call
   map: Open in the map
+  chart: The day on a map
+  on_the_way: On the way
   park: Save where the car is
   car: The car
   find_car: Find the car
@@ -51,6 +53,26 @@ ui:
   show_answer: Show the answer
   challenge: Challenge
   star: "★"
+  set_off_now: Set off now
+  set_off_at: Set off at
+  rearrange: Move the day about
+  pick_block: Pick an hour to move.
+  earlier: 15 minutes earlier
+  later: 15 minutes later
+  shorter: 15 minutes shorter
+  longer: 15 minutes longer
+  swap_up: Swap with the hour before
+  swap_down: Swap with the hour after
+  remove_block: Take this out
+  restore_block: Put it back
+  add_block: Add something
+  at_what_time: At what time
+  what_is_it: What is it
+  save_block: Add it
+  ask: Ask about the trip
+  ask_anything: Ask in your own words
+  ask_it: Ask
+  from_the_phone: The phone's assistant, not the trip's book
 
 modules:
   timeline:
@@ -89,6 +111,36 @@ derive:
     or (block.type == 'free' and block.until)
     or block.time
 
+# What the pack can answer, answered from its own data (decision 0027). A pack replaces one by
+# key, adds its own, and keeps the rest.
+questions:
+  now:
+    ask: What is happening now?
+    answer: "{block.time} {block.text}"
+    when: block
+  next:
+    ask: What is next?
+    answer: "{next.time} {next.text}"
+    when: next
+  where:
+    ask: Where are we going?
+    answer: place.name
+    when: place
+    shortcut: true
+  tomorrow:
+    ask: What are we doing tomorrow?
+    answer: tomorrow.title
+    when: tomorrow
+    shortcut: true
+  weather:
+    ask: What is the weather?
+    answer: "{weather.summary}, {weather.low} to {weather.high}"
+    when: weather.high
+  papers:
+    ask: What papers do we have?
+    answer: documents
+    when: "not empty(documents)"
+
 # First true when wins. A pack's own rules are tried before these.
 rules:
   - {when: kid and not safe and not extended, screen: complete}
@@ -110,24 +162,33 @@ screens:
       points: [{open: sheet, with: {title: place.name, rows: points}}]
       ticket: [{open: sheet, with: {title: ui.ticket, value: block.ticket or place.during.ticket}}]
       map: [{do: map.open, with: {lat: place.at.lat, lon: place.at.lon, label: place.name}}]
+      chart: [{open: chart}]
+      ask: [{open: ask}]
       park: [{do: location.get, with: {then: "'parked'"}}]
       parked: [{store: car, value: $arg}]
       calendar: [{do: calendar.sync, with: {scope: block.event}}]
     layout:
       - Screen: {title: day.title, today: ui.today, on_today: agenda, foot_label: next and ui.next, foot_time: next.time, foot: next.text or ui.nothing_more}
       - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
+      - Alert: {if: next.leaving, title: ui.set_off_now, text: next.text}
+      - Label: {if: next.leave_at and not next.leaving, text: "{ui.set_off_at} {next.leave_at}"}
       - Label: {if: block.type, text: "{ui.now} · {block.type}"}
       - Chip: {if: "not empty(people)", text: holder.name or ui.whose_phone, on_tap: relay}
       - BigValue: {text: hero, caption: block.text}
       - Label: {if: weather.summary, text: weather.summary}
+      - Label: {if: block.road, text: ui.on_the_way}
+      - Row: {each: block.road, text: item.name, caption: item.what, time: item.at}
       - Card: {if: "block.type == 'driving'", title: ui.parking, text: place.parking}
       - Auto: {if: "block.type == 'parking'", value: place.parking, skip: [price]}
       - Auto: {value: place.during, skip: [type, ticket, points]}
-      - Auto: {value: block, skip: [time, text, type, place, until, locked, guide, for, duration, boarding, check_in, ticket, state, event, zone, until_zone]}
+      - Auto: {value: block, skip: [time, text, type, place, until, locked, leave, road, guide, for, duration, boarding, check_in, ticket, state, event, zone, until_zone]}
       - Alert: {each: alerts, if: "item.severity == 'high'", severity: item.severity, title: item.title, text: item.action or item.detail}
       - Button: {if: points, label: ui.points, on_tap: points}
       - Button: {if: block.ticket or place.during.ticket, label: ui.ticket, on_tap: ticket}
+      - Map: {if: place.plan, points: place.plan.points, image: place.plan.image, caption: place.plan.caption}
       - Button: {if: place.at, label: ui.map, on_tap: map}
+      - Button: {if: chart, label: ui.chart, on_tap: chart}
+      - Button: {if: questions, label: ui.ask, on_tap: ask}
       - Button: {if: "block.type == 'parking'", label: ui.park, on_tap: park}
       - Button: {if: block.event, label: ui.calendar_event, on_tap: calendar}
 
@@ -140,6 +201,8 @@ screens:
       - Screen: {title: day.title, today: ui.today, on_today: agenda}
       - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
       - Chip: {if: "not empty(people)", text: holder.name or ui.whose_phone, on_tap: relay}
+      - Alert: {if: next.leaving, title: ui.set_off_now, text: next.text}
+      - Label: {if: next.leave_at and not next.leaving, text: "{ui.set_off_at} {next.leave_at}"}
       - BigValue: {if: next, text: next.time, caption: next.text}
       - Label: {if: weather.high, text: "{weather.summary}, {weather.low} to {weather.high}"}
       - Auto: {value: day, skip: [date, title, blocks, fixed, options, choice, started, decision, zone, time]}
@@ -150,10 +213,13 @@ screens:
   night:
     actions:
       agenda: [{open: agenda}]
+      adjust: [{open: adjust, with: {next: true}}]
     layout:
       - Screen: {title: ui.tonight, today: ui.today, on_today: agenda, foot_label: tomorrow and ui.tomorrow, foot: tomorrow.title or ui.nothing_more}
       - BigValue: {if: tomorrow.first, text: tomorrow.first.time, caption: tomorrow.first.text}
+      - Row: {each: tomorrow.blocks, text: item.text, time: item.time}
       - Auto: {value: tomorrow, skip: [date, title, blocks, fixed, options, choice, first, decision, zone]}
+      - Button: {if: tomorrow, label: ui.rearrange, on_tap: adjust}
 
   # The whole day at a glance, each block with its state. The way out of every screen.
   agenda:
@@ -165,8 +231,11 @@ screens:
       calendar_day: [{do: calendar.sync, with: {scope: day.date}}]
       calendar_trip: [calendar.sync]
       weather: [climate.sync]
-      sheet: [{open: sheet, with: {title: $arg.title, value: $arg.value}}]
+      sheet: [{open: sheet, with: {title: $arg.title, value: $arg.value, ticks: $arg.ticks}}]
       choose: [{open: choose}]
+      adjust: [{open: adjust}]
+      chart: [{open: chart}]
+      ask: [{open: ask}]
     layout:
       - Screen: {title: day.title, back: ui.back, on_back: back}
       - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
@@ -177,11 +246,43 @@ screens:
       - Button: {if: "not empty(alerts)", label: ui.alerts, on_tap: alerts}
       - Button: {if: "not empty(documents)", label: ui.documents, on_tap: documents}
       - Row: {each: sheets, text: item.title, value: item, on_tap: sheet}
+      - Button: {if: chart, label: ui.chart, on_tap: chart}
+      - Button: {if: questions, label: ui.ask, on_tap: ask}
       - Button: {if: store.car, label: ui.find_car, on_tap: car}
       - Button: {if: decision.due and decision.answered and not kid, label: ui.change_plan, on_tap: choose}
+      - Button: {if: day and not kid, label: ui.rearrange, on_tap: adjust}
       - Button: {if: not kid, label: ui.calendar_day, on_tap: calendar_day}
       - Button: {if: not kid, label: ui.calendar_trip, on_tap: calendar_trip}
       - Button: {if: weather.syncs and not kid, label: ui.weather_sync, on_tap: weather}
+
+  # The day on plain paper: the places it stops at, in the order it visits them. Nothing is
+  # fetched; the pins are the pack's own coordinates.
+  chart:
+    actions:
+      back: [back]
+      map: [{do: map.open, with: {lat: place.at.lat, lon: place.at.lon, label: place.name}}]
+    layout:
+      - Screen: {title: ui.chart, back: ui.back, on_back: back}
+      - Map: {points: chart.points, path: chart.path, span: chart.span_m}
+      - Button: {if: place.at, label: ui.map, on_tap: map}
+
+  # The questions the pack can answer, already answered, so a tap costs no call. Where the phone
+  # has a model of its own the person may ask in their words: it is given the day and nothing
+  # else, and what it says is shown as its own, never beside a fact from the book.
+  ask:
+    state: {open: "", typed: "", reply: ""}
+    actions:
+      back: [back]
+      show: [{set: open, to: $arg}]
+      type: [{set: typed, to: $arg}]
+      say: [{set: reply, to: "''"}, {do: assistant.ask, with: {question: typed, facts: day, then: "'answered'"}}]
+      answered: [{set: reply, to: $arg}]
+    layout:
+      - Screen: {title: ui.ask, back: ui.back, on_back: back}
+      - Row: {each: questions, text: item.ask, caption: "(item.id == open and item.answer) or ui.show_answer", value: item.id, on_tap: show}
+      - Field: {if: can.assistant, label: ui.ask_anything, value: typed, on_change: type}
+      - Button: {if: can.assistant and typed, label: ui.ask_it, on_tap: say}
+      - Card: {if: reply, title: ui.from_the_phone, text: reply}
 
   # What somebody at a counter asks for: a group per person with their documents, then the ones
   # that are nobody's in particular. Adults only: the documents module hands a child none.
@@ -222,10 +323,70 @@ screens:
   sheet:
     actions:
       back: [back]
+      # A row carries the name of its own fact, so ticking is one store and needs no arithmetic.
+      tick: [{store: "{$arg}", value: "not at(store, $arg)"}]
     layout:
       - Screen: {title: params.title, back: ui.back, on_back: back}
+      - Check: {each: params.ticks, text: item.text, checked: item.done, value: item.fact, on_tap: tick}
       - Auto: {value: params.value}
       - Row: {each: params.rows, text: item.name or item.title, caption: item.what or item.action}
+
+  # Moving the day about: pick an hour, then shift it, stretch it, swap it with the hour beside it
+  # or take it out. `next` opens it on tomorrow, which is how the night screen comes in. Nothing is
+  # written back to the pack: every edit is a fact of its own, and the day is rebuilt from them.
+  adjust:
+    state: {picked: null}
+    actions:
+      back: [back]
+      pick: [{set: picked, to: $arg}]
+      earlier: [{do: timeline.move, with: {block: picked, by: -15}}]
+      later: [{do: timeline.move, with: {block: picked, by: 15}}]
+      shorter: [{do: timeline.grow, with: {block: picked, by: -15}}]
+      longer: [{do: timeline.grow, with: {block: picked, by: 15}}]
+      up: [{do: timeline.swap, with: {block: picked, side: "'up'"}}]
+      down: [{do: timeline.swap, with: {block: picked, side: "'down'"}}]
+      drop: [{do: timeline.drop, with: {block: picked}}, {set: picked, to: "null"}]
+      restore: [{do: timeline.restore, with: {block: picked}}]
+      add: [{open: add, with: {date: "(params.next and tomorrow.date) or day.date"}}]
+    layout:
+      - Screen: {title: ui.rearrange, back: ui.back, on_back: back}
+      - Label: {if: not picked, text: ui.pick_block}
+      - Row:
+          each: "(params.next and tomorrow.blocks) or day.blocks"
+          text: item.text
+          time: item.time
+          state: "(item.event == picked and 'picked') or item.state"
+          value: item.event
+          on_tap: pick
+      - Group:
+          if: picked
+          layout:
+            - Button: {label: ui.earlier, on_tap: earlier}
+            - Button: {label: ui.later, on_tap: later}
+            - Button: {label: ui.shorter, on_tap: shorter}
+            - Button: {label: ui.longer, on_tap: longer}
+            - Button: {label: ui.swap_up, on_tap: up}
+            - Button: {label: ui.swap_down, on_tap: down}
+            - Button: {label: ui.remove_block, on_tap: drop}
+            - Button: {label: ui.restore_block, on_tap: restore}
+      - Button: {label: ui.add_block, on_tap: add}
+
+  # A block of your own on a day. It joins the day in time order and then moves, swaps and drops
+  # like any block the pack wrote.
+  add:
+    state: {time: "", what: ""}
+    actions:
+      back: [back]
+      set_time: [{set: time, to: $arg}]
+      set_what: [{set: what, to: $arg}]
+      keep:
+        - {do: timeline.add, with: {date: params.date, time: time, text: what}}
+        - back
+    layout:
+      - Screen: {title: ui.add_block, back: ui.back, on_back: back}
+      - Field: {label: ui.at_what_time, value: time, hint: "'09:00'", on_change: set_time}
+      - Field: {label: ui.what_is_it, value: what, on_change: set_what}
+      - Button: {if: time and what, label: ui.save_block, on_tap: keep}
 
   # What the current block proposes to the person holding the phone.
   suggestion:
@@ -249,6 +410,7 @@ screens:
       give_back: [{do: device.unlock, with: {then: "'returned'"}}]
       returned: [{store: holder, value: store.returns_to}, {store: holder_until, value: "null"}, home]
       answer: [{set: answer, to: "true"}]
+      ask: [{open: ask}]
     layout:
       - Screen: {title: place.name or day.title, foot_label: next and ui.next, foot_time: next.time, foot: next.text or ui.nothing_more}
       - Chip: {text: holder.name}
@@ -264,6 +426,7 @@ screens:
       - Card: {if: guiding and answer, text: place.guide.answer}
       - Card: {if: guiding and place.guide.challenge, title: ui.challenge, text: place.guide.challenge}
       - Row: {each: points, if: item.for_kids, text: item.name, caption: item.for_kids}
+      - Button: {if: questions, label: ui.ask, on_tap: ask}
       - Button: {label: ui.give_back, on_tap: give_back}
 
   # One thing and no way out: a child holds the phone where it is not safe. The host sounds it,

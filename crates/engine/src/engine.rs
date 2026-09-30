@@ -10,7 +10,7 @@ pub use sync::Request;
 use crate::clock::{minutes, next_day, next_minute, shift};
 use crate::define::{Definition, Does, Rule, define, fill};
 use crate::expr::Expr;
-use crate::modules::Run;
+use crate::modules::{Run, plan};
 use crate::pack::Pack;
 use crate::tree::{Conventions, Tree, build, outline};
 use crate::validate::patterns::{is_real_date, is_stamp};
@@ -33,6 +33,8 @@ pub struct World {
     pub store: Map,
     /// The local time now in each zone of `Engine::zones`, by zone name.
     pub zones: Map,
+    /// What this host can do beyond the shell itself, read as `can.assistant` (decision 0027).
+    pub can: Vec<String>,
 }
 
 /// What would change the answer: the next instant, and the regions whose crossing matters.
@@ -80,6 +82,16 @@ pub struct Frame {
 pub struct View {
     pub tree: Tree,
     pub watch: Watch,
+    /// The questions to offer the phone's launcher and its assistant (decision 0027). The words
+    /// only: what the pack answers stays in the app.
+    pub shortcuts: Vec<Shortcut>,
+}
+
+/// A question the phone may offer outside the app, by the id that opens it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shortcut {
+    pub id: String,
+    pub ask: String,
 }
 
 /// What an action did: the new view, the facts to store and the commands for the host.
@@ -248,7 +260,19 @@ impl Engine {
                 }
                 Does::Home => nav.stack.truncate(1),
                 Does::Command(name, with) => {
-                    commands.push(Command { name: name.clone(), args: values(with, &scope) });
+                    let args = values(with, &scope);
+                    // A `timeline` action is a store patch, not a host command (decision 0025).
+                    let edits = plan::edit(&store, &scope, name, &args);
+                    match edits {
+                        Some(edits) => {
+                            for (key, v) in edits.iter() {
+                                store.set(key, v.clone());
+                                patch.set(key, v.clone());
+                            }
+                            scope.set("store", Value::Map(store.clone()));
+                        }
+                        None => commands.push(Command { name: name.clone(), args }),
+                    }
                 }
             }
         }
@@ -307,6 +331,11 @@ impl Engine {
     fn view(&self, d: Decision, nav: &Nav) -> View {
         let top = &nav.stack[nav.stack.len() - 1];
         let holder = d.scope.get("holder").cloned().unwrap_or(Value::Null);
+        let offered = d.scope.get("questions").and_then(Value::as_list).unwrap_or_default();
+        let shortcuts = offered.iter().filter(|q| q.get("shortcut") == Some(&Value::Bool(true)));
+        let shortcuts: Vec<Shortcut> = shortcuts
+            .map(|q| Shortcut { id: text(q.get("id")), ask: text(q.get("ask")) })
+            .collect();
         let mut tree = match self.def.screen(&top.screen) {
             None => outline(&self.pack),
             Some(screen) => {
@@ -317,7 +346,7 @@ impl Engine {
         };
         tree.theme = text(holder.get("theme"));
         tree.kid = holder.get("adult") == Some(&Value::Bool(false));
-        View { tree, watch: d.watch }
+        View { tree, watch: d.watch, shortcuts }
     }
 
     fn run(&self, world: &World) -> Decision {
@@ -337,6 +366,10 @@ impl Engine {
             ("content".into(), self.pack.content.clone()),
             ("ui".into(), manifest.get("ui").cloned().unwrap_or(Value::Null)),
             ("store".into(), Value::Map(world.store.clone())),
+            (
+                "can".into(),
+                Value::Map(Map(world.can.iter().map(|c| (c.clone(), Value::Bool(true))).collect())),
+            ),
         ]);
         let content = self.content();
         let mut run = Run::new(Keymap::of(manifest), content, world, scope);
@@ -347,6 +380,25 @@ impl Engine {
             let value = e.eval(&run.scope).into_owned();
             run.scope.set(name, value);
         }
+        // Every question answered here (decision 0027), in the holder's language or the pack's.
+        let holder = run.scope.get("holder").and_then(|h| h.get("language"));
+        let langs = [text(holder), text(manifest.get("pack").and_then(|h| h.get("language")))];
+        let langs: Vec<&str> = langs.iter().map(String::as_str).collect();
+        let offered = self.def.questions.iter();
+        let offered =
+            offered.filter(|q| q.when.as_ref().is_none_or(|w| truthy(Some(&w.eval(&run.scope)))));
+        let asked: Vec<Value> = offered
+            .map(|q| {
+                let mut m = Map::default();
+                m.set("id", string(&q.id));
+                m.set("ask", string(q.words(&langs)));
+                m.set("answer", q.answer.eval(&run.scope));
+                m.set("shortcut", Value::Bool(q.shortcut));
+                Value::Map(m)
+            })
+            .collect();
+        run.scope.set("questions", Value::List(asked));
+
         let holds = |r: &&Rule| r.when.as_ref().is_none_or(|w| truthy(Some(&w.eval(&run.scope))));
         let rule = self.def.rules.iter().find(holds);
         let screen = rule.map_or(OUTLINE.to_owned(), |r| r.screen.clone());
@@ -445,6 +497,43 @@ rules:
 
     fn at(now: &str) -> World {
         World { now: now.into(), ..World::default() }
+    }
+
+    #[test]
+    fn every_question_the_pack_offers_is_answered_before_the_rules_run() {
+        let content =
+            "days: [{date: 2026-04-11, title: Arrive}]\npeople: [{id: rita, language: es}]";
+        let definition = r#"modules:
+  timeline:
+  people:
+questions:
+  loo: {ask: {es: Aseos, en: Toilets}, answer: day.title, shortcut: true}
+  chat: {ask: Ask anything, answer: "'go on'", when: can.assistant}
+screens: {moment: {}, idle: {}}
+rules: [{when: questions, screen: moment}, {screen: idle}]
+"#;
+        let pack = Pack {
+            manifest: parse(&format!("{HEAD}{definition}")).unwrap(),
+            content: parse(content).unwrap(),
+            theme: None,
+        };
+        let e = Engine::load(pack).unwrap().0;
+        // No model on this host, and no holder: the words are the pack's language, and the
+        // question that needs a model is not offered at all.
+        let plain = e.decide(&at("2026-04-11T10:00")).unwrap();
+        assert_eq!(
+            show(plain.scope.get("questions")),
+            r#"[{"id": "loo", "ask": "Toilets", "answer": "Arrive", "shortcut": true}]"#
+        );
+        let can = vec!["assistant".to_owned()];
+        let w = World { holder: "rita".into(), can, ..at("2026-04-11T10:00") };
+        assert_eq!(
+            show(e.decide(&w).unwrap().scope.get("questions")),
+            concat!(
+                r#"[{"id": "loo", "ask": "Aseos", "answer": "Arrive", "shortcut": true}, "#,
+                r#"{"id": "chat", "ask": "Ask anything", "answer": "go on", "shortcut": false}]"#
+            )
+        );
     }
 
     #[test]
@@ -587,7 +676,7 @@ zone: Europe/Paris
         assert_eq!(d.screen, OUTLINE);
         assert_eq!(d.watch, Watch { until: "2026-04-12T00:00".into(), regions: vec![] });
         let keys: Vec<&str> = d.scope.keys().collect();
-        assert_eq!(keys, ["now", "content", "ui", "store"]);
+        assert_eq!(keys, ["now", "content", "ui", "store", "can", "questions"]);
         assert_eq!(
             show(d.scope.get("now")),
             r#"{"date": "2026-04-11", "time": "10:00", "stamp": "2026-04-11T10:00"}"#
@@ -646,6 +735,9 @@ screens:
       detail: [{set: picked, to: \"'gone'\"}, {open: info, with: {what: block.text}}]
       finish: [{store: done, value: true}]
       stay: [back, home]
+      nudge:
+        - {do: timeline.move, with: {block: \"'2026-04-11.blocks.0'\", by: 30}}
+        - {do: timeline.move, with: {block: \"'2026-04-11.blocks.0'\", by: -10}}
     layout:
       - BigValue: {text: block.text}
       - Label: {text: \"picked {picked}\", on_tap: pick}
@@ -761,6 +853,15 @@ rules:
         assert_eq!(out.store, Map(stored));
         // `store.choice` is not the key just stored, so the second effect is skipped.
         assert_eq!(texts(&out.view), ["Museum", "picked b"]);
+    }
+
+    #[test]
+    fn a_timeline_edit_is_answered_here_and_never_reaches_the_host() {
+        let (e, mut nav) = (engine(MACHINE), Nav::default());
+        let out = act(&e, &mut nav, "nudge", Value::Null);
+        // Both moves land, so the second one read the fact the first one wrote.
+        assert_eq!(show(out.store.get("plan.2026-04-11.blocks.0")), r#"{"shift": 20}"#);
+        assert_eq!(out.commands, vec![]);
     }
 
     #[test]

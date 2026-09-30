@@ -3,6 +3,8 @@ package dev.deskpress.app
 import android.content.Context
 import android.content.res.AssetManager
 import android.net.Uri
+import android.provider.DocumentsContract
+import android.provider.DocumentsContract.Document
 import androidx.documentfile.provider.DocumentFile
 import dev.deskpress.engine.CallException
 import dev.deskpress.engine.Finding
@@ -66,7 +68,8 @@ fun world(
     inside: List<String> = emptyList(),
     located: Boolean = false,
     zones: Map<String, LocalDateTime> = emptyMap(),
-) = World(now.format(MINUTE), "", inside, located, store, zones.mapValues { it.value.format(MINUTE) })
+    can: List<String> = emptyList(),
+) = World(now.format(MINUTE), "", inside, located, store, zones.mapValues { it.value.format(MINUTE) }, can)
 
 /** A zone by its IANA name, or `fallback` for an empty or unknown one. */
 fun zoneOr(name: String, fallback: ZoneId): ZoneId =
@@ -81,6 +84,29 @@ fun Value?.text(): String =
         is Value.Items -> items.joinToString(", ") { it.text() }
         is Value.Fields, Value.Null, null -> ""
     }
+
+/** A value as JSON: the shape the pack's facts reach the phone's own model in (decision 0027). */
+fun Value?.json(): String =
+    when (this) {
+        is Value.Text -> quoted(value)
+        is Value.Number, is Value.Bool -> text()
+        is Value.Items -> items.joinToString(",", "[", "]") { it.json() }
+        is Value.Fields -> fields.joinToString(",", "{", "}") { "${quoted(it.key)}:${it.value.json()}" }
+        Value.Null, null -> "null"
+    }
+
+private fun quoted(s: String) = buildString {
+    append('"')
+    for (c in s) {
+        when {
+            c == '"' || c == '\\' -> append('\\').append(c)
+            c == '\n' -> append("\\n")
+            c < ' ' -> append("\\u%04x".format(c.code))
+            else -> append(c)
+        }
+    }
+    append('"')
+}
 
 /** The text files a pack is made of. Anything else in its folder, like a PDF, is not read. */
 private val TEXT = setOf("yaml", "yml", "json")
@@ -104,22 +130,35 @@ fun AssetManager.pack(folder: String): Map<String, String> {
     return files
 }
 
-/** Every pack file under the folder the person picked, keyed by its path inside that folder. */
+/**
+ * Every pack file under the folder the person picked, keyed by its path inside that folder. One
+ * query per directory: name, kind and id come back in the same cursor (decision 0028).
+ */
 fun Context.pack(folder: Uri): Map<String, String> {
-    val root = DocumentFile.fromTreeUri(this, folder) ?: throw IOException("the folder is gone")
+    val columns = arrayOf(Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE)
     val files = mutableMapOf<String, String>()
-    fun walk(dir: DocumentFile, prefix: String) {
-        for (file in dir.listFiles()) {
-            val name = file.name ?: continue
-            if (file.isDirectory) {
-                walk(file, "$prefix$name/")
+    fun walk(dir: String, prefix: String, depth: Int) {
+        // A picked folder is somebody else's tree, and a provider may hand back one that loops.
+        if (depth > 8) throw IOException("the folder goes deeper than a pack ever does")
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(folder, dir)
+        val found = mutableListOf<Triple<String, String, Boolean>>()
+        val cursor = contentResolver.query(children, columns, null, null, null) ?: throw IOException("the folder is gone")
+        cursor.use { c ->
+            while (c.moveToNext()) {
+                found += Triple(c.getString(0), c.getString(1), c.getString(2) == Document.MIME_TYPE_DIR)
+            }
+        }
+        for ((id, name, isDir) in found) {
+            if (isDir) {
+                walk(id, "$prefix$name/", depth + 1)
             } else if (isText(name)) {
-                val stream = contentResolver.openInputStream(file.uri) ?: continue
+                val uri = DocumentsContract.buildDocumentUriUsingTree(folder, id)
+                val stream = contentResolver.openInputStream(uri) ?: continue
                 files[prefix + name] = stream.bufferedReader().use { it.readText() }
             }
         }
     }
-    walk(root, "")
+    walk(DocumentsContract.getTreeDocumentId(folder), "", 0)
     return files
 }
 

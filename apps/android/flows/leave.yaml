@@ -1,0 +1,14 @@
+# A block you have to set off for: the hour to leave, and, once that hour comes, the notice to go.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T17:00"
+- assertVisible: "Set off at 18:15"
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T18:20"
+- assertVisible: "Set off now"
+- assertVisible: "Ferry from Cais do Sodre.*"

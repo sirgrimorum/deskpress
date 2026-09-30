@@ -40,15 +40,18 @@ pub enum Func {
     Empty,
     /// `later(stamp, minutes)`: the stamp that many minutes on.
     Later,
+    /// `at(value, key)`: a mapping by key, a list by whole number; null for anything else.
+    At,
 }
 
 /// Each function by name, with how many values it takes.
-const FUNCS: [(&str, Func, usize); 5] = [
+const FUNCS: [(&str, Func, usize); 6] = [
     ("count", Func::Count, 1),
     ("first", Func::First, 1),
     ("last", Func::Last, 1),
     ("empty", Func::Empty, 1),
     ("later", Func::Later, 2),
+    ("at", Func::At, 2),
 ];
 
 // The most `later` moves a stamp: a year of minutes.
@@ -204,7 +207,19 @@ impl Func {
             Func::Last => found(list.last()),
             Func::Empty => Cow::Owned(Value::Bool(len == 0)),
             Func::Later => Cow::Owned(minutes_on(v, more.unwrap_or(&Value::Null))),
+            Func::At => found(indexed(v, more.unwrap_or(&Value::Null))),
         }
+    }
+}
+
+/// A mapping by its key, or a list by a whole number from zero; null for anything else.
+fn indexed<'a>(v: &'a Value, key: &Value) -> Option<&'a Value> {
+    match (v, key) {
+        (Value::Map(m), _) => m.get(&text(Some(key))),
+        (Value::List(items), Value::Number(n)) if n.fract() == 0.0 && *n >= 0.0 => {
+            items.get(*n as usize)
+        }
+        _ => None,
     }
 }
 
@@ -541,7 +556,7 @@ nothing: ~",
         assert_eq!(err("a ,"), "column 3: expected the end, found \",\"");
         assert_eq!(
             err("explode(a)"),
-            "column 1: \"explode\" is not a function: count, first, last, empty, later"
+            "column 1: \"explode\" is not a function: count, first, last, empty, later, at"
         );
         assert_eq!(err("(a or b or (c"), "column 14: expected \")\", found the end");
     }
@@ -663,6 +678,31 @@ nothing: ~",
             assert_eq!(later(bad), Value::Null, "{bad}");
         }
         assert_eq!(parse("later(a.b, c)").unwrap().roots(), ["a", "c"]);
+    }
+
+    #[test]
+    fn at_indexes_a_mapping_by_key_and_a_list_by_number_else_null() {
+        let at = |src: &str| eval(&format!("at({src})"));
+        for bad in [
+            "block, 'missing'", // a key the mapping has not got
+            "block, 0",         // a mapping never indexes by number
+            "days, 2",          // past the end of the list
+            "days, -1",         // before its start
+            "days, 0.5",        // not a whole number
+            "days, 'first'",    // a list never indexes by key
+            "'text', 0",        // neither a mapping nor a list
+            "nothing, 'a'",
+            "empty_list, 0",
+        ] {
+            assert_eq!(at(bad), Value::Null, "{bad}");
+        }
+        assert_eq!(at("block, 'time'"), Value::String("10:00".into()));
+        assert_eq!(at("block, 'locked'"), Value::Bool(true));
+        assert_eq!(at("days, 1"), yaml::parse("date: 2026-04-12").unwrap());
+        assert_eq!(at("block.tags, 0"), Value::String("a".into()));
+        // The key is read as text, so a number names a key spelled that way.
+        assert_eq!(at("at(block, 'tags'), n"), Value::Null);
+        assert_eq!(parse("at(a.b, c)").unwrap().roots(), ["a", "c"]);
     }
 
     #[test]

@@ -18,7 +18,7 @@ flowchart LR
     sensors[/"clock, location, holder"/]
     store[("stored facts")]
     renderer["Compose renderer"]
-    tools["tools: map, calendar, geofence, biometric"]
+    tools["tools: map, calendar, geofence, biometric, model"]
   end
   pack --> load
   sensors --> world
@@ -67,11 +67,11 @@ Same world, same tree: the host never calls the engine to find out that nothing 
 `watch` says what would change the answer (the next instant, the geofences that matter), so the
 host waits on one timer instead of polling. See [decision 0013](decisions/0013-call-only-on-change.md).
 
-The world is four things: the local time in the pack's timezone as `YYYY-MM-DDTHH:MM`, with the
+The world is five things: the local time in the pack's timezone as `YYYY-MM-DDTHH:MM`, with the
 local time of each other zone the days name (the host converts, so the engine carries no
 timezone database), the ids of the places whose region the
-device is inside (never coordinates) and whether it knows where it is, who holds the phone, and
-the stored facts. The regions come from the pack: `watch` carries each place's circle, and the host
+device is inside (never coordinates) and whether it knows where it is, who holds the phone, the
+stored facts, and what this device can do, like carrying a model of its own. The regions come from the pack: `watch` carries each place's circle, and the host
 works out which it is inside.
 
 ### Two machines
@@ -130,15 +130,18 @@ The contract between engine and renderer. Plain data, versioned, and the same on
   "theme": "rita-light",
   "kid": false,
   "nodes": [
-    { "kind": "BigValue", "props": { "text": "11:15", "caption": "Tile museum, top floor first" }, "on": {}, "children": [] },
-    { "kind": "Button", "props": { "label": "Point by point" }, "on": { "tap": "points" }, "children": [] }
+    { "key": "0", "kind": "BigValue", "props": { "text": "11:15", "caption": "Tile museum, top floor first" }, "on": {}, "children": [] },
+    { "key": "1", "kind": "Button", "props": { "label": "Point by point" }, "on": { "tap": "points" }, "children": [] }
   ]
 }
 ```
 
 A prop is any value: text, a number, a list or a mapping. `on` maps an event to an action of the
 screen; the host sends that name back through `dispatch`, with the node's `value` prop as `$arg`.
-`children` are the nodes a `Group` holds; every other kind has none.
+`children` are the nodes a `Group` holds; every other kind has none. `key` tells one node from
+another across a redraw: its place in the layout, and for a repeated one the item's own `event` or
+`id` (decision 0028). It is unique among its siblings, and a renderer that ignores it draws the
+same screen.
 `theme` is the theme id of the person holding the phone (empty for the pack's default) and `kid`
 says a child holds it, so the renderer switches to kid type, borders and boxes.
 
@@ -146,6 +149,17 @@ Next to the tree, the engine returns `watch: {until, regions}` for the host, not
 renderer keeps the current tree on screen until a different one arrives, so a call never flickers.
 
 A renderer knows the closed set of components and the theme tokens, and nothing about packs.
+
+What the person does to a day on the device, moving, resizing, swapping, dropping or adding a
+block, is never written back into the pack: each edit is a stored fact keyed by the block's `event`
+id, and the timeline applies them every time it builds the day. Those actions are the one kind the
+engine answers itself rather than handing to the host. See
+[decision 0025](decisions/0025-the-day-in-hand.md).
+
+A map here is drawn, never fetched. The engine projects the day's places onto plain paper and the
+renderer draws the pins; a place may carry its own plan of pins over a picture the pack ships. No
+tiles, no tile server, nothing on the network. A map app is still one tap away for directions. See
+[decision 0026](decisions/0026-maps.md).
 
 ## The theme
 
@@ -162,16 +176,32 @@ checks the whole pack with it; the host only writes what it gets back. See
 
 Everything that touches the device lives here, in Kotlin: reading and writing the picked files,
 loading the engine through UniFFI, feeding it the clock and location, persisting stored facts, and
-the tools: open a map, sync a calendar, fetch a module's data, watch geofences, unlock with a fingerprint, dial a
-number, show a pack file full screen. For a calendar sync the engine says what the events are
+the tools: open a map, sync a calendar, fetch a module's data, watch geofences, unlock with a
+fingerprint, dial a number, show a pack file full screen, ask the phone's own model. For a calendar sync the engine says what the events are
 and what changed against what the host wrote before; the host writes only its own rows. See
 [decision 0021](decisions/0021-calendar.md).
+
+Two choices belong to the host and not to any pack: how big the text is drawn, which scales every
+type step over the theme, and which map app `map.open` is sent to. They live in the shell
+preferences, so they hold whatever pack is open.
+
+## The assistant
+
+Three tiers, and each one is allowed to be absent. The pack's `questions` are the floor: the pack
+says what it can answer, the engine answers each one from its own live data, and the screen offers
+exactly that list. Where the phone carries a model of its own the person may also type, and then
+the host sends the question with the facts the pack chose and nothing else; the orders are the
+host's, the pack's words go under them as data, and a phone without a model sees `can.assistant`
+false and is offered no box. The questions marked `shortcut` are published to the launcher and the
+system assistant, so one of them opens the app already at its answer. Nothing asked leaves the
+device. See [decision 0027](decisions/0027-the-assistant.md).
 
 ## Offline first
 
 The pack is a file on the device. The engine and the validator are local. With no `sync` in the
 pack, nothing the app does reaches the network itself: opening a map hands the place to a map app,
-and a calendar sync writes into an account calendar the phone syncs on its own.
+and a calendar sync writes into an account calendar the phone syncs on its own. The one exception is
+the first question typed on a phone whose model is not downloaded yet, which the system fetches.
 
 A module can also sync its data, if the pack says so: by button or automatically, over the pack's
 own data or instead of it. The person approves the hosts once, a failed sync keeps the last good

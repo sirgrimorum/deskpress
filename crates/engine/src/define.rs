@@ -10,7 +10,7 @@ pub use sync::{FLOOR, Fetch};
 
 use crate::expr::{Expr, Op, column_of, parse};
 use crate::validate::Report;
-use crate::validate::patterns::{is_id, is_real_date, is_stamp, is_time};
+use crate::validate::patterns::{is_id, is_language, is_real_date, is_stamp, is_time};
 use crate::value::{Map, Value, quote, text};
 
 /// The modules in the order they run, the content root each reads unless told otherwise, and the
@@ -20,7 +20,7 @@ pub const MODULES: [(&str, &str, &[&str]); 8] = [
     ("timeline", "days", &["day", "block", "next", "days", "tomorrow"]),
     ("choices", "days", &["decision"]),
     ("people", "people", &["holder", "people"]),
-    ("places", "places", &["place", "here", "away"]),
+    ("places", "places", &["place", "here", "away", "chart"]),
     ("alerts", "alerts", &["alerts"]),
     ("documents", "documents", &["documents"]),
     ("climate", "climate", &["weather"]),
@@ -28,7 +28,7 @@ pub const MODULES: [(&str, &str, &[&str]); 8] = [
 ];
 
 /// The names every expression can read.
-pub const BASE: [&str; 4] = ["now", "content", "ui", "store"];
+pub const BASE: [&str; 5] = ["now", "content", "ui", "store", "can"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Module {
@@ -55,13 +55,47 @@ pub struct Clock {
     pub day: bool,
 }
 
+/// A question the pack can answer, and the answer as an expression (decision 0027).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Question {
+    pub id: String,
+    /// The words to offer, by language tag. An empty tag is the text a pack with one language
+    /// wrote, used when nothing matches.
+    pub ask: Vec<(String, String)>,
+    pub answer: Prop,
+    /// Offered only while this holds. None means always.
+    pub when: Option<Expr>,
+    /// Offer it to the phone's launcher and assistant too.
+    pub shortcut: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Definition {
     pub modules: Vec<Module>,
     pub derive: Vec<(String, Expr)>,
+    pub questions: Vec<Question>,
     pub rules: Vec<Rule>,
     pub screens: Vec<(String, Screen)>,
     pub clocks: Vec<Clock>,
+}
+
+impl Question {
+    /// The words for the first of `langs` this question speaks, matching the whole tag before its
+    /// primary subtag, else the text a pack with one language wrote.
+    pub fn words(&self, langs: &[&str]) -> &str {
+        fn primary(t: &str) -> &str {
+            t.split('-').next().unwrap_or(t)
+        }
+        for want in langs.iter().filter(|l| !l.is_empty()) {
+            let exact = self.ask.iter().find(|(l, _)| l == want);
+            let hit = exact.or_else(|| self.ask.iter().find(|(l, _)| primary(l) == primary(want)));
+            if let Some((_, words)) = hit {
+                return words;
+            }
+        }
+        let plain = self.ask.iter().find(|(l, _)| l.is_empty());
+        plain.unwrap_or(&self.ask[0]).1.as_str()
+    }
 }
 
 impl Definition {
@@ -81,6 +115,7 @@ pub fn define(manifest: &Value) -> (Definition, Report) {
     if let Some(m) = manifest.as_map() {
         d.modules(m.get("modules"));
         d.derive(m.get("derive"));
+        d.questions(m.get("questions"));
         d.rules(m.get("rules"), m.get("screens"));
         d.screens(m.get("screens"));
     }
@@ -176,6 +211,83 @@ impl Definer {
             }
             // Known even when broken, so its uses are not a second error.
             self.known.push(name.to_owned());
+        }
+    }
+
+    /// The questions the pack can answer (decision 0027). `questions` becomes a known name after
+    /// they are read, whether or not any were, so a rule or a screen reads it and a question
+    /// cannot read itself.
+    fn questions(&mut self, section: Option<&Value>) {
+        match section.map(Value::as_map) {
+            None => {}
+            Some(Some(questions)) => {
+                for (id, q) in questions.iter() {
+                    self.question(id, q);
+                }
+            }
+            Some(None) => {
+                self.r.error("questions", "has to be a mapping of question id to {ask, answer}");
+            }
+        }
+        self.known.push("questions".to_owned());
+    }
+
+    fn question(&mut self, id: &str, q: &Value) {
+        let at = format!("questions.{id}");
+        if !is_id(id) {
+            let message =
+                format!("{} is not a name: lowercase letters, digits and underscores", quote(id));
+            self.r.error(at, message);
+            return;
+        }
+        let Some(q) = q.as_map() else {
+            self.r.error(&at, "has to be a mapping: {ask, answer, when, shortcut}");
+            return;
+        };
+        self.only(&at, q, "a question", &["ask", "answer", "when", "shortcut"]);
+        let ask = self.ask(&at, q.get("ask"));
+        let answer = match q.get("answer") {
+            Some(a) => self.prop(&format!("{at}.answer"), a),
+            None => {
+                self.r.error(&at, "a question needs an answer: the expression that answers it");
+                None
+            }
+        };
+        let when = q.get("when").map(|w| self.expr(&format!("{at}.when"), w));
+        if when.as_ref().is_some_and(Option::is_none) {
+            return;
+        }
+        let (Some(ask), Some(answer)) = (ask, answer) else {
+            return;
+        };
+        let shortcut = q.get("shortcut") == Some(&Value::Bool(true));
+        let id = id.to_owned();
+        self.def.questions.push(Question { id, ask, answer, when: when.flatten(), shortcut });
+    }
+
+    /// The words a question is offered in: one text, or one per language tag.
+    fn ask(&mut self, at: &str, ask: Option<&Value>) -> Option<Vec<(String, String)>> {
+        let at = format!("{at}.ask");
+        match ask {
+            Some(Value::String(s)) if !s.is_empty() => Some(vec![(String::new(), s.clone())]),
+            Some(Value::Map(m)) if !m.0.is_empty() => {
+                let mut out = Vec::new();
+                for (lang, words) in m.iter() {
+                    if is_language(lang) {
+                        out.push((lang.to_owned(), text(Some(words))));
+                        continue;
+                    }
+                    let message =
+                        format!("{} is not a language tag, like es or pt-BR", quote(lang));
+                    self.r.error(format!("{at}.{lang}"), message);
+                }
+                (!out.is_empty()).then_some(out)
+            }
+            _ => {
+                self.r
+                    .error(at, "a question needs an ask: the words to offer, or one per language");
+                None
+            }
         }
     }
 
@@ -439,7 +551,7 @@ mod tests {
         );
         assert_eq!(
             said("derive: {a: 'holder.adult or day or holder'}"),
-            "error derive.a: column 1: \"holder\" is not a name here. Known: now, content, ui, store\nerror derive.a: column 17: \"day\" is not a name here. Known: now, content, ui, store"
+            "error derive.a: column 1: \"holder\" is not a name here. Known: now, content, ui, store, can\nerror derive.a: column 17: \"day\" is not a name here. Known: now, content, ui, store, can"
         );
         // A broken name is still known, so its uses are not a second error.
         assert_eq!(said("derive: {a: 'x', b: 'a'}").lines().count(), 1);
@@ -453,6 +565,84 @@ mod tests {
         let names: Vec<&str> = d.derive.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, ["kid", "flag", "n", "two"]);
         assert_eq!(d.derive[2].1, Expr::Literal(Value::Number(2.0)));
+    }
+
+    #[test]
+    fn a_question_needs_an_ask_an_answer_and_a_real_language() {
+        assert_eq!(
+            said("questions: [a]"),
+            "error questions: has to be a mapping of question id to {ask, answer}"
+        );
+        assert_eq!(
+            said("questions: {Loo: {}}"),
+            "error questions.Loo: \"Loo\" is not a name: lowercase letters, digits and underscores"
+        );
+        assert_eq!(
+            said("questions: {loo: [a]}"),
+            "error questions.loo: has to be a mapping: {ask, answer, when, shortcut}"
+        );
+        let no_ask = concat!(
+            "error questions.loo.ask: ",
+            "a question needs an ask: the words to offer, or one per language"
+        );
+        assert_eq!(said("questions: {loo: {answer: 'true'}}").lines().last(), Some(no_ask));
+        assert_eq!(said("questions: {loo: {ask: '', answer: 'true'}}"), no_ask);
+        assert_eq!(said("questions: {loo: {ask: {}, answer: 'true'}}"), no_ask);
+        // A tag nobody speaks is reported; a question left with no words at all is not asked.
+        assert_eq!(
+            said("questions: {loo: {ask: {ES: Donde}, answer: 'true'}}"),
+            "error questions.loo.ask.ES: \"ES\" is not a language tag, like es or pt-BR"
+        );
+        assert_eq!(
+            said("questions: {loo: {ask: Where, why: no}}"),
+            concat!(
+                "error questions.loo.why: \"why\" is not part of a question: ",
+                "ask, answer, when, shortcut\n",
+                "error questions.loo: a question needs an answer: the expression that answers it"
+            )
+        );
+        assert_eq!(
+            said("questions: {loo: {ask: Where, answer: 'true', when: nope}}"),
+            concat!(
+                "error questions.loo.when: column 1: \"nope\" is not a name here. ",
+                "Known: now, content, ui, store, can"
+            )
+        );
+    }
+
+    #[test]
+    fn a_question_is_answered_by_an_expression_and_offered_while_its_when_holds() {
+        let d = def(&format!(
+            "{SCREENS}modules:\n  people:\nquestions:\n  loo: {{ask: {{es: Donde, en: Where}}, answer: holder.name, shortcut: true}}\n  bed: {{ask: Where do we sleep, answer: 'the {{holder.name}} bed', when: holder}}\nrules: [{{when: questions, screen: moment}}, {{screen: blocker}}]"
+        ));
+        assert_eq!(d.questions.len(), 2);
+        let (loo, bed) = (&d.questions[0], &d.questions[1]);
+        assert_eq!(loo.ask, [("es".to_owned(), "Donde".to_owned()), ("en".into(), "Where".into())]);
+        assert_eq!((loo.shortcut, loo.when.is_some()), (true, false));
+        assert_eq!(bed.ask, [(String::new(), "Where do we sleep".to_owned())]);
+        assert_eq!((bed.shortcut, bed.when.is_some()), (false, true));
+        // An answer with {} in it fills in; a plain one is read as an expression.
+        let filled = |p: &Prop| matches!(p, Prop::Template(_));
+        assert_eq!((filled(&loo.answer), filled(&bed.answer)), (false, true));
+    }
+
+    #[test]
+    fn the_words_are_the_first_language_the_question_speaks() {
+        let q = |ask: &[(&str, &str)]| Question {
+            id: "q".into(),
+            ask: ask.iter().map(|(l, w)| ((*l).to_owned(), (*w).to_owned())).collect(),
+            answer: Prop::Expr(Expr::Literal(Value::Null)),
+            when: None,
+            shortcut: false,
+        };
+        let many = q(&[("es", "Donde"), ("pt", "Onde"), ("", "Where")]);
+        // A person with no language of their own falls through to the pack's.
+        assert_eq!(many.words(&["", "es"]), "Donde");
+        // pt-BR is close enough to pt, and closer than the words with no language.
+        assert_eq!(many.words(&["pt-BR", "es"]), "Onde");
+        assert_eq!(many.words(&["de", "fr"]), "Where");
+        // Nothing matches and nothing is plain: the first words the pack wrote.
+        assert_eq!(q(&[("es", "Donde")]).words(&["de"]), "Donde");
     }
 
     #[test]

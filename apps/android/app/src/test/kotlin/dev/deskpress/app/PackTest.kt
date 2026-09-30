@@ -52,7 +52,7 @@ class PackTest {
 
     @Test
     fun aNewerTreeIsRefusedNotHalfDrawn() {
-        val view = View(Tree(TREE_VERSION + 1u, "s", emptyList(), "", false), Watch("", emptyList()))
+        val view = View(Tree(TREE_VERSION + 1u, "s", emptyList(), "", false), Watch("", emptyList()), emptyList())
         assertEquals(PackState.Failed("tree version 5, this app draws 4"), show(view))
     }
 
@@ -60,6 +60,23 @@ class PackTest {
     fun theWorldIsTheMinuteInThePackTimezone() {
         val world = world(LocalDateTime.parse("2026-04-11T09:05:59"), emptyMap())
         assertEquals("2026-04-11T09:05", world.now)
+    }
+
+    /** The facts below as JSON. A raw string escapes nothing, so this is the text itself. */
+    private val JSON =
+        """{"title":"A \"long\" walk\nuphill\u0007","path":"a\\b","blocks":[2,false,null]}"""
+
+    @Test
+    fun theFactsAModelSeesAreJson() {
+        val day = Value.Fields(
+            listOf(
+                Field("title", Value.Text("A \"long\" walk\nuphill\u0007")),
+                Field("path", Value.Text("a\\b")),
+                Field("blocks", Value.Items(listOf(Value.Number(2.0), Value.Bool(false), Value.Null))),
+            ),
+        )
+        assertEquals(JSON, day.json())
+        assertEquals("null", (null as Value?).json())
     }
 
     @Test
