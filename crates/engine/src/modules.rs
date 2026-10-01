@@ -1,9 +1,14 @@
 //! What each module puts in the scope for one world, and the instants and regions at which that
 //! would change. Every module hands out canonical keys, whatever the pack calls them.
 
+mod alarms;
 mod calendar;
 pub(crate) mod chart;
+pub(crate) mod jet_lag;
+mod log;
 pub(crate) mod plan;
+pub(crate) mod tasks;
+pub(crate) mod travel;
 
 use std::cmp::Reverse;
 
@@ -26,6 +31,8 @@ pub(crate) struct Run<'a> {
     pub regions: Vec<Region>,
     /// The top level content keys the modules so far have read.
     used: Vec<String>,
+    /// The places, for the travel between two blocks; the engine sets it before the modules run.
+    pub places: Option<&'a Value>,
 }
 
 fn list(data: Option<&Value>) -> &[Value] {
@@ -84,7 +91,7 @@ impl<'a> Run<'a> {
     pub fn new(keymap: Keymap<'a>, content: &'a Map, world: &'a World, scope: Map) -> Self {
         let date = &world.now[..10];
         let (until, regions, used) = (Vec::new(), Vec::new(), Vec::new());
-        Run { keymap, content, world, date, scope, until, regions, used }
+        Run { keymap, content, world, date, scope, until, regions, used, places: None }
     }
 
     pub fn module(&mut self, m: &Module) {
@@ -98,6 +105,9 @@ impl<'a> Run<'a> {
             "people" => self.people(data),
             "places" => self.places(data),
             "alerts" => self.alerts(data),
+            "jet_lag" => self.jet_lag(data),
+            "tasks" => self.tasks(data),
+            "log" => self.log(),
             "documents" => self.documents(data),
             "sheets" => self.sheets(data),
             _ => self.climate(data, m.sync.is_some()),
@@ -140,6 +150,12 @@ impl<'a> Run<'a> {
             date.to_owned()
         };
         (format!("{on}T{until}"), zone)
+    }
+
+    /// When a block with an `until` ends, as a stamp of the pack's zone.
+    fn ending(&self, date: &str, block: &Map) -> String {
+        let (end, zone) = self.ends(date, block);
+        self.stamp(&end[..10], &end[11..], &zone)
     }
 
     /// `obj` with canonical keys, as a mapping.
@@ -278,12 +294,14 @@ impl<'a> Run<'a> {
             blocks.sort_by_key(|b| text(b.get("time")));
         }
         let mut m = self.canon(day, "day");
-        m.set("blocks", Value::List(blocks.iter().cloned().map(Value::Map).collect()));
+        let page = self.page(&date, day, &blocks);
+        let timed = |b: &&Map| !text(b.get("time")).is_empty() && !truthy(b.get("leg"));
+        let blocks: Vec<Map> = page.iter().filter(timed).cloned().collect();
+        m.set("blocks", Value::List(page.into_iter().map(Value::Map).collect()));
         if self.read(day, "day", "options").is_some() {
             m.set("options", self.option_list(&kept));
         }
         m.set("choice", chosen.map_or(Value::Null, |c| Value::String(id(c))));
-        blocks.retain(|b| !text(b.get("time")).is_empty());
         (m, blocks)
     }
 
@@ -333,8 +351,7 @@ impl<'a> Run<'a> {
             }
             if let Some(b) = current {
                 let until = text(b.get("until"));
-                let (end, zone) = self.ends(&date, &b);
-                let ends = self.stamp(&end[..10], &until, &zone);
+                let ends = self.ending(&date, &b);
                 if until.is_empty() || ends > now {
                     if !until.is_empty() {
                         self.until.push(ends);
@@ -507,14 +524,49 @@ impl<'a> Run<'a> {
         }
     }
 
+    /// Whether the pack marks an alert dealt with: its `status` is `done`.
+    fn done(&self, alert: &Value) -> bool {
+        self.keymap.value("status", self.read(alert, "alert", "status")) == "done"
+    }
+
+    /// When an alert falls, as its `at` and `notify_from`: once, or with a `repeat` every so many
+    /// days to its `until` (a year of them at most), from today on. Nothing once it is done.
+    fn falls(&self, alert: &Value) -> Vec<(String, String)> {
+        if self.done(alert) {
+            return Vec::new();
+        }
+        let field = |k: &str| text(self.read(alert, "alert", k));
+        let (at, from) = (field("at"), field("notify_from"));
+        let repeat = self.read(alert, "alert", "repeat");
+        let every = match repeat.and_then(|r| self.read(r, "repeat", "every")) {
+            Some(Value::Number(n)) if n.fract() == 0.0 && *n >= 1.0 => *n as i64,
+            _ => 0,
+        };
+        let until = text(repeat.and_then(|r| self.read(r, "repeat", "until")));
+        if every == 0 || at.is_empty() || !is_real_date(&until) {
+            return vec![(at, from)];
+        }
+        let day = |d: &str| minutes(&format!("{}T00:00", &d[..10])).div_euclid(1440);
+        // Moved by whole days, a date staying a date and a stamp a stamp.
+        let moved = |s: &str, days: i64| match s.len() {
+            0 => String::new(),
+            10 => shift(&format!("{s}T00:00"), days * 1440)[..10].to_owned(),
+            _ => shift(s, days * 1440),
+        };
+        let first = ((day(self.date) - day(&at)).max(0) + every - 1) / every;
+        let times = (first..).map(|k| (moved(&at, k * every), moved(&from, k * every)));
+        times.take_while(|(at, _)| at[..10] <= *until).take(366).collect()
+    }
+
     /// The alerts showing now, most severe first. One shows from `notify_from`, else from the
-    /// start of its day, to the end of its day.
+    /// start of its day, to the end of its day; one that repeats, at each time it falls.
     fn alerts(&mut self, data: Option<&Value>) {
         let now = self.world.now.as_str();
         let mut active: Vec<(usize, Map)> = Vec::new();
         for alert in list(data) {
-            let at = text(self.read(alert, "alert", "at"));
-            let from = text(self.read(alert, "alert", "notify_from"));
+            let Some((at, from)) = self.falls(alert).into_iter().next() else {
+                continue;
+            };
             let day = at.get(..10);
             let start = match (from.as_str(), day) {
                 ("", Some(day)) => format!("{day}T00:00"),
@@ -532,6 +584,11 @@ impl<'a> Run<'a> {
             let rank = SEVERITIES.iter().position(|s| *s == severity).unwrap_or(SEVERITIES.len());
             let mut m = self.canon(alert, "alert");
             m.set("severity", Value::String(severity));
+            for (key, v) in [("at", at), ("notify_from", from)] {
+                if !v.is_empty() {
+                    m.set(key, Value::String(v));
+                }
+            }
             active.push((rank, m));
         }
         active.sort_by_key(|(rank, _)| *rank);
@@ -724,15 +781,15 @@ mod tests {
         }
     }
 
-    struct Out {
-        scope: Map,
-        until: Vec<String>,
+    pub(super) struct Out {
+        pub(super) scope: Map,
+        pub(super) until: Vec<String>,
         regions: Vec<Region>,
     }
 
     impl Out {
         /// What sits at a dotted path of the scope, as a message would show it.
-        fn at(&self, path: &str) -> String {
+        pub(super) fn at(&self, path: &str) -> String {
             let mut keys = path.split('.');
             let first = self.scope.get(keys.next().unwrap_or_default());
             show(keys.fold(first, |v, k| v.and_then(|v| v.get(k))))
@@ -748,7 +805,14 @@ mod tests {
         }
     }
 
-    fn run(module: &str, manifest: &str, content: &str, world: &World, scope: &str) -> Out {
+    /// One module run over this manifest, content and scope, YAML each.
+    pub(super) fn run(
+        module: &str,
+        manifest: &str,
+        content: &str,
+        world: &World,
+        scope: &str,
+    ) -> Out {
         let (manifest, content) = (parse(manifest).unwrap(), parse(content).unwrap());
         let scope = parse(scope).unwrap().as_map().cloned().unwrap_or_default();
         let (name, from, _) = *MODULES.iter().find(|(n, ..)| *n == module).unwrap();
@@ -840,6 +904,29 @@ mod tests {
         );
         let out = run("timeline", "", DAYS, &planned("2026-04-11T08:00", &store), "");
         assert_eq!(out.each("day.blocks", "text"), "A note Coffee Museum Walk");
+    }
+
+    #[test]
+    fn a_leg_follows_the_blocks_it_joins_when_one_moves_or_they_swap() {
+        let content = r#"days: [{date: 2026-04-11, blocks: [["09:00", Old, {place: old, until: "10:00"}], ["11:00", New, {place: new_wing}]]}]
+places: {old: {at: {lat: 40.0, lon: 0.0}, legs: {new_wing: 25}}, new_wing: {at: {lat: 40.01, lon: 0.0}}}
+"#;
+        let content = parse(content).unwrap().as_map().cloned().unwrap();
+        let day = |store: &str| {
+            let w = planned("2026-04-11T08:00", store);
+            let mut r = Run::new(Keymap::of(&Value::Null), &content, &w, Map::default());
+            r.places = content.get("places");
+            let (name, from, _) = *MODULES.iter().find(|(n, ..)| *n == "timeline").unwrap();
+            r.module(&Module { name, from: Some(from.to_owned()), sync: None });
+            let out = Out { scope: r.scope, until: r.until, regions: r.regions };
+            format!("{} | {}", out.each("day.blocks", "time"), out.each("day.blocks", "text"))
+        };
+        assert_eq!(day(""), "09:00 10:35 11:00 | Old → new wing New");
+        let moved = day("plan.2026-04-11.blocks.1: {shift: 30}");
+        assert_eq!(moved, "09:00 11:05 11:30 | Old → new wing New");
+        let swapped =
+            day("plan.2026-04-11.blocks.0: {shift: 120}\nplan.2026-04-11.blocks.1: {shift: -120}");
+        assert_eq!(swapped, "09:00 10:35 11:00 | New → old Old");
     }
 
     #[test]
@@ -948,7 +1035,7 @@ mod tests {
         let out = timeline("2026-04-11T11:30", &[]);
         assert_eq!(
             out.at("block"),
-            r#"{"time": "11:15", "text": "Museum", "type": "visit", "place": "azulejo", "until": "13:00", "event": "2026-04-11.blocks.2"}"#
+            r#"{"time": "11:15", "text": "Museum", "type": "visit", "place": "azulejo", "until": "13:00", "event": "2026-04-11.blocks.2", "lasts": 105}"#
         );
         assert_eq!(out.at("next.text"), r#""Ferry""#);
         assert_eq!(out.until, ["2026-04-11T18:40", "2026-04-11T13:00"]);
@@ -1001,10 +1088,10 @@ mod tests {
         let out = timeline("2026-04-15T08:00", &[]);
         assert_eq!(
             out.at("block"),
-            r#"{"time": "07:30", "text": "x", "event": "2026-04-15.blocks.1"}"#
+            r#"{"time": "07:30", "text": "x", "event": "2026-04-15.blocks.1", "lasts": 60}"#
         );
         assert!(out.at("day.blocks").contains(
-            r#"{"time": "07:00", "text": null, "event": "2026-04-15.blocks.0", "state": "past"}"#
+            r#"{"time": "07:00", "text": null, "event": "2026-04-15.blocks.0", "lasts": 30, "state": "past"}"#
         ));
     }
 
@@ -1273,6 +1360,29 @@ day: {blocks: [{place: azulejo}, {place: odd}, {place: half}, {place: cais}, {pl
         let out = alerts("2026-04-10T12:00");
         assert_eq!(out.each("alerts", "id"), "gone always");
         assert_eq!(out.until, ["2026-04-11T00:00", "2026-04-11T17:30", "2026-04-11T00:00"]);
+    }
+
+    #[test]
+    fn a_done_alert_is_gone_and_one_that_repeats_shows_each_time_it_falls() {
+        let content = "alerts:
+  - {id: tide, severity: low, at: 2026-04-09T09:00, notify_from: 2026-04-09T08:00, repeat: {every: 2, until: 2026-04-13}}
+  - {id: daily, severity: low, at: 2026-04-10, repeat: {every: 1, until: 2026-04-11}}
+  - {id: over, severity: high, at: 2026-04-11, status: hecho}
+  - {id: odd, severity: low, at: 2026-04-11, repeat: {every: 0, until: 2026-04-13}}
+";
+        let keymap = "keymap: {values: {status: {done: hecho}}}";
+        let alerts = |now: &str| run("alerts", keymap, content, &world(now, &[]), "");
+        let out = alerts("2026-04-11T07:00");
+        assert_eq!(out.each("alerts", "id"), "daily odd");
+        assert_eq!(out.each("alerts", "at"), "2026-04-11 2026-04-11");
+        assert_eq!(out.until, ["2026-04-11T08:00"]);
+        let out = alerts("2026-04-11T08:30");
+        assert_eq!(out.each("alerts", "at"), "2026-04-11T09:00 2026-04-11 2026-04-11");
+        assert_eq!(out.each("alerts", "notify_from"), "2026-04-11T08:00");
+        let out = alerts("2026-04-12T10:00");
+        assert_eq!(out.each("alerts", "id"), "");
+        assert_eq!(out.until, ["2026-04-13T08:00"]);
+        assert_eq!(alerts("2026-04-14T10:00").until, Vec::<String>::new());
     }
 
     #[test]

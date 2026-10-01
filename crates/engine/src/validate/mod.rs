@@ -17,7 +17,10 @@ pub use theme::TOKENS as COLOR_TOKENS;
 
 use crate::engine::Region;
 use crate::modules::chart::apart;
+use crate::modules::jet_lag::DOES;
 use crate::modules::region;
+use crate::modules::tasks::STATUSES;
+use crate::modules::travel::TRAVEL;
 use crate::value::{Map, Value, quote, show, text, truthy};
 
 /// How far around a place its offline map is kept at the least, in metres, as `Maps.kt` keeps it.
@@ -168,6 +171,12 @@ impl Checker<'_> {
         if let Some(alerts) = root("alerts") {
             self.alerts(alerts);
         }
+        if let Some(plan) = root("jet_lag") {
+            self.jet_lag(plan);
+        }
+        if let Some(tasks) = root("tasks") {
+            self.tasks(tasks);
+        }
         if let Some(documents) = root("documents") {
             self.documents(documents);
         }
@@ -190,7 +199,7 @@ impl Checker<'_> {
                 self.r.error(format!("pack.{key}"), "required in the manifest");
             }
         }
-        let shapes: [Shape; 3] = [
+        let shapes: [Shape; 4] = [
             (
                 "id",
                 is_slug,
@@ -198,6 +207,7 @@ impl Checker<'_> {
             ),
             ("timezone", is_timezone, "is not an IANA timezone name, like Europe/Madrid"),
             ("language", is_language, "is not a language tag, like es or pt-BR"),
+            ("updated", |s| is_date(s) || is_stamp(s), "is not a date, or a date and time"),
         ];
         for (key, ok, message) in shapes {
             let v = head.get(key);
@@ -322,11 +332,32 @@ impl Checker<'_> {
             if let Some(plan) = read("plan") {
                 self.plan(&at, plan);
             }
+            if let Some(legs) = read("legs") {
+                self.legs(&at, legs, places);
+            }
             let known = [
                 "name", "kind", "at", "safe", "during", "parking", "points", "in_order", "plan",
-                "verified",
+                "verified", "legs",
             ];
             self.free_keys(&at, place, &known, "place");
+        }
+    }
+
+    /// `legs`: the minutes from this place to others of the pack, for the travel between blocks.
+    fn legs(&mut self, at: &str, legs: &Value, places: &Map) {
+        let Some(legs) = legs.as_map() else {
+            self.r.error(format!("{at}.legs"), "has to be a mapping of place id to minutes");
+            return;
+        };
+        for (to, m) in legs.iter() {
+            let here = format!("{at}.legs.{to}");
+            if !within(Some(m), 1.0, 720.0) || !matches!(m, Value::Number(n) if n.fract() == 0.0) {
+                let message = format!("{} is not whole minutes from 1 to 720", show(Some(m)));
+                self.r.error(&here, message);
+            }
+            if places.get(to).is_none() {
+                self.r.warn(&here, "is not a place of this pack, so no leg uses it");
+            }
         }
     }
 
@@ -506,7 +537,10 @@ impl Checker<'_> {
                 }
                 self.decision(&at, &date, read("decision"));
             }
-            let known = ["date", "title", "who", "zone", "blocks", "fixed", "options", "decision"];
+            self.word(&at, "travel", &TRAVEL, read("travel"));
+            let known = [
+                "date", "title", "who", "zone", "travel", "blocks", "fixed", "options", "decision",
+            ];
             self.free_keys(&at, day, &known, "day");
         }
 
@@ -705,12 +739,159 @@ impl Checker<'_> {
                 self.r
                     .error(format!("{at}.time"), format!("{} is not a time, HH:MM", quote(&time)));
             }
+            self.word(&at, "status", &STATUSES, read("status"));
+            let day = text(read("at")).get(..10).map(str::to_owned);
+            if let Some(repeat) = read("repeat") {
+                self.repeat(&format!("{at}.repeat"), repeat, day.as_deref());
+            }
+            let (from, when) = (text(read("notify_from")), text(read("at")));
+            let rings = is_stamp(&from) || is_stamp(&when) || (is_date(&when) && is_time(&time));
+            match read("alarm") {
+                Some(Value::Bool(true)) if !rings => self.r.error(
+                    format!("{at}.alarm"),
+                    "an alarm needs a time to ring at: a notify_from or an at with its hour",
+                ),
+                Some(a) if !matches!(a, Value::Bool(_)) => {
+                    self.r.error(format!("{at}.alarm"), "is true or false")
+                }
+                _ => {}
+            }
         }
         if critical > 6 {
             let message = format!(
                 "{critical} alerts are critical. Severity is a budget: when everything is critical, the real one gets swiped past too"
             );
             self.r.warn("alerts", message);
+        }
+    }
+
+    /// A word the shell knows for `key`, in the canonical form or the pack's own.
+    fn word(&mut self, at: &str, key: &str, words: &[&str], v: Option<&Value>) {
+        if v.is_some() && !words.contains(&self.keymap.value(key, v).as_str()) {
+            let message = format!(
+                "{} is not one of {}, or map your own words in keymap.values.{key}",
+                show(v),
+                words.join(", ")
+            );
+            self.r.error(format!("{at}.{key}"), message);
+        }
+    }
+
+    /// An alert's `repeat`: every so many whole days, to a date not before the alert's own.
+    fn repeat(&mut self, at: &str, repeat: &Value, day: Option<&str>) {
+        let Some(repeat) = repeat.as_map() else {
+            self.r.error(at, "has to be a mapping: every, a number of days, and until, a date");
+            return;
+        };
+        let keymap = self.keymap;
+        let read = |k: &str| keymap.field(repeat, "repeat", k);
+        let (every, until) = (read("every"), text(read("until")));
+        if !matches!(every, Some(Value::Number(n)) if n.fract() == 0.0 && *n >= 1.0) {
+            self.r.error(
+                format!("{at}.every"),
+                format!("{} is not a whole number of days", show(every)),
+            );
+        }
+        let Some(day) = day else {
+            self.r.error(at, "a repeat needs the alert's at, the first time it falls");
+            return;
+        };
+        if !is_real_date(&until) || until.as_str() < day {
+            let message = format!("{} is not a real date on or after {day}", quote(&until));
+            self.r.error(format!("{at}.until"), message);
+        }
+    }
+
+    fn jet_lag(&mut self, plan: &Value) {
+        let Some(days) = plan.as_list() else {
+            self.r.error("jet_lag", "has to be a list, one entry per day");
+            return;
+        };
+        let keymap = self.keymap;
+        let mut dates = HashSet::new();
+        for (i, day) in days.iter().enumerate() {
+            let label = format!("jet_lag[{i}]");
+            let Some(day) = day.as_map() else {
+                self.r.error(&label, "has to be a mapping");
+                continue;
+            };
+            let read = |key: &str| keymap.field(day, "jet_lag", key);
+            let date = text(read("date"));
+            let at = if is_real_date(&date) { format!("jet_lag.{date}") } else { label };
+            if !is_real_date(&date) {
+                let message = format!("{} is not a real date, YYYY-MM-DD", show(read("date")));
+                self.r.error(&at, message);
+            } else if !dates.insert(date.clone()) {
+                self.r.error(format!("{at}.date"), format!("{date} appears twice"));
+            }
+            let Some(steps) = read("steps").and_then(Value::as_list) else {
+                self.r.error(&at, "a jet-lag day needs steps, a list");
+                continue;
+            };
+            for (n, step) in steps.iter().enumerate() {
+                self.step(&format!("{at}.steps[{n}]"), step);
+            }
+        }
+    }
+
+    fn step(&mut self, at: &str, step: &Value) {
+        let Some(step) = step.as_map() else {
+            self.r.error(at, "has to be a mapping: a time, a text and what it does");
+            return;
+        };
+        let keymap = self.keymap;
+        let read = |key: &str| keymap.field(step, "step", key);
+        if !truthy(read("text")) {
+            self.r.error(at, "a step needs a text: what to do");
+        }
+        for key in ["time", "until"] {
+            let v = text(read(key));
+            if !v.is_empty() && !is_time(&v) {
+                self.r.error(format!("{at}.{key}"), format!("{} is not a time, HH:MM", quote(&v)));
+            }
+        }
+        self.word(at, "do", &DOES, read("do"));
+        self.whom(&format!("{at}.for"), read("for"));
+        match read("alarm") {
+            Some(Value::Bool(true)) if text(read("time")).is_empty() => {
+                self.r.error(format!("{at}.alarm"), "an alarm needs the step's time to ring at")
+            }
+            Some(a) if !matches!(a, Value::Bool(_)) => {
+                self.r.error(format!("{at}.alarm"), "is true or false")
+            }
+            _ => {}
+        }
+    }
+
+    fn tasks(&mut self, tasks: &Value) {
+        let Some(tasks) = tasks.as_list() else {
+            self.r.error("tasks", "has to be a list");
+            return;
+        };
+        let keymap = self.keymap;
+        let mut ids = HashSet::new();
+        for (i, t) in tasks.iter().enumerate() {
+            let at = format!("tasks[{i}]");
+            let Some(t) = t.as_map() else {
+                self.r.error(&at, "has to be a mapping");
+                continue;
+            };
+            let read = |key: &str| keymap.field(t, "task", key);
+            let id = t.get("id");
+            if let Some(found) = self.r.id(&at, id, "a task needs an id: it names the tick")
+                && !ids.insert(found)
+            {
+                self.r.error(format!("{at}.id"), format!("{} is used twice", show(id)));
+            }
+            if !truthy(read("title")) {
+                self.r.error(&at, "a task needs a title");
+            }
+            let deadline = read("deadline");
+            if deadline.is_some() && !is_real_date(&text(deadline)) {
+                let message = format!("{} is not a real date, YYYY-MM-DD", show(deadline));
+                self.r.error(format!("{at}.deadline"), message);
+            }
+            self.word(&at, "status", &STATUSES, read("status"));
         }
     }
 
@@ -934,9 +1115,11 @@ mod tests {
   language: Spanish
   timezone: Madrid
   content: c.yaml
+  updated: soon
 ";
         let s = said(&validate(&yaml(bad), &yaml(&day_and("")), None));
         assert!(s.contains("pack.id: \"Not A Slug\" is not a slug"), "{s}");
+        assert!(s.contains("pack.updated: \"soon\" is not a date, or a date and time"), "{s}");
         assert!(s.contains("pack.timezone: \"Madrid\" is not an IANA timezone name"), "{s}");
         assert!(s.contains("pack.language: \"Spanish\" is not a language tag"), "{s}");
 
@@ -1136,6 +1319,33 @@ places:
         let kept =
             "places.loose: its points have a position but it has none, so no map is kept for them";
         assert!(s.contains(kept), "{s}");
+    }
+
+    #[test]
+    fn a_leg_is_whole_minutes_to_a_place_and_a_day_travels_one_of_three_ways() {
+        let content = "days:
+  - {date: 2026-04-11, title: A, travel: walking, blocks: [['10:00', 'Go.']]}
+  - {date: 2026-04-12, title: B, travel: a pie, blocks: [['10:00', 'Go.']]}
+  - {date: 2026-04-13, title: C, travel: swimming, blocks: [['10:00', 'Go.']]}
+places:
+  castle: {name: Castle, legs: {town: 20, moat: 0, gate: 7.5, nowhere: 10}}
+  town: {name: Town, legs: soon}
+  moat: {name: Moat}
+  gate: {name: Gate}
+";
+        let manifest = "keymap:\n  values: {travel: {walking: a pie}}\n";
+        let s = said(&with(manifest, content, None));
+        for needle in [
+            "places.castle.legs.moat: 0 is not whole minutes from 1 to 720",
+            "places.castle.legs.gate: 7.5 is not whole minutes from 1 to 720",
+            "places.castle.legs.nowhere: is not a place of this pack, so no leg uses it",
+            "places.town.legs: has to be a mapping of place id to minutes",
+            "days.2026-04-13.travel: \"swimming\" is not one of walking, driving, transit",
+        ] {
+            assert!(s.contains(needle), "wanted {needle:?} in:\n{s}");
+        }
+        assert!(!s.contains("legs.town") && !s.contains("2026-04-11.travel"), "{s}");
+        assert!(!s.contains("2026-04-12.travel"), "{s}");
     }
 
     #[test]
@@ -1467,6 +1677,100 @@ days:
         let content = day_and("alerts: [{id: ferry, title: El ferry, severity: alta}]\n");
         clean("keymap:\n  values:\n    severity: {high: alta}\n", &content, None);
         says(&content, "\"alta\" is not a severity");
+    }
+
+    #[test]
+    fn an_alert_may_be_done_repeat_and_ask_for_an_alarm() {
+        let ok = "{id: tide, title: Tide, severity: low, at: 2026-04-11, time: '09:00', status: open, alarm: true, repeat: {every: 1, until: 2026-04-13}}";
+        clean("", &day_and(&format!("alerts:\n  - {ok}\n")), None);
+        let content = day_and(
+            "alerts:
+  - {id: a, title: x, severity: low, status: shut, alarm: true}
+  - {id: b, title: x, severity: low, at: 2026-04-11, alarm: 'yes', repeat: {every: 1.5, until: 2026-04-10}}
+  - {id: c, title: x, severity: low, repeat: {every: 2, until: 2026-04-12}}
+  - {id: d, title: x, severity: low, at: 2026-04-11, repeat: weekly}
+  - {id: e, title: x, severity: low, notify_from: 2026-04-11T08:00, alarm: true}
+",
+        );
+        let s = said(&with("", &content, None));
+        for needle in [
+            "alerts[0].status: \"shut\" is not one of open, partial, done",
+            "alerts[0].alarm: an alarm needs a time to ring at",
+            "alerts[1].alarm: is true or false",
+            "alerts[1].repeat.every: 1.5 is not a whole number of days",
+            "alerts[1].repeat.until: \"2026-04-10\" is not a real date on or after 2026-04-11",
+            "alerts[2].repeat: a repeat needs the alert's at",
+            "alerts[3].repeat: has to be a mapping",
+        ] {
+            assert!(s.contains(needle), "wanted {needle:?} in:\n{s}");
+        }
+        assert!(!s.contains("alerts[4]"), "{s}");
+        let content = day_and("alerts: [{id: a, title: x, severity: low, status: hecho}]\n");
+        clean("keymap:\n  values:\n    status: {done: hecho}\n", &content, None);
+    }
+
+    #[test]
+    fn a_jet_lag_day_has_a_date_and_steps_that_say_what_to_do() {
+        let people = "people: [{id: rita, name: Rita}]\n";
+        let ok = "{date: 2026-04-11, zone: Europe/Madrid, steps: [{time: '07:00', until: '09:00', text: Up, do: wake, for: rita, alarm: true}, {text: Water}]}";
+        clean("", &day_and(&format!("{people}jet_lag:\n  - {ok}\n")), None);
+        let content = day_and(&format!(
+            "{people}jet_lag:
+  - {ok}
+  - {ok}
+  - text
+  - {{date: 2026-02-30, steps: x}}
+  - {{date: 2026-04-12, steps: [x, {{time: 7am, until: '9', do: nap, for: [nobody], alarm: 'yes'}}, {{text: y, alarm: true}}]}}
+"
+        ));
+        let s = said(&with("", &content, None));
+        for needle in [
+            "jet_lag.2026-04-11.date: 2026-04-11 appears twice",
+            "jet_lag[2]: has to be a mapping",
+            "jet_lag[3]: \"2026-02-30\" is not a real date",
+            "jet_lag[3]: a jet-lag day needs steps, a list",
+            "jet_lag.2026-04-12.steps[0]: has to be a mapping",
+            "jet_lag.2026-04-12.steps[1]: a step needs a text",
+            "jet_lag.2026-04-12.steps[1].time: \"7am\" is not a time, HH:MM",
+            "jet_lag.2026-04-12.steps[1].until: \"9\" is not a time, HH:MM",
+            "jet_lag.2026-04-12.steps[1].do: \"nap\" is not one of wake, bed, sleep",
+            "jet_lag.2026-04-12.steps[1].for: \"nobody\" is not one of the people",
+            "jet_lag.2026-04-12.steps[1].alarm: is true or false",
+            "jet_lag.2026-04-12.steps[2].alarm: an alarm needs the step's time",
+        ] {
+            assert!(s.contains(needle), "wanted {needle:?} in:\n{s}");
+        }
+        says(&day_and("jet_lag: x\n"), "jet_lag: has to be a list, one entry per day");
+        let mapped = day_and("jet_lag: [{date: 2026-04-11, steps: [{text: x, do: cafe}]}]\n");
+        clean("keymap:\n  values:\n    do: {coffee: cafe}\n", &mapped, None);
+    }
+
+    #[test]
+    fn a_task_has_an_id_a_title_and_maybe_a_deadline_and_a_status() {
+        let ok = "{id: tickets, title: Tickets, deadline: 2026-10-01, status: partial, who: Rita}";
+        clean("", &day_and(&format!("tasks:\n  - {ok}\n  - {{id: bags, title: Bags}}\n")), None);
+        let content = day_and(&format!(
+            "tasks:
+  - {ok}
+  - {ok}
+  - text
+  - {{deadline: soon, status: later}}
+  - {{id: 'not an id', title: x}}
+"
+        ));
+        let s = said(&with("", &content, None));
+        for needle in [
+            "tasks[1].id: \"tickets\" is used twice",
+            "tasks[2]: has to be a mapping",
+            "tasks[3]: a task needs an id",
+            "tasks[3]: a task needs a title",
+            "tasks[3].deadline: \"soon\" is not a real date",
+            "tasks[3].status: \"later\" is not one of open, partial, done",
+            "tasks[4].id: \"not an id\"",
+        ] {
+            assert!(s.contains(needle), "wanted {needle:?} in:\n{s}");
+        }
+        says(&day_and("tasks: x\n"), "tasks: has to be a list");
     }
 
     #[test]

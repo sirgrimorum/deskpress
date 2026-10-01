@@ -180,7 +180,7 @@ impl Reader<'_> {
     fn push(&self, mut node: Node, nodes: &mut Vec<Node>) {
         let slot = node.props.iter().position(|(k, _)| k == "text");
         if let Some(i) = slot {
-            let body = self.body(&node.props[i].1);
+            let body = self.body(&node.props[i].1, true);
             if node.kind == "Card" && body.is_empty() {
                 return;
             }
@@ -252,19 +252,22 @@ impl Reader<'_> {
     }
 
     /// A value as the text of a card: a path reference by what it points to, a list one line per
-    /// item, a mapping one `key: value` line per key it shows.
-    fn body(&self, v: &Value) -> String {
+    /// item, a mapping one `key: value` line per key it shows. Only the first reference is followed.
+    fn body(&self, v: &Value, follow: bool) -> String {
         let lines = |lines: Vec<String>| {
             let kept: Vec<String> = lines.into_iter().filter(|l| !l.is_empty()).collect();
             kept.join("\n")
         };
         match v {
-            Value::String(s) => self.resolve(s).map_or_else(|| s.clone(), |found| self.body(found)),
-            Value::List(items) => lines(items.iter().map(|i| self.body(i)).collect()),
+            Value::String(s) => match self.resolve(s).filter(|_| follow) {
+                Some(found) => self.body(found, false),
+                None => s.clone(),
+            },
+            Value::List(items) => lines(items.iter().map(|i| self.body(i, follow)).collect()),
             Value::Map(m) => {
                 let shown = m.iter().filter(|(k, _)| !self.hidden(k));
                 let line = |(k, v): (&str, &Value)| {
-                    let body = self.body(v);
+                    let body = self.body(v, follow);
                     if body.is_empty() { body } else { format!("{}: {body}", k.replace('_', " ")) }
                 };
                 lines(shown.map(line).collect())
@@ -463,8 +466,9 @@ tags: x",
     const FACTS: &str = r#"now: {date: 2026-04-11}
 ui: {to_confirm: to confirm}
 content:
-  bookings: [{id: museum, code: M-1, source: web, gate: ""}, {id: loop, next: bookings.museum}]
+  bookings: [{id: museum, code: M-1, source: web, gate: ""}, {id: loop, next: bookings.museum}, {id: pass, see: places.park}]
   hops: bookings.museum
+  places: {park: {ticket: bookings.pass}}
 store:
   hours: 10 to 18
   source_page: x
@@ -476,6 +480,7 @@ store:
   note__2026_4_11x: Odd date
   ticket: bookings.museum
   loop: bookings.loop.next
+  cycle: places.park
   hop: hops.x
   gone: bookings.nowhere
   not_a_path: Bookings.museum
@@ -498,6 +503,8 @@ store:
             "Card note  2026 4 11x|Odd date",
             "Card ticket|id: museum\ncode: M-1",
             "Card loop|bookings.loop.next",
+            // Two that point at each other: only the first is followed.
+            "Card cycle|ticket: bookings.pass",
             "Card hop|hops.x",
             "Card gone|bookings.nowhere",
             "Card not a path|Bookings.museum",

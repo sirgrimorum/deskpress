@@ -5,7 +5,8 @@
 # phone, choose for a day with options, and documents and document for what somebody at a
 # counter asks for. See docs/templates.md.
 
-# The words the screens say. A pack in another language replaces them by key.
+# The words the screens say. A pack in another language replaces them by key, and may name the
+# block types in its own words under `types`, as `types: {flight: Vuelo}`.
 ui:
   today: Today
   back: Back
@@ -21,6 +22,7 @@ ui:
   ticket: The ticket
   parking: Parking
   free: Free
+  to: to
   alerts: Alerts
   whose_phone: Whose phone is it?
   for_you: For you
@@ -62,7 +64,8 @@ ui:
   set_off_now: Set off now
   set_off_at: Set off at
   rearrange: Move the day about
-  pick_block: Pick an hour to move.
+  pick_block: Pick an hour to move, or drag it by its handle.
+  move_block: Move
   earlier: 15 minutes earlier
   later: 15 minutes later
   shorter: 15 minutes shorter
@@ -79,6 +82,21 @@ ui:
   ask_anything: Ask in your own words
   ask_it: Ask
   from_the_phone: The phone's assistant, not the trip's book
+  body_clock: Body clock
+  bed_clash: The plan runs past bed time
+  tasks: To do
+  late: Late
+  log: Car and notes
+  plate: Plate
+  model: Model
+  fuel: Fuel
+  km: Kilometres
+  spot: Floor and bay
+  parked: Parked
+  keep_log: Keep
+  write_note: Write a note
+  note: The note
+  keep_note: Keep the note
 
 modules:
   timeline:
@@ -86,6 +104,9 @@ modules:
   people:
   places:
   alerts:
+  jet_lag:
+  tasks:
+  log:
   documents:
   climate:
   sheets:
@@ -112,7 +133,7 @@ derive:
     (block.type == 'driving' and block.duration)
     or (block.type == 'walking' and block.duration)
     or (block.type == 'flight' and block.boarding)
-    or (block.type == 'parking' and (place.parking.price or ui.free))
+    or (block.type == 'parking' and ((place.parking.price == 0 and ui.free) or place.parking.price))
     or (block.type == 'lodging' and block.check_in)
     or (block.type == 'free' and block.until)
     or block.time
@@ -140,7 +161,7 @@ questions:
     shortcut: true
   weather:
     ask: What is the weather?
-    answer: "{weather.summary}, {weather.low} to {weather.high}"
+    answer: "{weather.summary}, {weather.low} {ui.to} {weather.high}"
     when: weather.high
   papers:
     ask: What papers do we have?
@@ -171,14 +192,15 @@ screens:
       chart: [{open: chart}]
       ask: [{open: ask}]
       park: [{do: location.get, with: {then: "'parked'"}}]
-      parked: [{store: car, value: $arg}]
+      parked: [{store: car, value: $arg}, {store: log.parked, value: now.stamp}, {store: log.spot, value: "null"}]
       calendar: [{do: calendar.sync, with: {scope: block.event}}]
     layout:
       - Screen: {title: day.title, today: ui.today, on_today: agenda, foot_label: next and ui.next, foot_time: next.time, foot: next.text or ui.nothing_more}
       - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
       - Alert: {if: next.leaving, title: ui.set_off_now, text: next.text}
       - Label: {if: next.leave_at and not next.leaving, text: "{ui.set_off_at} {next.leave_at}"}
-      - Label: {if: block.type, text: "{ui.now} · {block.type}"}
+      - Label: {if: block.type, text: "{ui.now} · {at(ui.types, block.type) or block.type}"}
+      - Label: {if: jet_lag.now, text: "{ui.body_clock} · {jet_lag.now.text}"}
       - Chip: {if: "not empty(people)", text: holder.name or ui.whose_phone, on_tap: relay}
       - BigValue: {text: hero, caption: block.text}
       - Label: {if: weather.summary, text: weather.summary}
@@ -187,7 +209,7 @@ screens:
       - Card: {if: "block.type == 'driving'", title: ui.parking, text: place.parking}
       - Auto: {if: "block.type == 'parking'", value: place.parking, skip: [price]}
       - Auto: {value: place.during, skip: [type, ticket, points]}
-      - Auto: {value: block, skip: [time, text, type, place, until, locked, leave, road, guide, for, duration, boarding, check_in, ticket, state, event, zone, until_zone]}
+      - Auto: {value: block, skip: [time, text, type, place, until, locked, leave, road, guide, for, duration, boarding, check_in, ticket, state, event, zone, until_zone, lasts]}
       - Alert: {each: alerts, if: "item.severity == 'high'", severity: item.severity, title: item.title, text: item.action or item.detail}
       - Button: {if: points, label: ui.points, on_tap: points}
       - Button: {if: block.ticket or place.during.ticket, label: ui.ticket, on_tap: ticket}
@@ -204,6 +226,7 @@ screens:
     actions:
       agenda: [{open: agenda}]
       relay: [{open: relay}]
+      tasks: [{open: tasks}]
     layout:
       - Screen: {title: day.title, today: ui.today, on_today: agenda}
       - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
@@ -211,10 +234,17 @@ screens:
       - Alert: {if: next.leaving, title: ui.set_off_now, text: next.text}
       - Label: {if: next.leave_at and not next.leaving, text: "{ui.set_off_at} {next.leave_at}"}
       - BigValue: {if: next, text: next.time, caption: next.text}
-      - Label: {if: weather.high, text: "{weather.summary}, {weather.low} to {weather.high}"}
-      - Auto: {value: day, skip: [date, title, blocks, fixed, options, choice, started, decision, zone, time]}
+      - Label: {if: weather.high, text: "{weather.summary}, {weather.low} {ui.to} {weather.high}"}
+      - Alert: {each: jet_lag.steps, if: "item.clash and item.state != 'past'", title: ui.bed_clash, text: "{item.time} · {item.clash}"}
+      - Group:
+          if: jet_lag.now or jet_lag.next
+          title: ui.body_clock
+          layout:
+            - Row: {each: jet_lag.steps, if: "item.state != 'past'", time: item.time, text: item.text, state: item.state}
+      - Auto: {value: day, skip: [date, title, blocks, fixed, options, choice, started, decision, zone, travel, time]}
       - Alert: {each: alerts, if: "item.severity == 'high'", severity: item.severity, title: item.title, text: item.action or item.detail}
       - Button: {label: ui.see_day, on_tap: agenda}
+      - Button: {if: tasks.open, label: "{ui.tasks} · {tasks.open}", on_tap: tasks}
 
   # After the last block of the day, from seven: tomorrow's first hour and what to have ready.
   night:
@@ -224,8 +254,13 @@ screens:
     layout:
       - Screen: {title: ui.tonight, today: ui.today, on_today: agenda, foot_label: tomorrow and ui.tomorrow, foot: tomorrow.title or ui.nothing_more}
       - BigValue: {if: tomorrow.first, text: tomorrow.first.time, caption: tomorrow.first.text}
-      - Row: {each: tomorrow.blocks, text: item.text, time: item.time}
-      - Auto: {value: tomorrow, skip: [date, title, blocks, fixed, options, choice, first, decision, zone]}
+      - Row: {each: tomorrow.blocks, text: item.text, time: item.time, caption: item.duration}
+      - Group:
+          if: jet_lag.now or jet_lag.next
+          title: ui.body_clock
+          layout:
+            - Row: {each: jet_lag.steps, if: "item.state != 'past'", time: item.time, text: item.text, state: item.state}
+      - Auto: {value: tomorrow, skip: [date, title, blocks, fixed, options, choice, first, decision, zone, travel]}
       - Button: {if: tomorrow, label: ui.rearrange, on_tap: adjust}
 
   # The whole day at a glance, each block with its state. The way out of every screen.
@@ -243,19 +278,29 @@ screens:
       adjust: [{open: adjust}]
       chart: [{open: chart}]
       ask: [{open: ask}]
+      tasks: [{open: tasks}]
+      log: [{open: log}]
     layout:
       - Screen: {title: day.title, back: ui.back, on_back: back}
       - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
-      - Label: {if: weather.high, text: "{weather.summary}, {weather.low} to {weather.high}"}
+      - Label: {if: weather.high, text: "{weather.summary}, {weather.low} {ui.to} {weather.high}"}
       - Label: {if: weather.failed, text: "{ui.weather_failed} {weather.failed}"}
-      - Row: {each: day.blocks, text: item.text, time: item.time, state: item.state}
+      - Row: {each: day.blocks, text: item.text, time: item.time, caption: item.duration, state: item.state}
       - Row: {each: alerts, if: "item.severity == 'medium'", text: item.title, caption: item.action, state: "'note'"}
+      - Alert: {each: jet_lag.steps, if: "item.clash and item.state != 'past'", title: ui.bed_clash, text: "{item.time} · {item.clash}"}
+      - Group:
+          if: jet_lag
+          title: ui.body_clock
+          layout:
+            - Row: {each: jet_lag.steps, time: item.time, text: item.text, state: item.state}
+      - Button: {if: tasks.open, label: "{ui.tasks} · {tasks.open}", on_tap: tasks}
       - Button: {if: "not empty(alerts)", label: ui.alerts, on_tap: alerts}
       - Button: {if: "not empty(documents)", label: ui.documents, on_tap: documents}
       - Row: {each: sheets, text: item.title, value: item, on_tap: sheet}
       - Button: {if: chart, label: ui.chart, on_tap: chart}
       - Button: {if: questions, label: ui.ask, on_tap: ask}
       - Button: {if: store.car, label: ui.find_car, on_tap: car}
+      - Button: {if: not kid, label: ui.log, on_tap: log}
       - Button: {if: decision.due and decision.answered and not kid, label: ui.change_plan, on_tap: choose}
       - Button: {if: day and not kid, label: ui.rearrange, on_tap: adjust}
       - Button: {if: not kid, label: ui.calendar_day, on_tap: calendar_day}
@@ -325,10 +370,76 @@ screens:
 
   # A day that is not in the pack: every day there is.
   days:
+    actions:
+      tasks: [{open: tasks}]
     layout:
       - Screen: {title: ui.days}
       - Label: {text: ui.not_today}
       - Row: {each: days, text: item.title, caption: item.date}
+      - Button: {if: tasks.open, label: "{ui.tasks} · {tasks.open}", on_tap: tasks}
+
+  # What has to be done around the trip, by deadline, the late ones marked. A tick is a fact of
+  # its own, so the pack is never written back.
+  tasks:
+    actions:
+      back: [back]
+      tick: [{store: "{$arg}", value: "not at(store, $arg)"}]
+    layout:
+      - Screen: {title: ui.tasks, back: ui.back, on_back: back}
+      - Check: {each: tasks.items, if: item.late, text: item.title, caption: "{ui.late} · {item.about}", checked: item.done, value: item.fact, on_tap: tick}
+      - Check: {each: tasks.items, if: not item.late, text: item.title, caption: item.about, checked: item.done, value: item.fact, on_tap: tick}
+
+  # What the family keeps as the trip goes: the car, where it was left, and notes. All of it is
+  # facts, so another phone takes it with the rest (decision 0034).
+  log:
+    state: {plate: "", model: "", fuel: "", km: "", spot: ""}
+    actions:
+      back: [back]
+      set_plate: [{set: plate, to: $arg}]
+      set_model: [{set: model, to: $arg}]
+      set_fuel: [{set: fuel, to: $arg}]
+      set_km: [{set: km, to: $arg}]
+      set_spot: [{set: spot, to: $arg}]
+      # Only what changed, so a field left alone keeps the other phone's word.
+      keep:
+        - {store: log.plate, value: plate, if: "plate and plate != log.plate"}
+        - {store: log.model, value: model, if: "model and model != log.model"}
+        - {store: log.fuel, value: fuel, if: "fuel and fuel != log.fuel"}
+        - {store: log.km, value: km, if: "km and km != log.km"}
+        - {store: log.spot, value: spot, if: "spot and spot != log.spot"}
+        - back
+      park: [{do: location.get, with: {then: "'parked'"}}]
+      parked: [{store: car, value: $arg}, {store: log.parked, value: now.stamp}, {store: log.spot, value: "null"}]
+      car: [{do: map.open, with: {lat: store.car.lat, lon: store.car.lon, label: ui.car}}]
+      note: [{open: note}]
+    layout:
+      - Screen: {title: ui.log, back: ui.back, on_back: back}
+      - Group:
+          title: ui.car
+          layout:
+            - Field: {label: ui.plate, value: log.plate, on_change: set_plate}
+            - Field: {label: ui.model, value: log.model, on_change: set_model}
+            - Field: {label: ui.fuel, value: log.fuel, on_change: set_fuel}
+            - Field: {label: ui.km, value: log.km, on_change: set_km}
+            - Field: {label: ui.spot, value: log.spot, on_change: set_spot}
+            - Button: {if: plate or model or fuel or km or spot, label: ui.keep_log, on_tap: keep}
+            - Label: {if: log.parked, text: "{ui.parked} {log.parked}"}
+            - Button: {label: ui.park, on_tap: park}
+            - Button: {if: store.car, label: ui.find_car, on_tap: car}
+      - Button: {label: ui.write_note, on_tap: note}
+      - Row: {each: log.notes, text: item.text, caption: item.when}
+
+  # A note for the log. Each is a fact of its own, so two phones' notes add up.
+  note:
+    state: {words: ""}
+    actions:
+      back: [back]
+      write: [{set: words, to: $arg}]
+      keep: [{store: "note.{now.stamp}.{count(log.notes)}", value: words}, back]
+    layout:
+      - Screen: {title: ui.write_note, back: ui.back, on_back: back}
+      - Field: {label: ui.note, value: words, on_change: write}
+      - Button: {if: words, label: ui.keep_note, on_tap: keep}
 
   # The detail a moment has no room for. To read, not to act: no main button.
   sheet:
@@ -342,9 +453,10 @@ screens:
       - Auto: {value: params.value}
       - Row: {each: params.rows, text: item.name or item.title, caption: item.what or item.action}
 
-  # Moving the day about: pick an hour, then shift it, stretch it, swap it with the hour beside it
-  # or take it out. `next` opens it on tomorrow, which is how the night screen comes in. Nothing is
-  # written back to the pack: every edit is a fact of its own, and the day is rebuilt from them.
+  # Moving the day about: drag an hour by its handle to another place in the day, or pick it, then
+  # shift it, stretch it, swap it or take it out. The way between two places shows and follows.
+  # `next` opens it on tomorrow, which is how the night screen comes in. Nothing is written back
+  # to the pack: every edit is a fact of its own, and the day is rebuilt from them.
   adjust:
     state: {picked: null}
     actions:
@@ -356,19 +468,14 @@ screens:
       longer: [{do: timeline.grow, with: {block: picked, by: 15}}]
       up: [{do: timeline.swap, with: {block: picked, side: "'up'"}}]
       down: [{do: timeline.swap, with: {block: picked, side: "'down'"}}]
+      reorder: [{do: timeline.reorder, with: {block: $arg.block, to: $arg.to}}]
       drop: [{do: timeline.drop, with: {block: picked}}, {set: picked, to: "null"}]
       restore: [{do: timeline.restore, with: {block: picked}}]
       add: [{open: add, with: {date: "(params.next and tomorrow.date) or day.date"}}]
     layout:
       - Screen: {title: ui.rearrange, back: ui.back, on_back: back}
       - Label: {if: not picked, text: ui.pick_block}
-      - Row:
-          each: "(params.next and tomorrow.blocks) or day.blocks"
-          text: item.text
-          time: item.time
-          state: "(item.event == picked and 'picked') or item.state"
-          value: item.event
-          on_tap: pick
+      - Day: {blocks: "(params.next and tomorrow.blocks) or day.blocks", picked: picked, move: ui.move_block, on_tap: pick, on_move: reorder}
       - Group:
           if: picked
           layout:

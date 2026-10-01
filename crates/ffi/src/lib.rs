@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use deskpress_engine::engine::{self, Engine, Nav};
 use deskpress_engine::value::{self as data, Map, text};
-use deskpress_engine::{edit, facts, pack, tree, validate, yaml};
+use deskpress_engine::{edit, facts, pack, share, tree, validate, yaml};
 
 uniffi::setup_scaffolding!();
 
@@ -228,6 +228,24 @@ impl From<engine::Event> for Event {
     }
 }
 
+/// An alarm for the phone to ring with the app closed: `at` local to `zone`, empty for the pack's
+/// timezone, and `key` the same each time the engine names it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Alarm {
+    pub key: String,
+    pub at: String,
+    pub zone: String,
+    pub title: String,
+    pub text: String,
+}
+
+impl From<engine::Alarm> for Alarm {
+    fn from(a: engine::Alarm) -> Self {
+        let engine::Alarm { key, at, zone, title, text } = a;
+        Alarm { key, at, zone, title, text }
+    }
+}
+
 /// What a calendar sync would do: the events to add and to change, and the ids to remove.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Plan {
@@ -326,6 +344,16 @@ fn refused(detail: String) -> CallError {
     CallError::Refused { detail }
 }
 
+/// What a phone takes of a trip another phone sent: facts with the epoch milliseconds each was
+/// kept at, and the pack's files with its `updated` when the pack sent is newer, else none.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct Taken {
+    pub facts: HashMap<String, Value>,
+    pub stamps: HashMap<String, i64>,
+    pub files: HashMap<String, String>,
+    pub updated: String,
+}
+
 /// A pack that passed validation, and where the person is in it. It may still have warnings.
 #[derive(uniffi::Object)]
 pub struct LoadedPack {
@@ -356,6 +384,35 @@ impl LoadedPack {
         text(self.engine.pack().manifest.get("pack").and_then(|p| p.get("timezone")))
     }
 
+    /// The trip as this phone holds it, for another phone with the same pack: the facts but the
+    /// phone's own, `stamps` the epoch milliseconds each was kept at, and the pack's files.
+    pub fn share(
+        &self,
+        facts: HashMap<String, Value>,
+        stamps: HashMap<String, i64>,
+        files: HashMap<String, String>,
+    ) -> String {
+        let files = files.into_iter().map(|(p, value)| (p, Value::Text { value }));
+        let (id, updated) = (self.id(), self.updated());
+        share::share(&id, &updated, &sorted(facts), &stamped(stamps), &sorted(files.collect()))
+    }
+
+    /// What this phone, holding `facts` kept at `stamps`, takes of `sent`. Refused when it is not
+    /// a trip, or another pack's.
+    pub fn take(
+        &self,
+        sent: String,
+        facts: HashMap<String, Value>,
+        stamps: HashMap<String, i64>,
+    ) -> Result<Taken, CallError> {
+        let (id, updated) = (self.id(), self.updated());
+        let t = share::take(&sent, &id, &updated, &sorted(facts), &stamped(stamps));
+        let t = t.map_err(refused)?;
+        let stamps = t.stamps.into_iter().map(|(k, at)| (k, at as i64)).collect();
+        let files = t.files.into_iter().collect();
+        Ok(Taken { facts: values(t.facts), stamps, files, updated: t.updated })
+    }
+
     /// The other IANA zones the plan names; the host passes the local time in each.
     pub fn zones(&self) -> Vec<String> {
         self.engine.zones()
@@ -379,6 +436,12 @@ impl LoadedPack {
         let plan = self.engine.calendar(&world.into(), &scope, &known).map_err(refused)?;
         let events = |l: Vec<engine::Event>| l.into_iter().map(Event::from).collect();
         Ok(Plan { add: events(plan.add), change: events(plan.change), remove: plan.remove })
+    }
+
+    /// Every alarm still to come: jet-lag steps and alerts that ask for one, and set-off notices.
+    pub fn alarms(&self, world: World) -> Result<Vec<Alarm>, CallError> {
+        let alarms = self.engine.alarms(&world.into()).map_err(refused)?;
+        Ok(alarms.into_iter().map(Alarm::from).collect())
     }
 
     /// Every host the pack fetches from, sorted, for the person to approve before the first sync.
@@ -412,6 +475,17 @@ impl LoadedPack {
         let commands = out.commands.into_iter().map(Command::from).collect();
         Ok(Outcome { view: out.view.into(), store: values(out.store), commands })
     }
+}
+
+impl LoadedPack {
+    /// When the pack says it was last updated, or empty.
+    fn updated(&self) -> String {
+        text(self.engine.pack().manifest.get("pack").and_then(|p| p.get("updated")))
+    }
+}
+
+fn stamped(stamps: HashMap<String, i64>) -> Map {
+    sorted(stamps.into_iter().map(|(k, at)| (k, Value::Number { value: at as f64 })).collect())
 }
 
 fn findings(list: Vec<validate::Finding>) -> Vec<Finding> {
@@ -661,6 +735,24 @@ rules:
     }
 
     #[test]
+    fn a_trip_goes_to_another_phone_with_the_same_pack_and_it_takes_what_is_newer() {
+        let mut sent = files("", "days: []\n");
+        let manifest = MANIFEST.replace("content.yaml}", "content.yaml, updated: 2026-04-10}");
+        sent.insert("pack.yaml".into(), manifest);
+        let theirs = load("pack.yaml".into(), sent.clone()).unwrap();
+        let mine = load("pack.yaml".into(), files("", "days: []\n")).unwrap();
+        let facts =
+            HashMap::from([("seen".to_owned(), text("x")), ("holder".to_owned(), text("ana"))]);
+        let stamps = HashMap::from([("seen".to_owned(), 1_790_000_000_000)]);
+        let trip = theirs.share(facts, stamps.clone(), sent.clone());
+        let taken = mine.take(trip, HashMap::new(), HashMap::new()).unwrap();
+        assert_eq!(taken.facts, HashMap::from([("seen".to_owned(), text("x"))]));
+        assert_eq!((taken.stamps, taken.files, taken.updated), (stamps, sent, "2026-04-10".into()));
+        let why = mine.take("no".into(), HashMap::new(), HashMap::new()).unwrap_err();
+        assert_eq!(why.to_string(), "this is not a trip DeskPress shared");
+    }
+
+    #[test]
     fn a_call_the_engine_cannot_answer_is_refused() {
         let pack = load(
             "pack.yaml".into(),
@@ -734,6 +826,27 @@ rules:
         assert_eq!([&walk.location, &walk.notes, &walk.reminder], ["", "Walk. Slowly", ""]);
         assert_eq!([&walk.zone, &walk.end_zone], ["Asia/Tokyo", "Asia/Tokyo"]);
         assert_eq!(walk.fingerprint.len(), 16);
+    }
+
+    #[test]
+    fn alarms_hand_over_what_is_still_to_ring() {
+        let definition =
+            "modules: {timeline: , alerts: }\nscreens: {a: {}}\nrules: [{screen: a}]\n";
+        let content = "days: [{date: 2026-04-11, title: A, blocks: [[\"10:00\", \"Ferry. Gate 2\", {leave: 20}]]}]
+alerts: [{id: tide, title: Tide, severity: low, at: 2026-04-11T12:00, alarm: true}]
+";
+        let pack = load("pack.yaml".into(), files(definition, content)).unwrap();
+        assert!(pack.alarms(world("today")).is_err());
+        let all = pack.alarms(world("2026-04-11T08:00")).unwrap();
+        let ferry = Alarm {
+            key: "leave.2026-04-11.blocks.0".into(),
+            at: "2026-04-11T09:40".into(),
+            zone: String::new(),
+            title: "Ferry".into(),
+            text: String::new(),
+        };
+        assert_eq!(all[0], ferry);
+        assert_eq!([&all[1].key, &all[1].at], ["alert.tide.2026-04-11T12:00", "2026-04-11T12:00"]);
     }
 
     #[test]

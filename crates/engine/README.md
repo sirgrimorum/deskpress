@@ -21,6 +21,7 @@ flowchart LR
 | `clock` | the pack-local minute: parsing, adding, comparing |
 | `tree` | the screen tree a layout builds, and the outline of a pack with no rules |
 | `validate` | lists every error and warning in a loaded pack |
+| `share` | the trip sent phone to phone: what one phone sends, and what another takes of it |
 | `expr` | parses and evaluates expressions and text templates |
 | `value` | the value tree all of them share |
 

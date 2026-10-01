@@ -12,6 +12,7 @@ pack:
   content: content.yaml
   theme: theme.yaml
   extends: travel
+  updated: 2026-04-01
 
 conventions:
   alert_prefixes: [warn, alert]

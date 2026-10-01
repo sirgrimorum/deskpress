@@ -8,6 +8,7 @@ entry is the short answer; the linked document has the rest.
 | term | meaning |
 | --- | --- |
 | **action** | something that can happen on a screen, like `confirm`. A named list of effects |
+| **alarm** | a time the phone rings with the app closed: a jet-lag step or an alert that asks for one, and the set-off notice of a block with a `leave` |
 | **alert** | a warning the pack wrote, shown by severity (`critical` to `low`) and by time. Never computed |
 | **as of** | when synced data was fetched. Shown so a stale forecast reads as stale |
 | **block** | one line of a day: a time, a text, and an optional map that makes it a moment |
@@ -28,16 +29,20 @@ entry is the short answer; the linked document has the rest.
 | **expression** | a small formula in a pack, like `decision.due and not decision.answered`. Parsed at load, never run as code |
 | **host** | the app around the engine (Android today). Owns the device: files, clock, location, storage, tools |
 | **holder** | the person holding the phone right now. Screens can change with who it is |
+| **jet lag** | the `jet_lag` root: per date, the steps that move the body clock (wake, bed, light, coffee) and a bed time the plan runs past |
 | **keymap** | a map in `pack.yaml` from canonical keys to the pack's own key names, grouped by context |
 | **kid mode** | the screens shown when the holder is not an adult |
 | **ledger** | what the host wrote into the calendar for one pack: the calendar picked, and a row and fingerprint per event id. A sync touches only those rows |
+| **leg** | the travel between two blocks at different places, put in the day by `timeline`: the pack's minutes for it, else a guess from where the two are. Never stored, never moved by hand |
+| **log** | the car and the trip's notes, kept as facts on the phone: plate, fuel, where it is parked, and a line written at a time ([decision 0034](decisions/0034-the-trip-phone-to-phone.md)) |
 | **main machine** | the pack's `rules`: it answers "which screen, right now" |
 | **manifest** | `pack.yaml`: the pack's name, language, timezone, where its content is, and its definition |
-| **module** | shared, tested logic a pack opts into: `timeline`, `choices`, `people`, `places`, `alerts`, `documents`, `climate` |
+| **module** | shared, tested logic a pack opts into: `timeline`, `choices`, `people`, `places`, `alerts`, `jet_lag`, `tasks`, `log`, `documents`, `climate`, `sheets` |
 | **moment** | the travel screen for the block happening now. Its cards depend on the block's type |
 | **moment type** | one of the thirteen block types (`visit`, `train`, `meal`...). Each picks the cards of its moment |
 | **nav stack** | the screens a user opened, first the one the rules picked. `open` pushes, `back` pops, `home` leaves the first |
 | **node** | one component in a screen tree, with its props and the events it answers |
+| **note** | one line of the log, the fact `note.<now.stamp>.<n>`. Text only, never deleted; two phones' notes add up |
 | **outline** | the screen of a pack with no `rules`: its name, then one row per day |
 | **params** | the values `open` passed to the screen it pushed. Empty on a screen the rules picked |
 | **pack** | a folder that describes an app: `pack.yaml`, `content.yaml`, optional `theme.yaml` and files. The shell loads it and becomes that app |
@@ -50,12 +55,15 @@ entry is the short answer; the linked document has the rest.
 | **sheet** | any other tree in the content (bookings, phrases, contacts), shown as rows and cards with no shell support needed |
 | **secret** | a key a sync needs, named in the pack with the query parameter it goes in, and typed on the device. Kept sealed with a keystore key, never in the pack |
 | **shell** | the engine plus a host: everything that is the same for every pack |
+| **stamp** | when the phone kept a stored fact, epoch milliseconds on the real clock (not `now.stamp`). Of two phones, the later stamp wins |
 | **stored fact** | a value the app saved on the device, like a decision. It is an input, so it can change the screen |
 | **template** | a definition bundled with the engine, like `travel`, that a pack names in `pack.extends` and only overrides where it differs. See `docs/templates.md` |
 | **theme** | the design system as data, in `theme.yaml`: color, type, spacing and radius tokens |
-| **token** | one named value of the theme. Components read tokens and never a theme's name |
 | **sync** | fetching a module's data from a source the pack names, on a button or automatically every so often while the app is open. Only `climate` so far |
-| **tool** | a device capability the engine can ask the host for: map, calendar, geofence, fingerprint |
+| **task** | one line of `tasks`: something to do around the trip, with a deadline and who, ticked on the phone |
+| **token** | one named value of the theme. Components read tokens and never a theme's name |
+| **tool** | a device capability the engine can ask the host for: map, calendar, geofence, fingerprint, alarms |
+| **trip sent** | one text file a phone hands to another holding the same pack: its facts, their stamps, and the pack when it is newer |
 | **tree version** | the number of the screen tree's shape. A renderer refuses a newer one instead of half drawing it |
 | **unknown key rule** | a key the shell does not know becomes a card labelled with that key, or an alert by its prefix or date. `Auto` applies it. Enriching a pack never breaks it |
 | **validate** | load a pack and list its errors and warnings. `deskpress validate <pack>` on the desk, `load` in the app |

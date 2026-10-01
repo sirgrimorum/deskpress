@@ -13,15 +13,18 @@ use crate::validate::Report;
 use crate::validate::patterns::{is_id, is_language, is_real_date, is_stamp, is_time};
 use crate::value::{Map, Value, quote, text};
 
-/// The modules in the order they run, the content root each reads unless told otherwise, and the
-/// names it exposes. A module reads the names the ones before it exposed.
+/// The modules in the order they run, the content root each reads unless told otherwise (`log`
+/// reads only facts), and the names it exposes. A module reads the names the ones before it exposed.
 /// `sheets` comes last: it hands out what the modules before it did not read.
-pub const MODULES: [(&str, &str, &[&str]); 8] = [
+pub const MODULES: [(&str, &str, &[&str]); 11] = [
     ("timeline", "days", &["day", "block", "next", "days", "tomorrow"]),
     ("choices", "days", &["decision"]),
     ("people", "people", &["holder", "people"]),
     ("places", "places", &["place", "here", "away", "chart", "area"]),
     ("alerts", "alerts", &["alerts"]),
+    ("jet_lag", "jet_lag", &["jet_lag"]),
+    ("tasks", "tasks", &["tasks"]),
+    ("log", "log", &["log"]),
     ("documents", "documents", &["documents"]),
     ("climate", "climate", &["weather"]),
     ("sheets", "sheets", &["sheets"]),
@@ -464,7 +467,7 @@ mod tests {
         );
         assert_eq!(
             said("modules: {weather: {}}"),
-            "error modules.weather: \"weather\" is not a module: timeline, choices, people, places, alerts, documents, climate, sheets"
+            "error modules.weather: \"weather\" is not a module: timeline, choices, people, places, alerts, jet_lag, tasks, log, documents, climate, sheets"
         );
         assert_eq!(
             said("modules: {timeline: 3}"),

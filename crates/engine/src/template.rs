@@ -252,6 +252,22 @@ packing: {check: true, items: [Hat, Bottle]}
         at(node.unwrap(), "value").cloned().unwrap()
     }
 
+    /// The hours the Day node draws, as `time text`.
+    fn hours(tree: &Tree) -> Vec<String> {
+        let day = tree.nodes.iter().find(|n| n.kind == "Day").expect("a Day node");
+        let blocks = at(day, "blocks").and_then(Value::as_list).unwrap_or_default();
+        blocks.iter().map(|b| format!("{} {}", text(b.get("time")), text(b.get("text")))).collect()
+    }
+
+    /// The `event` of the hour of the Day node that says `says`.
+    fn hour(tree: &Tree, says: &str) -> Value {
+        let day = tree.nodes.iter().find(|n| n.kind == "Day").expect("a Day node");
+        let blocks = at(day, "blocks").and_then(Value::as_list).unwrap_or_default();
+        let b = blocks.iter().find(|b| text(b.get("text")) == says);
+        assert!(b.is_some(), "no hour says {says:?}");
+        b.unwrap().get("event").cloned().unwrap()
+    }
+
     /// The day the pack shows after these facts were stored.
     fn after(e: &Engine, now: &str, facts: &Map) -> Tree {
         let w = World { store: facts.clone(), ..world(now, "", &[]) };
@@ -290,7 +306,7 @@ packing: {check: true, items: [Hat, Bottle]}
         let (e, mut nav) = (trip(), Nav::default());
         let night = world("2026-04-11T21:30", "", &[]);
         let out = e.dispatch(&night, &mut nav, "adjust", Value::Null).unwrap();
-        let dinner = carried(&out.view.tree, "Dinner");
+        let dinner = hour(&out.view.tree, "Dinner");
         e.dispatch(&night, &mut nav, "pick", dinner.clone()).unwrap();
         let out = e.dispatch(&night, &mut nav, "later", Value::Null).unwrap();
         // The pack is untouched: the new hour comes from the fact, every time the day is built.
@@ -298,6 +314,17 @@ packing: {check: true, items: [Hat, Bottle]}
         let out = e.dispatch(&night, &mut nav, "drop", Value::Null).unwrap();
         let gone = said(&after(&e, "2026-04-11T21:30", &out.store));
         assert!(!gone.iter().any(|l| l.contains("Dinner")), "{gone:?}");
+    }
+
+    #[test]
+    fn an_hour_dragged_down_the_day_trades_places_with_the_ones_it_passes() {
+        let (e, mut nav) = (trip(), Nav::default());
+        let noon = world("2026-04-11T14:00", "", &[]);
+        let out = e.dispatch(&noon, &mut nav, "adjust", Value::Null).unwrap();
+        let park = hour(&out.view.tree, "Park");
+        let arg = Map(vec![("block".into(), park), ("to".into(), Value::Number(1.0))]);
+        let out = e.dispatch(&noon, &mut nav, "reorder", Value::Map(arg)).unwrap();
+        assert_eq!(hours(&out.view.tree), [" A note", "10:00 Museum", "12:00 Park", "13:00 Drive"]);
     }
 
     #[test]
@@ -449,6 +476,27 @@ packing: {check: true, items: [Hat, Bottle]}
     }
 
     #[test]
+    fn a_free_lot_says_so_one_with_no_price_says_its_time_and_types_speak_the_pack_s_words() {
+        let manifest = over(&format!("{HEAD}ui: {{free: Gratis, types: {{parking: Parqueo}}}}\n"));
+        let content = parse(
+            r#"days: [{date: 2026-04-11, title: One, blocks: [["10:00", "A", {type: parking, place: free}], ["11:00", "B", {type: parking, place: open}]]}]
+places: {free: {name: Free, parking: {price: 0}}, open: {name: Open, parking: {where: West}}}
+"#,
+        );
+        let pack = Pack { manifest: manifest.unwrap(), content: content.unwrap(), theme: None };
+        let e = Engine::load(pack).unwrap().0;
+        let big = |now: &str| {
+            let tree = e.screen(&world(now, "", &[]), &mut Nav::default()).unwrap().tree;
+            let lines = said(&tree);
+            (lines.iter().find(|l| l.starts_with("BigValue")).cloned().unwrap(), lines)
+        };
+        let (free, lines) = big("2026-04-11T10:30");
+        assert_eq!(free, "BigValue  Gratis");
+        assert!(lines.contains(&"Label  Now · Parqueo".to_owned()), "{lines:?}");
+        assert_eq!(big("2026-04-11T11:30").0, "BigValue  11:00");
+    }
+
+    #[test]
     fn a_child_leaving_a_safe_place_ends_the_turn_while_the_device_knows_where_it_is() {
         let screen = |inside: &[&str], located| {
             let inside = inside.iter().map(|i| (*i).to_owned()).collect();
@@ -483,6 +531,8 @@ packing: {check: true, items: [Hat, Bottle]}
         let spot = crate::yaml::parse("v: {lat: 1, lon: 2}").unwrap().get("v").cloned().unwrap();
         let out = e.dispatch(&w, &mut Nav::default(), "parked", spot.clone()).unwrap();
         assert_eq!(out.store.get("car"), Some(&spot));
+        let when = (out.store.get("log.parked"), out.store.get("log.spot"));
+        assert_eq!(when, (Some(&Value::String("2026-04-11T10:30".into())), Some(&Value::Null)));
         // The agenda finds the car from then on.
         let mut w = world("2026-04-11T12:30", "ana", &[]);
         w.store.set("car", spot);
@@ -497,6 +547,49 @@ packing: {check: true, items: [Hat, Bottle]}
             (car[0].name.as_str(), car[0].args.get("lon")),
             ("map.open", Some(&Value::Number(2.0)))
         );
+    }
+
+    #[test]
+    fn a_task_ticked_twice_is_open_again_and_a_bed_time_the_plan_runs_past_warns_until_it_passes() {
+        let extra = r#"tasks: [{id: bags, title: Bags}]
+jet_lag: [{date: 2026-04-11, steps: [{time: "12:45", text: Nap, do: bed}, {time: "13:15", text: Up}]}]
+"#;
+        let e = load(&format!("{TRIP}{extra}"));
+        let (w, mut nav) = (world("2026-04-11T12:30", "", &[]), Nav::default());
+        let agenda = said(&e.screen(&w, &mut nav).unwrap().tree);
+        let clash = "Alert The plan runs past bed time 12:45 · Drive".to_owned();
+        assert!(agenda.contains(&clash), "{agenda:?}");
+        let later = world("2026-04-11T13:30", "", &[]);
+        let past = e.dispatch(&later, &mut Nav::default(), "agenda", Value::Null).unwrap();
+        assert!(!said(&past.view.tree).contains(&clash));
+        let tasks = e.dispatch(&w, &mut nav, "tasks", Value::Null).unwrap().view.tree;
+        let bags = carried(&tasks, "Bags");
+        let once = e.dispatch(&w, &mut nav, "tick", bags.clone()).unwrap().store;
+        let w = World { store: once.clone(), ..w };
+        let twice = e.dispatch(&w, &mut nav, "tick", bags).unwrap().store;
+        let tick = |done| Map(vec![("task.bags".to_owned(), Value::Bool(done))]);
+        assert_eq!((once, twice), (tick(true), tick(false)));
+    }
+
+    #[test]
+    fn the_log_keeps_only_what_changed_of_the_car_and_each_note_on_its_own() {
+        let (e, mut nav) = (trip(), Nav::default());
+        let w = world("2026-04-11T12:30", "", &[("log.plate", "1234 ABC")]);
+        e.dispatch(&w, &mut nav, "log", Value::Null).unwrap();
+        e.dispatch(&w, &mut nav, "set_plate", Value::String("1234 ABC".into())).unwrap();
+        e.dispatch(&w, &mut nav, "set_fuel", Value::String("3/4".into())).unwrap();
+        let out = e.dispatch(&w, &mut nav, "keep", Value::Null).unwrap();
+        assert_eq!(out.store, Map(vec![("log.fuel".to_owned(), Value::String("3/4".into()))]));
+        assert_eq!(out.view.tree.screen, "agenda");
+        e.dispatch(&w, &mut nav, "log", Value::Null).unwrap();
+        e.dispatch(&w, &mut nav, "note", Value::Null).unwrap();
+        e.dispatch(&w, &mut nav, "write", Value::String("Filled up".into())).unwrap();
+        let out = e.dispatch(&w, &mut nav, "keep", Value::Null).unwrap();
+        let note = ("note.2026-04-11T12:30.0".to_owned(), Value::String("Filled up".into()));
+        assert_eq!(out.store, Map(vec![note]));
+        let w = World { store: out.store, ..w };
+        let log = said(&e.dispatch(&w, &mut Nav::default(), "log", Value::Null).unwrap().view.tree);
+        assert_eq!(log.last().unwrap(), "Row  Filled up");
     }
 
     #[test]

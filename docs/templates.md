@@ -36,7 +36,8 @@ replaces `screens.moment` whole.
 The trip app of the design: six views (moment, sheet, agenda, suggestion, complete, relay),
 three moments of the day with a screen of their own (morning, night, and the list of days), `kid`
 for a child holding the phone, `documents` and `document` for what a counter asks for, and
-`choose` for a day with options, and `ask` for what the pack can answer about the trip.
+`choose` for a day with options, `ask` for what the pack can answer about the trip, `adjust`
+and `add` to change a day, `tasks`, and the car's `log` with a `note`.
 
 **Rules**, first true wins:
 
@@ -56,14 +57,17 @@ for a child holding the phone, `documents` and `document` for what a counter ask
 
 | screen | shows | actions |
 | --- | --- | --- |
-| `moment` | the day's critical alerts, the block's type, who holds the phone, the answer (`hero`), the weather, the place's parking and `during` keys, the block's own keys, high alerts, the place's plan and its map of points (`area`); what comes next in the bottom bar | `agenda`, `relay`, `points` and `ticket` (both open `sheet`), `map` (the place in a map app, when it has `at`), `park` on a parking block (saves the position as `store.car`), `calendar` (the block into the calendar, `calendar.sync` with its `event`), `ask` (opens `ask`, while the pack has questions), `chart` (opens `chart`) |
-| `morning` | the first hour, the weather, the day's own keys, high alerts | `agenda`, `relay` |
-| `night` | tomorrow's first hour, its own keys; its title in the bottom bar | `agenda`, `adjust` (opens `adjust` on tomorrow) |
-| `agenda` | critical alerts, the weather and why its last sync failed, every block with its state, medium alerts as rows | `back`, `alerts` (opens `sheet`), `documents` (opens `documents`), `car` (where the car was left, in a map app, once saved), `calendar_day` and `calendar_trip` (the day or every day into the calendar; not for a child), `weather` (`climate.sync`, when the module syncs; not for a child), `sheet` (one row per sheet, opens `sheet`), `choose` (opens `choose` to change a kept plan while its decision is due; not for a child), `ask` (opens `ask`, while the pack has questions), `chart` (opens `chart`), `adjust` (opens `adjust`) |
-| `days` | a line saying the plan does not cover today, then one row per day | |
+| `moment` | the day's critical alerts, the body clock step on now, the block's type, who holds the phone, the answer (`hero`), the weather, the place's parking and `during` keys, the block's own keys, high alerts, the place's plan and its map of points (`area`); what comes next in the bottom bar | `agenda`, `relay`, `points` and `ticket` (both open `sheet`), `map` (the place in a map app, when it has `at`), `park` on a parking block (saves the position as `store.car`, the time as `log.parked`, and empties `log.spot`), `calendar` (the block into the calendar, `calendar.sync` with its `event`), `ask` (opens `ask`, while the pack has questions), `chart` (opens `chart`) |
+| `morning` | the first hour, the weather, a bed time the plan runs past, the body clock steps still to come, the day's own keys, high alerts, a button with the tasks left | `agenda`, `relay`, `tasks` (opens `tasks`) |
+| `night` | tomorrow's first hour, its blocks with the leg to each and its duration, the body clock steps still to come, its own keys; its title in the bottom bar | `agenda`, `adjust` (opens `adjust` on tomorrow) |
+| `agenda` | critical alerts, a bed time the plan runs past, the weather and why its last sync failed, every block with its state and the leg to it with its duration, the day's body clock, medium alerts as rows, a button with the tasks left | `back`, `alerts` (opens `sheet`), `documents` (opens `documents`), `car` (where the car was left, in a map app, once saved), `calendar_day` and `calendar_trip` (the day or every day into the calendar; not for a child), `weather` (`climate.sync`, when the module syncs; not for a child), `sheet` (one row per sheet, opens `sheet`), `choose` (opens `choose` to change a kept plan while its decision is due; not for a child), `ask` (opens `ask`, while the pack has questions), `chart` (opens `chart`), `adjust` (opens `adjust`), `tasks` (opens `tasks`), `log` (opens `log`; not for a child) |
+| `days` | a line saying the plan does not cover today, then one row per day, and a button with the tasks left | `tasks` (opens `tasks`) |
+| `tasks` | the tasks not done, by deadline, each a `Check` with its deadline and who, `late` first in its caption once past | `back`, `tick` (stores the task's fact, or clears it) |
+| `log` | the car's plate, model, fuel, kilometres and floor and bay to type, when it was parked, then the notes, newest first | `back`, `set_plate` and the other `set_*`, `keep` (stores each field that changed as `log.<field>`, then back), `park` (saves where the car is, as on `moment`), `car` (where it was left, in a map app), `note` (opens `note`) |
+| `note` | a field for the note | `back`, `write`, `keep` (stores `note.<now.stamp>.<n>`, then back) |
 | `sheet` | what `open` passed: a title, checkable rows when it passed `ticks`, a value through `Auto` (a reference is followed), rows | `back`, `tick` (stores the row's own fact) |
 | `chart` | the day's places drawn on plain paper, the path between them | `back`, `route` (every stop in order to a map app, `map.route`, with two stops or more), `map` (the place in a map app, when it has `at`) |
-| `adjust` | every block of the day, or of tomorrow when `open` passed `next`; the picked one with the buttons that move it | `back`, `pick`, `earlier`, `later`, `shorter`, `longer`, `up`, `down`, `drop`, `restore` (all `timeline.*`), `add` (opens `add`) |
+| `adjust` | the day on one page (`Day`), or tomorrow when `open` passed `next`, with the travel between places; the picked one with the buttons that move it | `back`, `pick`, `reorder` (a drag), `earlier`, `later`, `shorter`, `longer`, `up`, `down`, `drop`, `restore` (all `timeline.*`), `add` (opens `add`) |
 | `add` | a block of your own: an hour and what it is | `back`, `set_time`, `set_what`, `keep` (`timeline.add`, then back) |
 | `choose` | the decision's question, a line saying the day follows the recommended plan until chosen (only before one is), the option in force with why and its own keys | `agenda` (Today), `others` (shows every option), `pick`, `confirm` (stores `choice.<date>`, runs `calendar.sync` for that date and goes home) |
 | `documents` | a group per person with their documents, then the ones that are nobody's. None for a child | `back`, `open` (opens `document` with the row's document) |
@@ -80,12 +84,13 @@ the weather, and what papers we have. Each is offered only while its data is the
 
 **Derives:** `kid` (the holder is not an adult), `safe` (here is safe, or a train/driving/flight block, or the block's place is safe or a meal or lodging and the device is not `away` from it), `extended` (`now.stamp < store.holder_until`), `mine`, `guiding` (the block names the holder its guide), `night`, and `hero`, the answer at the top
 of a moment: a drive or a walk its `duration`, a flight its `boarding`, a parking the place's
-parking price or `ui.free`, a lodging its `check_in`, free time its `until`, anything else the
+parking price (`ui.free` when it is 0), a lodging its `check_in`, free time its `until`, anything else the
 block's time. A block missing the key its type reads shows its time too, and the validator warns.
 
 **What the pack gives it.** A block's `type`, `place`, `guide`, `for`, `until`, `ticket` and
-`road`; a place's `during`, `parking`, `points` (each with an optional `at`), `in_order`, `guide` and `plan`
-(points and ticket may also sit inside `during`); people with `adult`. Every other key of a block, a
+`road`; a place's `during`, `parking`, `points` (each with an optional `at`), `in_order`, `guide`, `plan`
+and `legs` (points and ticket may also sit inside `during`); a day's `travel`; people with `adult`;
+`jet_lag`, `tasks`, and an alert's `status`, `repeat` and `alarm`. Every other key of a block, a
 place's `during` or `parking`, a day or tomorrow shows through `Auto`, by the unknown key rule, in
 the pack's order. `conventions` decide which prefixes hide and which warn. The `ui` labels are in
 English; a pack in another language overrides them by key.

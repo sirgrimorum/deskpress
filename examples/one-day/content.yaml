@@ -26,7 +26,9 @@ days:
          {type: visit, place: azulejo, guide: tomas, until: "13:00", ticket: sheets.bookings.azulejo,
           source_note: "Opening hours checked on the museum site"}]
       - ["13:15", "Lunch in the museum cloister. It is the cheap one, not the famous one.",
-         {type: meal}]
+         {type: meal, place: azulejo}]
+      - ["15:30", "Pasteis de nata at the market across from the ferry, then the river.",
+         {type: meal, place: cais_do_sodre}]
       - ["18:40", "Ferry from Cais do Sodre. Last one that connects is 19:10, do not wait for it.",
          {type: transfer, place: cais_do_sodre, locked: true, until: "19:15", leave: 25}]
   # The next day is still open: two plans, asked the evening before.
@@ -54,6 +56,8 @@ places:
     at: {lat: 38.7248, lon: -9.1139, radius_m: 120}
     safe: true
     verified: 2026-03-02
+    # Minutes to another place, where the pack knows better than a straight line does.
+    legs: {cais_do_sodre: 25}
     during:
       type: visit
       hours: "10:00 to 18:00, closed on Mondays"
@@ -108,6 +112,28 @@ alerts:
     title: "The 19:10 ferry does not connect"
     detail: "It arrives after the last bus on the other side. The 18:40 is the one that gets you home."
     action: "Leave the museum cafe by 18:10"
+  # Rings with the app closed, each day of the trip, until somebody marks it done.
+  - id: sunscreen
+    severity: low
+    at: 2026-04-11
+    time: "12:00"
+    title: Sunscreen again
+    alarm: true
+    repeat: {every: 1, until: 2026-04-12}
+
+# The body clock, a day at a time: what to do and when, on the day's own clock.
+jet_lag:
+  - date: 2026-04-11
+    steps:
+      - {time: "08:00", until: "11:00", text: "Morning light on the walk, sunglasses off", do: light}
+      - {time: "15:00", text: "No coffee from here on", do: no_coffee}
+      - {time: "21:30", text: "Lights out", do: bed, alarm: true}
+
+# What has to be done around the trip. `status: done` leaves one out; a tick on the phone is kept.
+tasks:
+  - {id: print_tickets, title: Print the museum tickets, deadline: 2026-04-09, status: done}
+  - {id: ferry_times, title: Check the ferry times again, deadline: 2026-04-11, who: Rita}
+  - {id: postcards, title: Postcards for the grandparents}
 
 climate:
   units: metric

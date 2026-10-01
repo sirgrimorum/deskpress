@@ -113,17 +113,7 @@ impl Checker<'_> {
                 format!("{} is not a place in this pack", quote(&place)),
             );
         }
-        let people = match read("for") {
-            Some(Value::List(ids)) => ids.as_slice(),
-            Some(one) => std::slice::from_ref(one),
-            None => &[],
-        };
-        for id in people.iter().map(|id| text(Some(id))) {
-            if !self.people.is_empty() && !self.people.contains(&id) {
-                let message = format!("{} is not one of the people in this pack", quote(&id));
-                self.r.error(format!("{bat}.for"), message);
-            }
-        }
+        self.whom(&format!("{bat}.for"), read("for"));
         self.person(&format!("{bat}.guide"), &text(read("guide")));
         let until = text(read("until"));
         if !until.is_empty() && !is_time(&until) {
@@ -183,6 +173,21 @@ impl Checker<'_> {
     pub(super) fn person(&mut self, at: &str, id: &str) {
         if !id.is_empty() && !self.people.is_empty() && !self.people.contains(id) {
             self.r.error(at, format!("{} is not one of the people in this pack", quote(id)));
+        }
+    }
+
+    /// A `for`: one id or a list of them, each one of the people when the pack lists any.
+    pub(super) fn whom(&mut self, at: &str, ids: Option<&Value>) {
+        let ids = match ids {
+            Some(Value::List(ids)) => ids.as_slice(),
+            Some(one) => std::slice::from_ref(one),
+            None => &[],
+        };
+        for id in ids.iter().map(|id| text(Some(id))) {
+            if !self.people.is_empty() && !self.people.contains(&id) {
+                let message = format!("{} is not one of the people in this pack", quote(&id));
+                self.r.error(at, message);
+            }
         }
     }
 

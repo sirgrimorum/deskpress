@@ -128,6 +128,18 @@ pub struct Event {
     pub fingerprint: String,
 }
 
+/// Something to ring with the app closed (decision 0033), at a local time of its zone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Alarm {
+    /// Names what it rings for, so the host can tell one it set before.
+    pub key: String,
+    pub at: String,
+    /// The zone `at` is local to; empty for the pack's.
+    pub zone: String,
+    pub title: String,
+    pub text: String,
+}
+
 /// What a calendar sync would do to the events the host wrote before.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Plan {
@@ -173,7 +185,7 @@ impl Engine {
     }
 
     /// The zones the plan names besides the pack's own: every `zone` and `until_zone` under the
-    /// days, once each, sorted. The host passes the local time in each as `World::zones`.
+    /// days and the jet lag, once each, sorted. The host passes the local time in each as `World::zones`.
     pub fn zones(&self) -> Vec<String> {
         fn walk(v: &Value, into: &mut BTreeSet<String>) {
             match v {
@@ -185,11 +197,11 @@ impl Engine {
                 _ => {}
             }
         }
-        let content = self.content();
-        let days =
-            self.from("timeline").and_then(|d| Keymap::of(&self.pack.manifest).root(content, d));
+        let (content, keymap) = (self.content(), Keymap::of(&self.pack.manifest));
+        let roots =
+            ["timeline", "jet_lag"].map(|m| self.from(m).and_then(|r| keymap.root(content, r)));
         let mut zones = BTreeSet::new();
-        days.into_iter().for_each(|d| walk(d, &mut zones));
+        roots.into_iter().flatten().for_each(|d| walk(d, &mut zones));
         zones.into_iter().filter(|z| !z.is_empty()).collect()
     }
 
@@ -313,6 +325,16 @@ impl Engine {
         Ok(plan)
     }
 
+    /// The alarms still to come for `world`'s holder, to ring with the app closed (decision 0033).
+    pub fn alarms(&self, world: &World) -> Result<Vec<Alarm>, String> {
+        check(&world.now)?;
+        let manifest = &self.pack.manifest;
+        let run = Run::new(Keymap::of(manifest), self.content(), world, Map::default());
+        let set_off = text(manifest.get("ui").and_then(|u| u.get("set_off_now")));
+        let roots = ["timeline", "jet_lag", "alerts"].map(|m| self.from(m));
+        Ok(run.alarms(roots, &set_off))
+    }
+
     /// Decides, and starts the stack over when the rules picked another screen.
     fn follow(&self, world: &World, nav: &mut Nav) -> Decision {
         let d = self.run(world);
@@ -373,6 +395,7 @@ impl Engine {
         ]);
         let content = self.content();
         let mut run = Run::new(Keymap::of(manifest), content, world, scope);
+        run.places = self.from("places").and_then(|p| Keymap::of(manifest).root(content, p));
         for m in &self.def.modules {
             run.module(m);
         }
@@ -594,6 +617,35 @@ zone: Europe/Paris
             theme: None,
         };
         assert_eq!(Engine::load(pack).unwrap().0.zones(), ["Asia/Seoul", "Asia/Tokyo"]);
+        let content = r#"days: [{date: 2026-04-11, title: A, zone: Asia/Tokyo}]
+jet_lag: [{date: 2026-04-11, zone: America/Bogota, steps: [{time: "07:00", text: Up, zone: Asia/Seoul}]}]
+"#;
+        let definition =
+            "modules: {timeline: , jet_lag: }\nscreens: {a: {}}\nrules: [{screen: a}]\n";
+        let pack = Pack {
+            manifest: parse(&format!("{HEAD}{definition}")).unwrap(),
+            content: parse(content).unwrap(),
+            theme: None,
+        };
+        let zones = Engine::load(pack).unwrap().0.zones();
+        assert_eq!(zones, ["America/Bogota", "Asia/Seoul", "Asia/Tokyo"]);
+    }
+
+    #[test]
+    fn alarms_are_the_ones_still_to_come_with_the_packs_set_off_words() {
+        let content =
+            "days: [{date: 2026-04-11, title: A, blocks: [[\"10:30\", Ferry, {leave: 20}]]}]\n";
+        let definition = "ui: {set_off_now: Go}\nmodules: {timeline: }\nscreens: {a: {}}\nrules: [{screen: a}]\n";
+        let pack = Pack {
+            manifest: parse(&format!("{HEAD}{definition}")).unwrap(),
+            content: parse(content).unwrap(),
+            theme: None,
+        };
+        let e = Engine::load(pack).unwrap().0;
+        let rings = e.alarms(&at("2026-04-11T08:00")).unwrap();
+        assert_eq!((rings[0].at.as_str(), rings[0].text.as_str()), ("2026-04-11T10:10", "Go"));
+        assert!(e.alarms(&at("2026-04-11T10:10")).unwrap().is_empty());
+        assert!(e.alarms(&at("x")).is_err());
     }
 
     #[test]

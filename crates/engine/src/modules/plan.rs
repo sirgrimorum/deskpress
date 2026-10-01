@@ -98,6 +98,11 @@ pub(crate) fn edit(store: &Map, scope: &Map, action: &str, args: &Map) -> Option
         );
         facts.set(&format!("plan.{event}"), Value::Map(m));
     };
+    // A move some block cannot take whole is refused, never half applied.
+    let fits = |moves: &Vec<(String, i64)>| {
+        let shift = |e: &str| whole(store.get(&format!("plan.{e}")).and_then(|w| w.get("shift")));
+        moves.iter().all(|(e, by)| (shift(e) + by).abs() <= LIMIT)
+    };
     // An action of ours with arguments that make no sense writes nothing. It never falls through
     // to the host: `timeline` is the engine's, so a typo in a pack must not reach a device tool.
     match action {
@@ -106,11 +111,20 @@ pub(crate) fn edit(store: &Map, scope: &Map, action: &str, args: &Map) -> Option
                 bump(&event, if action == "timeline.move" { "shift" } else { "grow" }, by);
             }
         }
-        "timeline.swap" => {
-            if let Some((a, b, other)) = neighbours(scope, &event, &text(args.get("side"))) {
-                let at = |t: &str| minutes(&format!("2000-01-01T{t}"));
-                bump(&event, "shift", at(&b) - at(&a));
-                bump(&other, "shift", at(&a) - at(&b));
+        "timeline.swap" | "timeline.reorder" => {
+            let at = |t: &str| minutes(&format!("2000-01-01T{t}"));
+            let moves = if action == "timeline.swap" {
+                let side = neighbours(scope, &event, &text(args.get("side")));
+                side.map(|(a, b, other)| {
+                    vec![(event.clone(), at(&b) - at(&a)), (other, at(&a) - at(&b))]
+                })
+            } else {
+                let to =
+                    args.get("to").filter(|t| matches!(t, Value::Number(n) if n.fract() == 0.0));
+                to.and_then(|to| reorder(scope, &event, whole(Some(to))))
+            };
+            for (e, by) in moves.filter(fits).unwrap_or_default() {
+                bump(&e, "shift", by);
             }
         }
         "timeline.drop" => {
@@ -142,21 +156,23 @@ pub(crate) fn edit(store: &Map, scope: &Map, action: &str, args: &Map) -> Option
     Some(facts)
 }
 
+/// The timed blocks of the day the timeline exposed that holds `event`, legs left out, and where
+/// `event` is among them.
+fn timed<'s>(scope: &'s Map, event: &str) -> Option<(Vec<&'s Value>, usize)> {
+    ["day", "tomorrow"].into_iter().find_map(|d| {
+        let blocks: Vec<&Value> = (scope.get(d)?.get("blocks")?.as_list()?.iter())
+            .filter(|b| !text(b.get("time")).is_empty() && !truthy(b.get("leg")))
+            .collect();
+        let at = blocks.iter().position(|b| text(b.get("event")) == event)?;
+        Some((blocks, at))
+    })
+}
+
 /// The times of the block `event` and of the timed neighbour on `side` (`up` or `down`) of it, with
 /// that neighbour's id, in the day the timeline exposed. `None` when either end is missing or
 /// locked: a locked hour is fixed, so nothing swaps with it.
 fn neighbours(scope: &Map, event: &str, side: &str) -> Option<(String, String, String)> {
-    let (day, at) = ["day", "tomorrow"].into_iter().find_map(|d| {
-        let blocks: Vec<&Value> = scope
-            .get(d)?
-            .get("blocks")?
-            .as_list()?
-            .iter()
-            .filter(|b| !text(b.get("time")).is_empty())
-            .collect();
-        let at = blocks.iter().position(|b| text(b.get("event")) == event)?;
-        Some((blocks, at))
-    })?;
+    let (day, at) = timed(scope, event)?;
     let other = match side {
         "up" => at.checked_sub(1)?,
         "down" => at + 1,
@@ -166,6 +182,36 @@ fn neighbours(scope: &Map, event: &str, side: &str) -> Option<(String, String, S
     let both = [day[at], other];
     (!both.iter().any(|b| truthy(b.get("locked"))))
         .then(|| (text(day[at].get("time")), text(other.get("time")), text(other.get("event"))))
+}
+
+/// The shifts that put block `event` at place `to` of its day, the blocks between taking its
+/// place in turn; each keeps its slot, from its start to the next one's. None across a locked hour.
+fn reorder(scope: &Map, event: &str, to: i64) -> Option<Vec<(String, i64)>> {
+    let (day, i) = timed(scope, event)?;
+    let j = usize::try_from(to).ok().filter(|j| *j < day.len() && *j != i)?;
+    if day[i.min(j)..=i.max(j)].iter().any(|b| truthy(b.get("locked"))) {
+        return None;
+    }
+    let at = |t: &str| minutes(&format!("2000-01-01T{t}"));
+    let start: Vec<i64> = day.iter().map(|b| at(&text(b.get("time")))).collect();
+    let slot = |k: usize| match start.get(k + 1) {
+        Some(next) => next - start[k],
+        None => Some(text(day[k].get("until")))
+            .filter(|u| !u.is_empty())
+            .map(|u| at(&u) - start[k])
+            .filter(|m| *m > 0)
+            .unwrap_or(60),
+    };
+    let id = |k: usize| text(day[k].get("event"));
+    let (s, mut shifts) = (slot(i), Vec::with_capacity(i.abs_diff(j) + 1));
+    if i < j {
+        shifts.extend((i + 1..=j).map(|k| (id(k), -s)));
+        shifts.push((id(i), start[j] + slot(j) - s - start[i]));
+    } else {
+        shifts.extend((j..i).map(|k| (id(k), s)));
+        shifts.push((id(i), start[j] - start[i]));
+    }
+    Some(shifts)
 }
 
 #[cfg(test)]
@@ -317,6 +363,84 @@ plan.d.blocks.4: {off: true}
             both,
             r#"{"plan.d.blocks.2": {"shift": -120}, "plan.d.blocks.1": {"shift": 120}}"#
         );
+    }
+
+    /// A day to reorder, with a leg the page put in and a locked hour at its end.
+    const ROW: &str = r#"day:
+  blocks:
+    - {time: "09:00", text: Museum, event: d.blocks.0}
+    - {time: "10:45", text: → Market, leg: true}
+    - {time: "11:00", text: Market, event: d.blocks.1}
+    - {time: "12:00", text: Lunch, event: d.blocks.2}
+    - {time: "14:00", text: Train, event: d.blocks.3, locked: true}
+tomorrow:
+  blocks:
+    - {time: "08:00", text: Bus, event: e.blocks.0}
+    - {time: "09:00", text: Beach, event: e.blocks.1, until: "12:00"}
+"#;
+
+    #[test]
+    fn a_swap_passes_over_the_leg_between_two_blocks() {
+        let both = edited(&Map::default(), ROW, "timeline.swap", "block: d.blocks.1\nside: up");
+        assert_eq!(
+            both,
+            r#"{"plan.d.blocks.1": {"shift": -120}, "plan.d.blocks.0": {"shift": 120}}"#
+        );
+    }
+
+    #[test]
+    fn a_block_moved_down_the_day_takes_the_slot_after_the_ones_it_passes() {
+        let down = edited(&Map::default(), ROW, "timeline.reorder", "block: d.blocks.0\nto: 2");
+        assert_eq!(
+            down,
+            r#"{"plan.d.blocks.1": {"shift": -120}, "plan.d.blocks.2": {"shift": -120}, "plan.d.blocks.0": {"shift": 180}}"#
+        );
+        let up = edited(&Map::default(), ROW, "timeline.reorder", "block: d.blocks.2\nto: 0");
+        assert_eq!(
+            up,
+            r#"{"plan.d.blocks.0": {"shift": 120}, "plan.d.blocks.1": {"shift": 120}, "plan.d.blocks.2": {"shift": -180}}"#
+        );
+    }
+
+    #[test]
+    fn the_last_block_of_a_day_lasts_to_its_until_or_else_an_hour() {
+        let args = "block: e.blocks.0\nto: 1";
+        let beach = edited(&Map::default(), ROW, "timeline.reorder", args);
+        assert_eq!(
+            beach,
+            r#"{"plan.e.blocks.1": {"shift": -60}, "plan.e.blocks.0": {"shift": 180}}"#
+        );
+        let odd = "day:\n  blocks:\n    - {time: \"08:00\", event: a}\n    - {time: \"09:00\", event: b, until: \"08:30\"}";
+        let hour = edited(&Map::default(), odd, "timeline.reorder", "block: a\nto: 1");
+        assert_eq!(hour, r#"{"plan.b": {"shift": -60}, "plan.a": {"shift": 60}}"#);
+    }
+
+    #[test]
+    fn nothing_is_reordered_across_a_locked_hour_or_to_nowhere() {
+        for args in [
+            "block: d.blocks.9\nto: 1",
+            "block: d.blocks.0\nto: 0",
+            "block: d.blocks.0\nto: soon",
+            "block: d.blocks.0\nto: 1.5",
+            "block: d.blocks.0",
+            "block: d.blocks.0\nto: -1",
+            "block: d.blocks.0\nto: 4",
+            "block: d.blocks.0\nto: 3",
+            "block: d.blocks.3\nto: 0",
+        ] {
+            assert_eq!(edited(&Map::default(), ROW, "timeline.reorder", args), "{}", "{args}");
+        }
+    }
+
+    #[test]
+    fn a_move_one_block_cannot_take_whole_is_refused_for_all_of_them() {
+        let near = map("plan.d.blocks.0: {shift: 600}\nplan.d.blocks.1: {shift: -700}");
+        let args = "block: d.blocks.0\nto: 2";
+        assert_eq!(edited(&near, ROW, "timeline.reorder", args), "{}");
+        let swap = "block: d.blocks.1\nside: up";
+        assert_eq!(edited(&near, ROW, "timeline.swap", swap), "{}");
+        let fine = map("plan.d.blocks.0: {shift: 540}");
+        assert!(edited(&fine, ROW, "timeline.reorder", args).contains(r#"{"shift": 720}"#));
     }
 
     #[test]

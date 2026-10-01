@@ -40,6 +40,7 @@ pack:
   theme: theme.yaml           # optional. Without it the shell uses its default theme
   files: files/               # optional. Base for every file reference
   extends: travel             # optional. Starts from a bundled template (docs/templates.md)
+  updated: 2026-09-30         # optional. A date, or date and time: a newer one travels with the trip sent
 
 conventions:                  # optional, all of it
   alert_prefixes: [warn, alert]   # keys starting with these render as an Alert, not a Card
@@ -60,6 +61,7 @@ ui:                           # optional. overrides the shell's own labels
   back: Volver
   next: Lo que sigue
   open_map: Abrir en el mapa
+  types: {flight: vuelo, meal: comida}  # the block types in the pack's words; the rest stay as they are
 ```
 
 **`content` takes three forms.** One file name. A list of file names, merged in order, which is
@@ -176,11 +178,14 @@ with canonical keys, whatever the pack calls them.
 
 | module | names | what they hold |
 | --- | --- | --- |
-| `timeline` | `day`, `block`, `next`, `days`, `tomorrow` | today's day with its blocks in force, its `choice`, `started` (a timed block has begun) and `time` (the time on the day's own clock); the last block whose time has come, until its `until`; the first one still to come; every day; the day after today, with `first`, its first timed block. A block is `{time, text, state, event, ...its map}`, where `event` is its calendar id, `{date}.{list}.{n}`: the list is `blocks`, `fixed`, `option-{id}` or `added`, and `n` its place in that list. The day is then rebuilt from the device's own edits, `plan.<event>` and `added.<date>` |
+| `timeline` | `day`, `block`, `next`, `days`, `tomorrow` | today's day with its blocks in force, its `choice`, `started` (a timed block has begun) and `time` (the time on the day's own clock); the last block whose time has come, until its `until`; the first one still to come; every day; the day after today, with `first`, its first timed block. A block is `{time, text, state, event, ...its map}`, where `event` is its calendar id, `{date}.{list}.{n}`: the list is `blocks`, `fixed`, `option-{id}` or `added`, and `n` its place in that list. The day is then rebuilt from the device's own edits, `plan.<event>` and `added.<date>`. Its `blocks` also hold a leg before each block at a different place than the one before: `{time, until, text, duration, leg: true, late, from, to}`, from the place's `legs` or estimated, and `late` when it starts before the block it leaves is over. Every timed entry has `lasts`, its minutes ([decision 0032](decisions/0032-the-day-on-one-page.md)) |
 | `choices` | `decision` | the first decision due and unanswered, else the first one due, else the next one coming: `{date, title, options, recommended, choice, due, answered}` plus the decision's own keys. Due from `when` at `at` until its day is over |
 | `people` | `holder`, `people` | the person holding the phone (the host's, else the one stored as `holder`; a valid stamp stored as `holder_until` sets the watch until it runs out), and everyone |
 | `places` | `place`, `here`, `away`, `chart`, `area` | where the current block happens; the place the device is inside, the block's own when it is one of them, else the smallest; and whether the device knows where it is and is out of the block place's region. Both places carry their `id` ([decision 0020](decisions/0020-location.md)). `chart` is the day on plain paper: `{points, path, route, span_m}`, `route` being every stop in order as `{lat, lon, name}`, null when no place the day names has an `at` ([decision 0026](decisions/0026-maps.md)). `area` is the block's place up close: its points that have an `at`, charted the same way, `path` and `route` empty unless the place is `in_order`, null when none has one ([decision 0031](decisions/0031-maps-to-guide-by.md)) |
-| `alerts` | `alerts` | the ones showing now, most severe first: from `notify_from` (else the start of their day) to the end of their day |
+| `alerts` | `alerts` | the ones showing now, most severe first: from `notify_from` (else the start of their day) to the end of their day; one with a `repeat` each day it falls, and none with `status: done` |
+| `jet_lag` | `jet_lag` | today's entry in its own `zone`, null on a day with none: `{date, steps, now, next}`, each step with its `state` (`note`, `past`, `now`, `next`) and, on a `bed` or `sleep` step the plan runs past, `clash`, the text of that block ([decision 0033](decisions/0033-the-trip-around-the-days.md)) |
+| `tasks` | `tasks` | `{open, items}`: every task not marked done, by deadline and the undated last, each with `fact` (`task.<id>`, what ticks it), `done`, `late` (past its deadline, not ticked) and `about`, its deadline and who; `open` counts the ones not ticked |
+| `log` | `log` | the car and the notes, from the facts alone: `plate`, `model`, `fuel`, `km`, `spot` from `log.*`, `parked` (when `log.parked` was kept), and `notes`, each `note.<now.stamp>.<n>` as `{when, text}`, newest first ([decision 0034](decisions/0034-the-trip-phone-to-phone.md)) |
 | `documents` | `documents` | all of them, each with `person` (the name of its `for`, from the `people` module listed before it) and `call` as `[{label, number}]`. None when a child holds the phone |
 | `climate` | `weather` | the weather for today at `place`, else `here` |
 | `sheets` | `sheets` | every tree under `sheets` as `{id, title, value}`, the title the key with `_` as spaces; with no `sheets` root, every root key no other module reads. A sheet saying `check: true` also gets `ticks`, one `{fact, text, done}` per item, and keeps `check` and `items` out of `value` |
@@ -257,8 +262,9 @@ The `timeline` actions are the exception: the engine answers them itself, as sto
 command reaches the host ([decision 0025](decisions/0025-the-day-in-hand.md)). `timeline.move` and
 `timeline.grow` take `{block, by}`, an `event` id and whole minutes, and shift or stretch it;
 `timeline.swap` takes `{block, side}`, `'up'` or `'down'`, and gives each of the two the other's
-hour; `timeline.drop` and `timeline.restore` take `{block}`; `timeline.add` takes `{date, time,
-text}`. Arguments that make no sense write nothing.
+hour; `timeline.reorder` takes `{block, to}` and moves it to that index among the timed blocks,
+the ones it passes taking its place; `timeline.drop` and `timeline.restore` take `{block}`;
+`timeline.add` takes `{date, time, text}`. Arguments that make no sense write nothing.
 
 The commands the Android host runs: `device.unlock` (asks for the fingerprint or the device
 credential, then runs the action named in `then`), `phone.call` (opens the dialer with `number`),
@@ -296,9 +302,10 @@ set here.
 | `Chip` | a small tag |
 | `Button` | an action |
 | `Segmented` | two or three `items` of equal width; the one equal to `value` is filled, and a tap sends its item |
-| `Check` | a line to tick off: `text`, and `checked` for the box. A tap sends its `value` |
+| `Check` | a line to tick off: `text`, `caption` a muted line under it, and `checked` for the box. A tap sends its `value` |
 | `Field` | a line to type on: `label` above, `hint` when empty; every keystroke sends the typed text as `on_change` |
 | `Map` | pins at their fractions of a drawing: `points` as `{name, x, y, lat, lon, state}` with `x` and `y` from 0 to 1 and `lat` and `lon` optional, `path` joining them in order, `image` a picture the pack carries, `caption`, and `span` metres as a scale line. When the pins carry `lat` and `lon`, a tap opens them on a real map, full screen, in the card's words: `open` for the link and the title, `pick` before a pin is picked, `follow`, and `unplaced` when the phone has no position; English when left out |
+| `Day` | the day on one page: `blocks` as rows as tall as their `lasts`, legs smaller, the one equal to `picked` tinted. A tap sends the block's `event` as `on_tap`; dragging a row by its handle, labelled `move`, sends `on_move` with `{block, to}` |
 | `Missing` | a fact nobody confirmed, drawn as a striped hole |
 | `Auto` | expands a mapping by the unknown key rule, one node per key; a list is a `Card` per item, and any other value one `Card`. `skip: [keys]` leaves keys out |
 | `Group` | a titled box around the components in its own `layout`; left out when nothing inside is drawn |
@@ -371,6 +378,7 @@ days:
     who: [rita, tomas]                # optional, person ids
     zone: Europe/Lisbon               # optional, IANA. The day's clock; the pack's timezone if missing
     sleeps_at: Casa da Graca          # optional, any free key is allowed here too
+    travel: walking                   # optional: walking, driving or transit (or keymap.values.travel), how legs are guessed
     blocks:
       - ["09:20", "Land at LIS T1. Passport queue, 45 to 90 min to clear."]
       - ["15:30", "The market by the river, closed on Mondays."]
@@ -399,7 +407,7 @@ The third element is what turns a line of text into a real moment:
 | `zone` | the clock of this block, like a flight's departure | the day's `zone` |
 | `until_zone` | the clock of `until`, like a flight's arrival; `until` may then read earlier than the time, and ends the next day when that falls before the block | the block's zone |
 | `locked` | an hour that cannot move: a booked train, a timed entry. A resize before it stops here | the hour is treated as soft |
-| `leave` | whole minutes: how long before its time you have to set off. While this block is `next` it gains `leave_at`, the hour to go, and `leaving`, whether that hour has come | no notice |
+| `leave` | whole minutes: how long before its time you have to set off. While this block is `next` it gains `leave_at`, the hour to go, and `leaving`, whether that hour has come; the phone also rings then, app closed | no notice |
 | `road` | what a moving block passes, in order: a list of `{at, name, what}`, `at` a time when it has one | nothing between the two places |
 | `language` | which branch of your phrase sheets applies here | no phrase sheet |
 
@@ -478,6 +486,7 @@ places:
       price: "[to confirm]"
       verified: 2026-03-02
     in_order: false                   # optional: true joins the points on the map in their order
+    legs: {cais_do_sodre: 25}         # optional: whole minutes, 1 to 720, to another place, read both ways
     points:                           # may also sit inside during
       - id: panorama
         name: The great panorama
@@ -558,7 +567,13 @@ alerts:
     detail: "It arrives after the last bus on the other side. Budget an hour."
     action: "Leave the museum cafe by 18:10"
     see: bookings.azulejo            # optional path reference
+    status: open                     # optional. open | partial | done; done hides it
+    repeat: {every: 1, until: 2026-04-13}   # optional. Again every so many days, to until
+    alarm: true                      # optional. Rings at notify_from, else at, app closed
 ```
+
+A repeating alert falls on its first day and every `every` days after, to `until`; `notify_from`
+moves with it. An alarm needs an hour: a `notify_from` or an `at` with one, else `time`.
 
 | severity | where it shows |
 | --- | --- |
@@ -566,6 +581,41 @@ alerts:
 | `high` | below the moment's cards |
 | `medium` | a row in the day's agenda, not in the moment |
 | `low` | only in the alerts sheet |
+
+## jet_lag
+
+The body clock across the zones: a day per date, each with steps in the order they come.
+
+```yaml
+jet_lag:
+  - date: 2026-10-02
+    zone: Europe/Madrid              # optional. The day's clock, like a day's
+    steps:
+      - {time: "08:00", until: "11:00", text: Morning light, do: light}
+      - {time: "15:00", text: No coffee from here on, do: no_coffee}
+      - {time: "21:30", text: Lights out, do: bed, alarm: true, for: [rita]}
+      - {time: "07:00", text: Wake on Bogota time, do: wake, zone: America/Bogota}
+```
+
+`do` is `wake`, `bed`, `sleep`, `light`, `dark`, `coffee` or `no_coffee`, or the pack's own words
+through `keymap.values.do`. `for` works as on a block, and `alarm` rings a timed step with the
+app closed. A step with no `time` is a note for the day. A step's own `zone` is its clock, else the
+day's.
+
+## tasks
+
+What has to be done around the trip, ticked on the phone.
+
+```yaml
+tasks:
+  - {id: tickets, title: Print the tickets, deadline: 2026-10-01, who: rita, status: partial}
+  - {id: postcards, title: Postcards}
+```
+
+`deadline` is a date and `who` free text. `status` is `open`, `partial` or `done`, or the pack's
+words through `keymap.values.status`; a done one is not shown. A tick is a fact on the phone, kept
+apart from the pack. In the keymap, a task is `task`, a jet-lag day `jet_lag`, its step `step`,
+and an alert's repeat `repeat`.
 
 ## documents
 

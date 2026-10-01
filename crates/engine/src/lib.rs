@@ -8,6 +8,7 @@ pub mod expr;
 pub mod facts;
 mod modules;
 pub mod pack;
+pub mod share;
 mod template;
 pub mod tree;
 pub mod validate;

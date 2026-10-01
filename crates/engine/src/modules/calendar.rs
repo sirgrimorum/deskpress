@@ -4,10 +4,10 @@
 use super::{Run, list};
 use crate::clock::{later, start};
 use crate::engine::Event;
-use crate::value::{Map, text};
+use crate::value::{Map, Value, text};
 
 /// The first sentence of a block's text, without its full stop.
-fn title(text: &str) -> String {
+pub(super) fn title(text: &str) -> String {
     text.split_once(". ").map_or(text, |(first, _)| first).trim_end_matches('.').to_owned()
 }
 
@@ -21,6 +21,18 @@ fn fingerprint(fields: &[&str]) -> String {
 }
 
 impl Run<'_> {
+    /// The timed blocks of a day as written outside the app: an option's only once it is chosen.
+    pub(super) fn planned(&self, days: &[Value], day: &Value) -> Vec<Map> {
+        let date = self.date_of(day);
+        let chosen = format!("{date}.option-{}.", self.stored_choice(&date));
+        let (_, timed) = self.day(days, day);
+        let written = |b: &Map| {
+            let event = text(b.get("event"));
+            !event.contains(".option-") || event.starts_with(&chosen)
+        };
+        timed.into_iter().filter(written).collect()
+    }
+
     /// One event per timed block of the holder's, or of everyone's when nobody holds the phone.
     /// A day's option counts only once it is chosen, so until then only the rest is written.
     pub fn events(
@@ -35,15 +47,7 @@ impl Run<'_> {
         let mut events = Vec::new();
         for day in days {
             let date = self.date_of(day);
-            let chosen = format!("{date}.option-{}.", self.stored_choice(&date));
-            let (_, timed) = self.day(days, day);
-            let timed: Vec<Map> = timed
-                .into_iter()
-                .filter(|b| {
-                    let event = text(b.get("event"));
-                    !event.contains(".option-") || event.starts_with(&chosen)
-                })
-                .collect();
+            let timed = self.planned(days, day);
             for (n, b) in timed.iter().enumerate() {
                 let time = text(b.get("time"));
                 let begin = format!("{date}T{time}");
@@ -66,7 +70,7 @@ impl Run<'_> {
                     .collect();
                 let mut notes = vec![words.clone()];
                 let mut reminder = String::new();
-                for alert in alerts {
+                for alert in alerts.iter().filter(|a| !self.done(a)) {
                     let field = |k: &str| text(self.read(alert, "alert", k));
                     let (at, clock) = (field("at"), field("time"));
                     let at = if at.len() == 10 && !clock.is_empty() {
@@ -117,7 +121,6 @@ mod tests {
     use super::*;
     use crate::engine::World;
     use crate::validate::Keymap;
-    use crate::value::Value;
     use crate::yaml::parse;
 
     const CONTENT: &str = r#"days:
@@ -145,6 +148,7 @@ stops:
   - {at: "2026-04-11T11:15", title: Late, notify_from: 2026-04-11T12:00}
   - {at: "2026-04-11T11:15", action: Queue early}
   - {at: 2026-04-11, title: Other}
+  - {at: "2026-04-11T11:15", title: Dealt with, status: done}
 "#;
 
     fn events(holder: &str, store: &[(&str, &str)], manifest: &str) -> Vec<Event> {

@@ -3,7 +3,7 @@
 use std::io::Write;
 use std::path::Path;
 
-use deskpress_engine::engine::{Engine, Nav, Region, View, World};
+use deskpress_engine::engine::{Alarm, Engine, Nav, Region, View, World};
 use deskpress_engine::tree::{Node, Tree};
 use deskpress_engine::value::{Map, Value, show, text};
 use deskpress_engine::{pack, validate, yaml};
@@ -22,6 +22,7 @@ commands:
   screen <pack> --at <time> [world]               print the screen for that moment and its watch, as JSON
   act <pack> --at <time> [world] <action>...      run actions in turn and print where they leave the screen
   preview <pack> --at <time> [world] [action]...  print the screen after any actions, as text a person reads
+  alarms <pack> --at <time> [world]               list the alarms the phone would set, one a line
   reference                                       print the pack format and the templates, to write a pack by
   version                                         print the screen tree version
 
@@ -39,7 +40,7 @@ pub fn run(args: &[String], out: &mut impl Write, err: &mut impl Write) -> u8 {
         [command] if command == "reference" => (0, REFERENCE.to_owned(), String::new()),
         [command, target] if command == "validate" => validate(target),
         [command, target, rest @ ..]
-            if ["screen", "act", "preview"].contains(&command.as_str()) =>
+            if ["screen", "act", "preview", "alarms"].contains(&command.as_str()) =>
         {
             screen(target, rest, command)
         }
@@ -112,8 +113,8 @@ fn validate(target: &str) -> (u8, String, String) {
     (1, out, String::new())
 }
 
-/// `deskpress screen`, `act` and `preview`: exit 0 with the screen, 1 when the pack does not load or
-/// an action is not on the screen, 2 when the arguments are wrong.
+/// `deskpress screen`, `act`, `preview` and `alarms`: exit 0 with the screen (the alarms, for
+/// `alarms`), 1 when the pack does not load or an action is not on the screen, 2 on bad arguments.
 fn screen(target: &str, args: &[String], command: &str) -> (u8, String, String) {
     let act = command == "act";
     let usage = |message: String| (2, String::new(), format!("{message}\n\n{USAGE}\n"));
@@ -122,8 +123,14 @@ fn screen(target: &str, args: &[String], command: &str) -> (u8, String, String) 
         Err(message) => return usage(message),
     };
     if command != "preview" && actions.is_empty() == act {
-        let message = if act { "act needs an action" } else { "screen takes no actions: use act" };
-        return usage(message.to_owned());
+        let message = if act {
+            "act needs an action".to_owned()
+        } else if command == "screen" {
+            "screen takes no actions: use act".to_owned()
+        } else {
+            format!("{command} takes no actions")
+        };
+        return usage(message);
     }
     let pack = match open(target) {
         Ok(pack) => pack,
@@ -136,6 +143,13 @@ fn screen(target: &str, args: &[String], command: &str) -> (u8, String, String) 
             format!("the pack does not load: deskpress validate {target}\n"),
         );
     };
+    if command == "alarms" {
+        return match engine.alarms(&world) {
+            Ok(all) if all.is_empty() => (0, "nothing to ring\n".to_owned(), String::new()),
+            Ok(all) => (0, all.iter().map(alarm).collect(), String::new()),
+            Err(e) => (1, String::new(), format!("{e}\n")),
+        };
+    }
     let mut nav = Nav::default();
     let mut view = match engine.screen(&world, &mut nav) {
         Ok(view) => view,
@@ -174,6 +188,12 @@ fn screen(target: &str, args: &[String], command: &str) -> (u8, String, String) 
         ])
     });
     (0, format!("{}\n", show(Some(&json(view, effects)))), String::new())
+}
+
+/// An alarm as a line: when, on which clock, what it says and the key it is set by.
+fn alarm(a: &Alarm) -> String {
+    let zone = if a.zone.is_empty() { "pack time" } else { &a.zone };
+    format!("{} {zone}  {}  [{}]\n", a.at, joined([a.title.clone(), a.text.clone()]), a.key)
 }
 
 /// The world the flags describe, and the arguments left over.
@@ -289,7 +309,7 @@ fn lines(nodes: &[Node], depth: usize, out: &mut String) {
             "Chip" => format!("({})", say("text")),
             "Check" => {
                 let ticked = prop(n, "checked") == Some(&Value::Bool(true));
-                format!("[{}] {}", if ticked { "x" } else { " " }, say("text"))
+                format!("[{}] {}", if ticked { "x" } else { " " }, says(n, &["text", "caption"]))
             }
             "Missing" => format!("? {}", says(n, &SAYS)),
             "Field" => format!(
@@ -309,6 +329,17 @@ fn lines(nodes: &[Node], depth: usize, out: &mut String) {
                 let names: Vec<String> =
                     list(prop(n, "points")).iter().map(|p| text(p.get("name"))).collect();
                 format!("map: {}", joined([say("caption"), names.join(", ")]))
+            }
+            "Day" => {
+                let picked = prop(n, "picked").map(|p| text(Some(p))).unwrap_or_default();
+                let item = |b: &Value| {
+                    let what = text(b.get("text"));
+                    let mine = !picked.is_empty() && text(b.get("event")) == picked;
+                    let what = if mine { format!("*{what}*") } else { what };
+                    format!("| {}", joined([text(b.get("time")), what, text(b.get("duration"))]))
+                };
+                let items: Vec<String> = list(prop(n, "blocks")).iter().map(item).collect();
+                items.join(&format!("\n{}", "  ".repeat(depth)))
             }
             _ => says(n, &SAYS),
         };
@@ -657,12 +688,13 @@ rules:
     #[test]
     fn screen_act_and_preview_refuse_arguments_that_say_no_world() {
         let dir = machine("args");
-        let cases: [(&str, &[&str], &str); 8] = [
+        let cases: [(&str, &[&str], &str); 9] = [
             ("screen", &[], "--at <time> is needed: the moment to show, YYYY-MM-DDTHH:MM"),
             ("screen", &["--at"], "--at needs a value"),
             ("screen", &["--at", "x", "--store", "k"], "--store takes key=value, not k"),
             ("screen", &["--at", "x", "--when", "y"], "--when is not an option"),
             ("screen", &["--at", "x", "go"], "screen takes no actions: use act"),
+            ("alarms", &["--at", "x", "go"], "alarms takes no actions"),
             ("act", &["--at", "x"], "act needs an action"),
             ("act", &["go"], "--at <time> is needed: the moment to show, YYYY-MM-DDTHH:MM"),
             ("preview", &["go"], "--at <time> is needed: the moment to show, YYYY-MM-DDTHH:MM"),
@@ -724,6 +756,27 @@ rules:
         assert_eq!(refused, (1, String::new(), message));
     }
 
+    #[test]
+    fn alarms_lists_what_the_phone_would_ring_or_says_there_is_nothing() {
+        let content = format!(
+            "{DAY}jet_lag: [{{date: 2026-04-11, zone: Asia/Tokyo, steps: [{{time: '22:00', text: Bed, alarm: true}}]}}]
+alerts: [{{id: tide, title: Tide, severity: low, at: '2026-04-11T12:00', alarm: true, detail: Low}}]
+"
+        );
+        let modules = "modules:\n  timeline:\n  jet_lag:\n  alerts:\nscreens:\n  a:\n    layout: []\nrules:\n  - {screen: a}\n";
+        let pack = manifest(&format!("  name: A\n{modules}"));
+        let dir = folder("alarms", &[("pack.yaml", &pack), ("content.yaml", &content)]);
+        let expected = "2026-04-11T12:00 pack time  Tide · Low  [alert.tide.2026-04-11T12:00]
+2026-04-11T22:00 Asia/Tokyo  Bed  [jet_lag.2026-04-11.0]
+";
+        let (code, out, err) = at(&dir, "alarms", &["--at", "2026-04-11T08:00"]);
+        assert_eq!((code, out.as_str(), err.as_str()), (0, expected, ""));
+        let (_, out, _) = at(&dir, "alarms", &["--at", "2026-04-12T08:00"]);
+        assert_eq!(out, "nothing to ring\n");
+        let message = "\"x\" is not a time: YYYY-MM-DDTHH:MM, in the pack's timezone\n".to_owned();
+        assert_eq!(at(&dir, "alarms", &["--at", "x"]), (1, String::new(), message));
+    }
+
     const SHOWN: &str = r#"modules:
   timeline:
 screens:
@@ -732,6 +785,10 @@ screens:
       options: [{name: Coast}, {name: Hills}, plain]
       picked: {name: Hills}
       pins: [{name: Pier, x: 0.1, y: 0.2}, {name: Fort, x: 0.5, y: 0.5}]
+      hours:
+        - {time: "09:00", text: Walk, event: a, lasts: 45}
+        - {time: "09:45", text: → Pier, duration: 15 min, leg: true}
+        - {time: "10:00", text: Pier, event: b}
     actions:
       back: []
       open: [{set: picked, to: $arg}]
@@ -742,7 +799,7 @@ screens:
       - Row: {time: "'09:00'", text: "'Walk'", state: "'past'"}
       - Alert: {title: "'Bags'", text: "'Lockers'"}
       - Chip: {text: "'Whose phone?'"}
-      - Check: {text: "'Tickets'", checked: true}
+      - Check: {text: "'Tickets'", checked: true, caption: "'Oct 1'"}
       - Check: {text: "'Water'", checked: "'yes'"}
       - Missing: {title: "'Seats'", text: "'not booked yet'"}
       - Field: {label: "'At what time'", value: "''", hint: "'09:00'"}
@@ -750,6 +807,8 @@ screens:
       - Segmented: {items: options, value: picked, on_tap: open}
       - Map: {points: pins, caption: "'The port'"}
       - Map: {points: "null"}
+      - Day: {blocks: hours, picked: "'b'"}
+      - Day: {blocks: "null"}
       - Group:
           title: "'Inside'"
           layout:
@@ -769,7 +828,7 @@ rules:
 09:00 · Walk · past
 ! Bags · Lockers
 (Whose phone?)
-[x] Tickets
+[x] Tickets · Oct 1
 [ ] Water
 ? Seats · not booked yet
 At what time: [09:00]
@@ -777,6 +836,9 @@ Who: [Ana]
 Coast | *Hills* | plain
 map: The port · Pier, Fort
 map: 
+| 09:00 · Walk
+| 09:45 · → Pier · 15 min
+| 10:00 · *Pier*
 Inside
   Hola · Hello
 [Go]
