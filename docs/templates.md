@@ -65,7 +65,7 @@ and `add` to change a day, `tasks`, and the car's `log` with a `note`.
 | `tasks` | the tasks not done, by deadline, each a `Check` with its deadline and who, `late` first in its caption once past | `back`, `tick` (stores the task's fact, or clears it) |
 | `log` | the car's plate, model, fuel, kilometres and floor and bay to type, when it was parked, then the notes, newest first | `back`, `set_plate` and the other `set_*`, `keep` (stores each field that changed as `log.<field>`, then back), `park` (saves where the car is, as on `moment`), `car` (where it was left, in a map app), `note` (opens `note`) |
 | `note` | a field for the note | `back`, `write`, `keep` (stores `note.<now.stamp>.<n>`, then back) |
-| `sheet` | what `open` passed: a title, checkable rows when it passed `ticks`, a value through `Auto` (a reference is followed), rows | `back`, `tick` (stores the row's own fact) |
+| `sheet` | what `open` passed: a title, the documents whose `ticket` is that value, checkable rows when it passed `ticks`, a value through `Auto` (a reference is followed), rows | `back`, `tick` (stores the row's own fact), `open` (opens `document`) |
 | `chart` | the day's places drawn on plain paper, the path between them | `back`, `route` (every stop in order to a map app, `map.route`, with two stops or more), `map` (the place in a map app, when it has `at`) |
 | `adjust` | the day on one page (`Day`), or tomorrow when `open` passed `next`, with the travel between places; the picked one dragged by its edges | `back`, `pick`, `move` and `resize` (a drag), `drop`, `restore` (all `timeline.*`), `add` (opens `add`) |
 | `add` | a block of your own: an hour and what it is | `back`, `set_time`, `set_what`, `keep` (`timeline.add`, then back) |

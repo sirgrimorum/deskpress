@@ -460,8 +460,11 @@ screens:
       back: [back]
       # A row carries the name of its own fact, so ticking is one store and needs no arithmetic.
       tick: [{store: "{$arg}", value: "not at(store, $arg)"}]
+      open: [{open: document, with: {doc: $arg}}]
     layout:
       - Screen: {title: params.title, back: ui.back, on_back: back}
+      # A ticket's papers first: the documents whose `ticket` names the same booking.
+      - Row: {each: documents, if: params.value and item.ticket == params.value, text: item.title, value: item, on_tap: open}
       - Check: {each: params.ticks, text: item.text, checked: item.done, value: item.fact, on_tap: tick}
       - Auto: {value: params.value}
       - Row: {each: params.rows, text: item.name or item.title, caption: item.what or item.action}

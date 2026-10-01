@@ -224,7 +224,7 @@ places:
       points: [{name: Hall, x: 0.5, y: 0.25}]
 documents:
   - {id: card, title: Card, for: ana, file: files/card.pdf, call: {Desk: "+1 555 0100"}, fields: {Number: A1}}
-  - {id: pass, title: Pass, file: files/pass.pdf}
+  - {id: pass, title: Pass, file: files/pass.pdf, ticket: doc_1}
 phrases: {hi: hola}
 packing: {check: true, items: [Hat, Bottle]}
 "#;
@@ -419,6 +419,16 @@ packing: {check: true, items: [Hat, Bottle]}
         );
         let out = e.dispatch(&w, &mut Nav::default(), "returned", Value::Null).unwrap();
         assert_eq!((out.view.tree.screen.as_str(), out.view.tree.kid), ("moment", false));
+    }
+
+    #[test]
+    fn a_ticket_lists_the_papers_its_booking_names_and_opens_them() {
+        let (e, w) = (trip(), world("2026-04-11T11:30", "ana", &[]));
+        let mut nav = Nav::default();
+        let sheet = e.dispatch(&w, &mut nav, "ticket", Value::Null).unwrap().view.tree;
+        let doc = carried(&sheet, "Pass");
+        let one = e.dispatch(&w, &mut nav, "open", doc).unwrap().view.tree;
+        assert_eq!(one.nodes.last().map(|n| text(at(n, "label"))), Some("Open the file".into()));
     }
 
     #[test]
