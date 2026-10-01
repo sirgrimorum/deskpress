@@ -1,6 +1,8 @@
 # 0033: the trip around the days
 
-Status: accepted, 2026-09-30.
+Status: accepted, 2026-09-30. Amended by
+[0036](0036-a-pack-in-its-own-words-and-on-its-own-clocks.md): alerts, tasks and decisions read on
+their own clock, and an alert takes `for` and `until`.
 
 ## Context
 

@@ -3,7 +3,8 @@
 Status: accepted, 2026-09-29. Amended by [0030](0030-trying-a-moment-and-the-day-as-a-route.md):
 Settings also pretends a clock and a place, and lists only the map apps on the phone.
 Amended by [0032](0032-the-day-on-one-page.md): the day on one page, dragged, with the
-travel between places.
+travel between places. Amended by [0035](0035-the-day-like-an-agenda.md): drags in place of the
+step buttons, and facts as hours.
 
 ## Context
 

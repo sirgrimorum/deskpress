@@ -97,9 +97,9 @@ keymap:
 Root collections go under `root`, and every other key under the kind of thing it belongs to. The
 full list is in [pack-format.md](pack-format.md).
 
-The shell's own handful of labels (Today, Back, and a few more) follow `pack.language`, and `ui:` in
-the manifest overrides any of them. If your language is not one the shell ships, `ui:` is how you
-get it: four lines, and the app speaks your language.
+The shell's own labels are English. A pack in another language writes them in `ui:`, and its
+block types in `ui.types`; when it extends a template, `validate` lists in one warning every label
+still in English.
 
 ## Mistakes worth naming
 

@@ -18,7 +18,7 @@
           "description": "Stable slug. The facts and calendar events the phone keeps are filed under it, so changing it orphans them."
         },
         "name": { "type": "string", "minLength": 1, "description": "What the app calls itself once this pack is loaded." },
-        "language": { "type": "string", "pattern": "^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$", "description": "BCP 47. Picks the shell's own labels." },
+        "language": { "type": "string", "pattern": "^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$", "description": "BCP 47, the language the pack is written in. The shell's labels are English; a pack in another language writes them in ui." },
         "timezone": { "type": "string", "pattern": "^[A-Za-z_]+/[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)?$|^UTC$", "description": "IANA name. The moment is computed in this zone." },
         "content": {
           "description": "One content file, several merged in order, or a map from root key to the file that holds it. The map roots each file under the key that names it, which is the only form where two files cannot collide.",
@@ -76,6 +76,7 @@
         "step": { "$ref": "#/$defs/rename" },
         "task": { "$ref": "#/$defs/rename" },
         "document": { "$ref": "#/$defs/rename" },
+        "climate": { "$ref": "#/$defs/rename" },
         "values": {
           "type": "object",
           "description": "The enums are structure, not prose, so a pack that writes them in its own language declares them here.",
@@ -92,9 +93,14 @@
     },
     "ui": {
       "type": "object",
-      "description": "Overrides for the shell's own labels. Anything not listed falls back to pack.language.",
+      "description": "The shell's labels by key. The template's are English; a pack in another language gives its own.",
       "additionalProperties": { "type": "string" },
       "properties": {
+        "types": {
+          "type": "object",
+          "description": "Each block type in the pack's words, as flight: Vuelo.",
+          "additionalProperties": { "type": "string" }
+        },
         "today": { "type": "string" },
         "back": { "type": "string" },
         "next": { "type": "string" },

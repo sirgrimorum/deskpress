@@ -1,6 +1,8 @@
 # 0014: a pack extends a bundled template; travel is the first
 
-Status: accepted, 2026-09-27.
+Status: accepted, 2026-09-27. Amended by
+[0036](0036-a-pack-in-its-own-words-and-on-its-own-clocks.md): `where`, `cost` and `consequence` get
+their own labelled cards.
 
 ## Context
 

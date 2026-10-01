@@ -1,6 +1,7 @@
 # 0032: the day on one page
 
-Status: accepted, 2026-09-30. Amends 0025.
+Status: accepted, 2026-09-30. Amends 0025. Amended by [0035](0035-the-day-like-an-agenda.md):
+`timeline.move` and `.resize` replace `.reorder`, and the page is a time axis.
 
 ## Context
 

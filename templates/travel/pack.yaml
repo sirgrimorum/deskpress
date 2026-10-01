@@ -21,6 +21,7 @@ ui:
   points: Point by point
   ticket: The ticket
   parking: Parking
+  where: Where
   free: Free
   to: to
   alerts: Alerts
@@ -28,6 +29,7 @@ ui:
   for_you: For you
   go: Go
   time_up: Time is up
+  not_safe: Not safe here
   give_back: Give the phone back
   to_confirm: to confirm
   more_time: 15 more minutes
@@ -53,6 +55,8 @@ ui:
   not_today: The plan does not cover today.
   until_chosen: Until somebody chooses, the day follows the recommended plan.
   other_options: See the other options
+  cost: Cost
+  consequence: If not
   keep: Keep this plan
   change_plan: Change the plan
   guide: You could be the guide
@@ -64,14 +68,12 @@ ui:
   set_off_now: Set off now
   set_off_at: Set off at
   rearrange: Move the day about
-  pick_block: Pick an hour to move, or drag it by its handle.
+  pick_block: Drag an hour by its handle, or pick it to drag its edges.
   move_block: Move
   earlier: 15 minutes earlier
   later: 15 minutes later
   shorter: 15 minutes shorter
   longer: 15 minutes longer
-  swap_up: Swap with the hour before
-  swap_down: Swap with the hour after
   remove_block: Take this out
   restore_block: Put it back
   add_block: Add something
@@ -207,7 +209,8 @@ screens:
       - Label: {if: block.road, text: ui.on_the_way}
       - Row: {each: block.road, text: item.name, caption: item.what, time: item.at}
       - Card: {if: "block.type == 'driving'", title: ui.parking, text: place.parking}
-      - Auto: {if: "block.type == 'parking'", value: place.parking, skip: [price]}
+      - Card: {if: "block.type == 'parking'", title: ui.where, text: place.parking.where}
+      - Auto: {if: "block.type == 'parking'", value: place.parking, skip: [price, where]}
       - Auto: {value: place.during, skip: [type, ticket, points]}
       - Auto: {value: block, skip: [time, text, type, place, until, locked, leave, road, guide, for, duration, boarding, check_in, ticket, state, event, zone, until_zone, lasts]}
       - Alert: {each: alerts, if: "item.severity == 'high'", severity: item.severity, title: item.title, text: item.action or item.detail}
@@ -241,7 +244,7 @@ screens:
           title: ui.body_clock
           layout:
             - Row: {each: jet_lag.steps, if: "item.state != 'past'", time: item.time, text: item.text, state: item.state}
-      - Auto: {value: day, skip: [date, title, blocks, fixed, options, choice, started, decision, zone, travel, time]}
+      - Auto: {value: day, skip: [date, title, blocks, fixed, options, choice, started, decision, zone, travel, time, who]}
       - Alert: {each: alerts, if: "item.severity == 'high'", severity: item.severity, title: item.title, text: item.action or item.detail}
       - Button: {label: ui.see_day, on_tap: agenda}
       - Button: {if: tasks.open, label: "{ui.tasks} · {tasks.open}", on_tap: tasks}
@@ -260,7 +263,7 @@ screens:
           title: ui.body_clock
           layout:
             - Row: {each: jet_lag.steps, if: "item.state != 'past'", time: item.time, text: item.text, state: item.state}
-      - Auto: {value: tomorrow, skip: [date, title, blocks, fixed, options, choice, first, decision, zone, travel]}
+      - Auto: {value: tomorrow, skip: [date, title, blocks, fixed, options, choice, first, decision, zone, travel, who]}
       - Button: {if: tomorrow, label: ui.rearrange, on_tap: adjust}
 
   # The whole day at a glance, each block with its state. The way out of every screen.
@@ -368,14 +371,22 @@ screens:
       - Auto: {value: params.doc.fields}
       - Button: {label: ui.open_file, on_tap: file}
 
-  # A day that is not in the pack: every day there is.
+  # A day that is not in the pack: every day there is, and before the trip its alerts and the
+  # body clock, which starts moving first.
   days:
     actions:
       tasks: [{open: tasks}]
     layout:
       - Screen: {title: ui.days}
+      - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
       - Label: {text: ui.not_today}
+      - Group:
+          if: jet_lag.now or jet_lag.next
+          title: ui.body_clock
+          layout:
+            - Row: {each: jet_lag.steps, if: "item.state != 'past'", time: item.time, text: item.text, state: item.state}
       - Row: {each: days, text: item.title, caption: item.date}
+      - Alert: {each: alerts, if: "item.severity == 'high'", severity: item.severity, title: item.title, text: item.action or item.detail}
       - Button: {if: tasks.open, label: "{ui.tasks} · {tasks.open}", on_tap: tasks}
 
   # What has to be done around the trip, by deadline, the late ones marked. A tick is a fact of
@@ -453,43 +464,40 @@ screens:
       - Auto: {value: params.value}
       - Row: {each: params.rows, text: item.name or item.title, caption: item.what or item.action}
 
-  # Moving the day about: drag an hour by its handle to another place in the day, or pick it, then
-  # shift it, stretch it, swap it or take it out. The way between two places shows and follows.
-  # `next` opens it on tomorrow, which is how the night screen comes in. Nothing is written back
-  # to the pack: every edit is a fact of its own, and the day is rebuilt from them.
+  # The day like an agenda: drag an hour by its handle, or a picked one by its edges; the rest makes
+  # room or closes up. `next` opens it on tomorrow, from the night screen.
   adjust:
     state: {picked: null}
     actions:
       back: [back]
       pick: [{set: picked, to: $arg}]
-      earlier: [{do: timeline.move, with: {block: picked, by: -15}}]
-      later: [{do: timeline.move, with: {block: picked, by: 15}}]
-      shorter: [{do: timeline.grow, with: {block: picked, by: -15}}]
-      longer: [{do: timeline.grow, with: {block: picked, by: 15}}]
-      up: [{do: timeline.swap, with: {block: picked, side: "'up'"}}]
-      down: [{do: timeline.swap, with: {block: picked, side: "'down'"}}]
-      reorder: [{do: timeline.reorder, with: {block: $arg.block, to: $arg.to}}]
+      move: [{do: timeline.move, with: {block: $arg.block, by: $arg.by}}]
+      resize: [{do: timeline.resize, with: {block: $arg.block, edge: $arg.edge, by: $arg.by}}]
       drop: [{do: timeline.drop, with: {block: picked}}, {set: picked, to: "null"}]
       restore: [{do: timeline.restore, with: {block: picked}}]
       add: [{open: add, with: {date: "(params.next and tomorrow.date) or day.date"}}]
     layout:
       - Screen: {title: ui.rearrange, back: ui.back, on_back: back}
       - Label: {if: not picked, text: ui.pick_block}
-      - Day: {blocks: "(params.next and tomorrow.blocks) or day.blocks", picked: picked, move: ui.move_block, on_tap: pick, on_move: reorder}
+      - Day:
+          blocks: "(params.next and tomorrow.blocks) or day.blocks"
+          picked: picked
+          move: ui.move_block
+          earlier: ui.earlier
+          later: ui.later
+          shorter: ui.shorter
+          longer: ui.longer
+          on_tap: pick
+          on_move: move
+          on_resize: resize
       - Group:
           if: picked
           layout:
-            - Button: {label: ui.earlier, on_tap: earlier}
-            - Button: {label: ui.later, on_tap: later}
-            - Button: {label: ui.shorter, on_tap: shorter}
-            - Button: {label: ui.longer, on_tap: longer}
-            - Button: {label: ui.swap_up, on_tap: up}
-            - Button: {label: ui.swap_down, on_tap: down}
             - Button: {label: ui.remove_block, on_tap: drop}
             - Button: {label: ui.restore_block, on_tap: restore}
       - Button: {label: ui.add_block, on_tap: add}
 
-  # A block of your own on a day. It joins the day in time order and then moves, swaps and drops
+  # A block of your own on a day. It joins the day in time order and then moves, stretches and drops
   # like any block the pack wrote.
   add:
     state: {time: "", what: ""}
@@ -557,8 +565,8 @@ screens:
       returned: [{store: holder, value: store.returns_to}, {store: holder_until, value: "null"}, home]
       extend: [{store: holder_until, value: "later(now.stamp, 15)"}]
     layout:
-      - Screen: {alarm: true}
-      - BigValue: {text: ui.time_up, caption: ui.give_back}
+      - Screen: {title: holder.name, alarm: true}
+      - BigValue: {text: (store.holder_until and ui.time_up) or ui.not_safe, caption: ui.give_back}
       - Button: {label: ui.give_back, on_tap: give_back}
       - Button: {label: ui.more_time, on_tap: more_time}
 
@@ -578,9 +586,11 @@ screens:
     layout:
       - Screen: {title: decision.title, today: ui.today, on_today: agenda}
       - BigValue: {if: decision.question, text: decision.question}
-      - Label: {if: not decision.answered, text: ui.until_chosen}
-      - Card: {each: decision.options, if: "item.id == (picked.id or decision.choice)", title: item.name, text: item.why}
-      - Auto: {each: decision.options, if: "item.id == (picked.id or decision.choice)", value: item, skip: [id, name, why, blocks, recommended, requires]}
+      - Label: {if: not decision.answered and decision.recommended, text: ui.until_chosen}
+      - Card: {each: decision.options, if: "item.id == (picked.id or decision.choice)", title: item.why and item.name, text: item.why or item.name}
+      - Card: {each: decision.options, if: "item.id == (picked.id or decision.choice)", title: ui.cost, text: item.cost}
+      - Card: {each: decision.options, if: "item.id == (picked.id or decision.choice)", title: ui.consequence, text: item.consequence}
+      - Auto: {each: decision.options, if: "item.id == (picked.id or decision.choice)", value: item, skip: [id, name, why, cost, consequence, blocks, recommended, requires]}
       - Button: {if: not others, label: ui.other_options, on_tap: others}
       - Segmented: {if: others, items: decision.options, value: picked, on_tap: pick}
       - Button: {label: ui.keep, on_tap: confirm}

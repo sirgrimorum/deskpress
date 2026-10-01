@@ -24,6 +24,14 @@
       "type": "array",
       "items": { "$ref": "#/$defs/alert" }
     },
+    "jet_lag": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/jet_lag_day" }
+    },
+    "tasks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/task" }
+    },
     "documents": {
       "type": "array",
       "items": { "$ref": "#/$defs/document" }
@@ -66,6 +74,7 @@
       "description": "Thirteen values. Each one decides which cards the moment view assembles, and nothing else.",
       "enum": ["visit", "train", "driving", "walking", "meal", "event", "flight", "parking", "lodging", "night", "morning", "transfer", "free"]
     },
+    "zone": { "type": "string", "pattern": "^[A-Za-z_]+/[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)?$|^UTC$", "description": "An IANA timezone name." },
     "block": {
       "description": "A list of two or three elements: a time, a text, and an optional map. An empty time is a note about the whole day.",
       "type": "array",
@@ -156,7 +165,8 @@
           "type": "array",
           "items": { "$ref": "#/$defs/date" }
         },
-        "question": { "type": "string", "description": "What the choose screen asks." }
+        "question": { "type": "string", "description": "What the choose screen asks." },
+        "zone": { "$ref": "#/$defs/zone", "description": "Its clock. The zone of the day it is asked if missing." }
       },
       "additionalProperties": true
     },
@@ -223,7 +233,7 @@
             "additionalProperties": true
           }
         },
-        "verified": { "$ref": "#/$defs/date", "description": "When somebody last checked these facts. Never renders as a card." }
+        "verified": { "$ref": "#/$defs/date", "description": "When somebody last checked these facts. Never drawn." }
       },
       "additionalProperties": true
     },
@@ -259,7 +269,65 @@
         "title": { "type": "string", "minLength": 1 },
         "detail": { "type": "string" },
         "action": { "type": "string" },
-        "see": { "type": "string", "description": "A path reference into the pack." }
+        "see": { "type": "string", "description": "A path reference into the pack." },
+        "until": {
+          "description": "When one fall stops showing: through that day, or to that minute. The end of the at day if missing.",
+          "anyOf": [{ "$ref": "#/$defs/stamp" }, { "$ref": "#/$defs/date" }]
+        },
+        "for": {
+          "description": "Who it is for, like a block's: hidden while somebody else holds the phone.",
+          "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "array", "items": { "$ref": "#/$defs/id" } }]
+        },
+        "zone": { "$ref": "#/$defs/zone", "description": "Its clock. The zone of the day on its at if missing, else the pack's." },
+        "status": { "enum": ["open", "partial", "done"], "description": "done hides it. The pack's own words through keymap.values.status." },
+        "repeat": {
+          "type": "object",
+          "required": ["every", "until"],
+          "properties": {
+            "every": { "type": "integer", "minimum": 1, "description": "Days between falls." },
+            "until": { "$ref": "#/$defs/date", "description": "The last fall." }
+          }
+        },
+        "alarm": { "type": "boolean", "description": "Rings at notify_from, else at, with the app closed." }
+      },
+      "additionalProperties": true
+    },
+    "jet_lag_day": {
+      "type": "object",
+      "required": ["date", "steps"],
+      "properties": {
+        "date": { "$ref": "#/$defs/date" },
+        "zone": { "$ref": "#/$defs/zone", "description": "The day's clock, like a day's." },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["text"],
+            "properties": {
+              "time": { "$ref": "#/$defs/time" },
+              "until": { "$ref": "#/$defs/time" },
+              "text": { "type": "string", "minLength": 1 },
+              "do": { "enum": ["wake", "bed", "sleep", "light", "dark", "coffee", "no_coffee"] },
+              "for": { "oneOf": [{ "$ref": "#/$defs/id" }, { "type": "array", "items": { "$ref": "#/$defs/id" } }] },
+              "alarm": { "type": "boolean" },
+              "zone": { "$ref": "#/$defs/zone" }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "task": {
+      "type": "object",
+      "required": ["id", "title"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "title": { "type": "string", "minLength": 1 },
+        "deadline": { "$ref": "#/$defs/date", "description": "Late once it has passed on the task's clock." },
+        "who": { "type": "string" },
+        "status": { "enum": ["open", "partial", "done"] },
+        "zone": { "$ref": "#/$defs/zone", "description": "Its clock. The zone of the day on its deadline if missing, else the pack's." }
       },
       "additionalProperties": true
     },

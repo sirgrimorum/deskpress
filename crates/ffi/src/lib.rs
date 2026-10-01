@@ -475,6 +475,20 @@ impl LoadedPack {
         let commands = out.commands.into_iter().map(Command::from).collect();
         Ok(Outcome { view: out.view.into(), store: values(out.store), commands })
     }
+
+    /// The facts `action` would store, keeping nothing: what a drag on the day shows before the
+    /// drop. Empty when it does not fit.
+    pub fn would(
+        &self,
+        world: World,
+        action: String,
+        arg: Value,
+    ) -> Result<HashMap<String, Value>, CallError> {
+        // A copy, so a drag's previews never hold up a tap's dispatch.
+        let nav = self.nav.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        let facts = self.engine.would(&world.into(), &nav, &action, arg.into());
+        Ok(values(facts.map_err(refused)?))
+    }
 }
 
 impl LoadedPack {
@@ -768,6 +782,8 @@ rules:
         assert_eq!(e.to_string(), message);
         let e = pack.dispatch(world("2026-04-11T10:00"), "stop".into(), Value::Null).unwrap_err();
         let detail = "\"stop\" is not an action of the screen \"a\"".to_owned();
+        assert_eq!(e, CallError::Refused { detail: detail.clone() });
+        let e = pack.would(world("2026-04-11T10:00"), "stop".into(), Value::Null).unwrap_err();
         assert_eq!(e, CallError::Refused { detail });
     }
 
@@ -792,8 +808,10 @@ rules:
         let every = Value::Items { items };
         let mut w = world("2026-04-11T10:00");
         w.store = HashMap::from([("b".to_owned(), text("2")), ("a".to_owned(), text("1"))]);
+        let would = pack.would(w.clone(), "go".into(), every.clone()).unwrap();
+        assert_eq!(would, HashMap::from([("seen".to_owned(), every.clone())]));
         let out = pack.dispatch(w.clone(), "go".into(), every.clone()).unwrap();
-        assert_eq!(out.store, HashMap::from([("seen".to_owned(), every.clone())]));
+        assert_eq!(out.store, would);
         let args = HashMap::from([("to".to_owned(), text("here"))]);
         assert_eq!(out.commands, [Command { name: "map.open".into(), args }]);
         let node = &out.view.tree.nodes[0];

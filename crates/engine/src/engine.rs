@@ -7,13 +7,12 @@ mod sync;
 
 pub use sync::Request;
 
-use crate::clock::{minutes, next_day, next_minute, shift};
+use crate::clock::{minutes, next_day, next_minute, real, shift};
 use crate::define::{Definition, Does, Rule, define, fill};
 use crate::expr::Expr;
 use crate::modules::{Run, plan};
 use crate::pack::Pack;
 use crate::tree::{Conventions, Tree, build, outline};
-use crate::validate::patterns::{is_real_date, is_stamp};
 use crate::validate::{Finding, Keymap, validate};
 use crate::value::{Map, Value, quote, text, truthy};
 
@@ -184,24 +183,26 @@ impl Engine {
         &self.pack
     }
 
-    /// The zones the plan names besides the pack's own: every `zone` and `until_zone` under the
-    /// days and the jet lag, once each, sorted. The host passes the local time in each as `World::zones`.
+    /// The zones the plan names besides the pack's own: every `zone` and `until_zone`, by any
+    /// name the keymap gives them, under the days, the jet lag, the alerts and the tasks, once
+    /// each, sorted. The host passes the local time in each as `World::zones`.
     pub fn zones(&self) -> Vec<String> {
-        fn walk(v: &Value, into: &mut BTreeSet<String>) {
+        fn walk(v: &Value, names: &[String], into: &mut BTreeSet<String>) {
             match v {
-                Value::Map(m) => m.iter().for_each(|(k, v)| match (k, v) {
-                    ("zone" | "until_zone", Value::String(z)) => _ = into.insert(z.clone()),
-                    _ => walk(v, into),
+                Value::Map(m) => m.iter().for_each(|(k, v)| match v {
+                    Value::String(z) if names.iter().any(|n| n == k) => _ = into.insert(z.clone()),
+                    _ => walk(v, names, into),
                 }),
-                Value::List(items) => items.iter().for_each(|v| walk(v, into)),
+                Value::List(items) => items.iter().for_each(|v| walk(v, names, into)),
                 _ => {}
             }
         }
         let (content, keymap) = (self.content(), Keymap::of(&self.pack.manifest));
-        let roots =
-            ["timeline", "jet_lag"].map(|m| self.from(m).and_then(|r| keymap.root(content, r)));
+        let names = [keymap.names("zone"), keymap.names("until_zone")].concat();
+        let roots = ["timeline", "jet_lag", "alerts", "tasks"]
+            .map(|m| self.from(m).and_then(|r| keymap.root(content, r)));
         let mut zones = BTreeSet::new();
-        roots.into_iter().flatten().for_each(|d| walk(d, &mut zones));
+        roots.into_iter().flatten().for_each(|d| walk(d, &names, &mut zones));
         zones.into_iter().filter(|z| !z.is_empty()).collect()
     }
 
@@ -227,6 +228,27 @@ impl Engine {
         action: &str,
         arg: Value,
     ) -> Result<Outcome, String> {
+        let (store, patch, commands) = self.apply(world, nav, action, arg)?;
+        let world = World { store, ..world.clone() };
+        let d = self.follow(&world, nav);
+        Ok(Outcome { view: self.view(d, nav), store: patch, commands })
+    }
+
+    /// The facts `action` would store, with nothing kept and `nav` untouched (decision 0035).
+    pub fn would(&self, world: &World, nav: &Nav, action: &str, arg: Value) -> Result<Map, String> {
+        let (_, patch, _) = self.apply(world, &mut nav.clone(), action, arg)?;
+        Ok(patch)
+    }
+
+    /// Runs the effects of `action`: the store after them, the facts they changed and the host
+    /// commands they asked for.
+    fn apply(
+        &self,
+        world: &World,
+        nav: &mut Nav,
+        action: &str,
+        arg: Value,
+    ) -> Result<(Map, Map, Vec<Command>), String> {
         check(&world.now)?;
         let d = self.follow(world, nav);
         let at = nav.stack.len() - 1;
@@ -274,7 +296,13 @@ impl Engine {
                 Does::Command(name, with) => {
                     let args = values(with, &scope);
                     // A `timeline` action is a store patch, not a host command (decision 0025).
-                    let edits = plan::edit(&store, &scope, name, &args);
+                    let edits = match name.as_str() {
+                        "timeline.move" | "timeline.resize" => {
+                            let world = World { store: store.clone(), ..world.clone() };
+                            Some(self.reshape(&world, name, &args))
+                        }
+                        _ => plan::edit(&store, name, &args),
+                    };
                     match edits {
                         Some(edits) => {
                             for (key, v) in edits.iter() {
@@ -288,9 +316,17 @@ impl Engine {
                 }
             }
         }
-        let world = World { store, ..world.clone() };
-        let d = self.follow(&world, nav);
-        Ok(Outcome { view: self.view(d, nav), store: patch, commands })
+        Ok((store, patch, commands))
+    }
+
+    /// The facts a drag on the day stores: every block it changes, with its new hours.
+    fn reshape(&self, world: &World, action: &str, args: &Map) -> Map {
+        let (manifest, content) = (&self.pack.manifest, self.content());
+        let keymap = Keymap::of(manifest);
+        let mut run = Run::new(keymap, content, world, Map::default());
+        run.places = self.from("places").and_then(|p| keymap.root(content, p));
+        let days = self.from("timeline").and_then(|r| keymap.root(content, r));
+        run.reshape(days, action, args).unwrap_or_default()
     }
 
     /// The calendar sync for `scope`: the whole trip when empty, a day by its date, or one event
@@ -396,6 +432,9 @@ impl Engine {
         let content = self.content();
         let mut run = Run::new(Keymap::of(manifest), content, world, scope);
         run.places = self.from("places").and_then(|p| Keymap::of(manifest).root(content, p));
+        let days = self.from("timeline").and_then(|d| Keymap::of(manifest).root(content, d));
+        run.days = days.and_then(Value::as_list).unwrap_or_default();
+        run.hidden = Conventions::of(manifest).hidden;
         for m in &self.def.modules {
             run.module(m);
         }
@@ -447,14 +486,14 @@ impl Engine {
             Some(Self::due(world, m.name, every))
         });
         let instants = run.until.into_iter().chain(clocks).chain([midnight]).chain(due);
-        let until = instants.filter(|u| u.as_str() > now).min().unwrap_or_default();
+        let until = instants.filter(|u| real(u) && u.as_str() > now).min().unwrap_or_default();
         let watch = Watch { until, regions: run.regions };
         Decision { screen, scope: run.scope, watch }
     }
 }
 
 fn check(now: &str) -> Result<(), String> {
-    if is_stamp(now) && is_real_date(&now[..10]) {
+    if real(now) {
         return Ok(());
     }
     Err(format!("{} is not a time: YYYY-MM-DDTHH:MM, in the pack's timezone", quote(now)))
@@ -629,6 +668,19 @@ jet_lag: [{date: 2026-04-11, zone: America/Bogota, steps: [{time: "07:00", text:
         };
         let zones = Engine::load(pack).unwrap().0.zones();
         assert_eq!(zones, ["America/Bogota", "Asia/Seoul", "Asia/Tokyo"]);
+        // By the pack's own name for it, and under the alerts and the tasks too.
+        let content = r#"days: [{date: 2026-04-11, title: A, zona: Asia/Tokyo}]
+alerts: [{id: a, title: A, severity: low, zone: America/Bogota}]
+tasks: [{id: t, title: T, zone: Asia/Tokyo}]
+"#;
+        let definition = "keymap: {day: {zone: zona}}\nmodules: {timeline: , alerts: , tasks: }\nscreens: {a: {}}\nrules: [{screen: a}]\n";
+        let pack = Pack {
+            manifest: parse(&format!("{HEAD}{definition}")).unwrap(),
+            content: parse(content).unwrap(),
+            theme: None,
+        };
+        let zones = Engine::load(pack).unwrap().0.zones();
+        assert_eq!(zones, ["America/Bogota", "Asia/Tokyo"]);
     }
 
     #[test]
@@ -761,7 +813,9 @@ jet_lag: [{date: 2026-04-11, zone: America/Bogota, steps: [{time: "07:00", text:
         assert_eq!(until("2026-04-11T12:30"), "2026-04-11T13:00");
         assert_eq!(until("2026-04-11T13:05"), "2026-04-11T18:00");
         assert_eq!(until("2026-04-11T18:10"), "2026-04-11T18:40");
-        assert_eq!(until("2026-04-11T19:00"), "2026-04-11T20:00");
+        // The last block, with no `until`, ends an hour after it began.
+        assert_eq!(until("2026-04-11T19:00"), "2026-04-11T19:40");
+        assert_eq!(until("2026-04-11T19:40"), "2026-04-11T20:00");
         assert_eq!(until("2026-04-11T21:00"), "2026-04-12T00:00");
         assert_eq!(until("2026-12-31T23:59"), "2027-01-01T00:00");
     }
@@ -788,8 +842,9 @@ screens:
       finish: [{store: done, value: true}]
       stay: [back, home]
       nudge:
-        - {do: timeline.move, with: {block: \"'2026-04-11.blocks.0'\", by: 30}}
-        - {do: timeline.move, with: {block: \"'2026-04-11.blocks.0'\", by: -10}}
+        - {do: timeline.move, with: {block: \"'2026-04-11.blocks.2'\", by: 30}}
+        - {do: timeline.move, with: {block: \"'2026-04-11.blocks.2'\", by: -10}}
+      shove: [{do: timeline.move, with: {block: \"'2026-04-11.blocks.9'\", by: 30}}]
     layout:
       - BigValue: {text: block.text}
       - Label: {text: \"picked {picked}\", on_tap: pick}
@@ -912,8 +967,21 @@ rules:
         let (e, mut nav) = (engine(MACHINE), Nav::default());
         let out = act(&e, &mut nav, "nudge", Value::Null);
         // Both moves land, so the second one read the fact the first one wrote.
-        assert_eq!(show(out.store.get("plan.2026-04-11.blocks.0")), r#"{"shift": 20}"#);
+        assert_eq!(show(out.store.get("plan.2026-04-11.blocks.2")), r#"{"at": "19:00"}"#);
         assert_eq!(out.commands, vec![]);
+        // One that does not fit stores nothing, and still asks the host for nothing.
+        let out = act(&e, &mut nav, "shove", Value::Null);
+        assert_eq!((out.store, out.commands), (Map::default(), vec![]));
+    }
+
+    #[test]
+    fn would_says_what_an_action_stores_and_keeps_nothing() {
+        let (e, nav) = (engine(MACHINE), Nav::default());
+        let world = at("2026-04-11T11:30");
+        let facts = e.would(&world, &nav, "nudge", Value::Null).unwrap();
+        assert_eq!(show(facts.get("plan.2026-04-11.blocks.2")), r#"{"at": "19:00"}"#);
+        assert_eq!(e.would(&world, &nav, "shove", Value::Null), Ok(Map::default()));
+        assert!(e.would(&world, &nav, "never", Value::Null).is_err());
     }
 
     #[test]

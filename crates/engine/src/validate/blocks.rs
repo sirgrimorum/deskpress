@@ -120,6 +120,9 @@ impl Checker<'_> {
             let message = format!("{} is not a time, HH:MM", quote(&until));
             self.r.error(format!("{bat}.until"), message);
         }
+        for key in ["zone", "until_zone"] {
+            self.zone(&format!("{bat}.{key}"), read(key));
+        }
         // An `until` in another zone can read earlier than the block and still be after it.
         if !until.is_empty() && !t.is_empty() && until.as_str() <= t && read("until_zone").is_none()
         {
@@ -194,6 +197,7 @@ impl Checker<'_> {
     pub(super) fn block_type(&mut self, at: &str, value: &Value) {
         let canon = self.keymap.value("type", Some(value));
         if TYPES.contains(&canon.as_str()) {
+            self.types.insert(canon);
             return;
         }
         let stem: String = canon.chars().take(3).collect();

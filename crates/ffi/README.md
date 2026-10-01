@@ -10,13 +10,14 @@ converts: every rule lives in `deskpress-engine`, which never depends on UniFFI.
 | `LoadedPack.id()` | the pack's id, which names where the host keeps its facts |
 | `LoadedPack.theme()` | the theme file as written, `Null` when the pack has none |
 | `LoadedPack.timezone()` | the pack's timezone, so the host can say what time it is there |
-| `LoadedPack.zones()` | the other zones the days and blocks name; the host passes the local time of each in `World.zones` |
+| `LoadedPack.zones()` | the other zones the pack names, on its days, blocks, jet lag, alerts and tasks; the host passes the local time of each in `World.zones` |
 | `LoadedPack.screen(world)` | the view for that world: the tree to draw and its `watch` |
 | `LoadedPack.calendar(world, scope, known)` | the calendar sync for a scope (the trip, a date, an event id) against the events the host wrote: a `Plan` to add, change and remove. An `Event`'s start and reminder are local to its `zone`, its end to `end_zone` |
 | `LoadedPack.hosts()` | every host the pack fetches from, for the person to approve once |
 | `LoadedPack.requests(world, module)` | the fetches a module syncs with now; an empty module asks for the automatic syncs due |
 | `LoadedPack.received(world, request, status, body)` | the facts to store after a fetch |
 | `LoadedPack.dispatch(world, action, arg)` | runs an action of the screen: the new view, a store patch and commands; `Refused` when the screen has no such action |
+| `LoadedPack.would(world, action, arg)` | the store patch `dispatch` would return, keeping nothing: empty when a drag on the day does not fit; `Refused` when the screen has no such action |
 | `LoadedPack.alarms(world)` | every alarm still to come, by time: jet-lag steps and alerts that ask for one, and set-off notices |
 | `LoadedPack.share(facts, stamps, files)` | the trip as text for another phone: the facts but the phone's own, when each was kept, and the pack's files when it says when it was updated |
 | `LoadedPack.take(sent, facts, stamps)` | what this phone takes of a trip sent: each fact kept there later, and the files of a newer pack once they load; `Refused` when it is not a trip of this pack |

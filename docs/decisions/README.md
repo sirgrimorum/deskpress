@@ -18,8 +18,8 @@ history.
 | [0010](0010-rust-core-uniffi.md) | a Rust core loaded natively through UniFFI; Cargo for the repo | accepted |
 | [0011](0011-android-host-and-make.md) | the Android host, the ffi crate, one Makefile, Maestro flows | accepted |
 | [0012](0012-data-sources-and-sync.md) | a module's data comes from the pack, a sync, or both; the climate module | accepted, amended by 0022 |
-| [0013](0013-call-only-on-change.md) | the engine is called only when its answer can change; each tree says when | accepted |
-| [0014](0014-travel-template.md) | a pack extends a bundled template; the travel template is the first | accepted |
+| [0013](0013-call-only-on-change.md) | the engine is called only when its answer can change; each tree says when | accepted, amended by 0035 |
+| [0014](0014-travel-template.md) | a pack extends a bundled template; the travel template is the first | accepted, amended by 0036 |
 | [0015](0015-android-renderer.md) | the renderer draws from theme tokens; a pack comes from a picked folder; facts stay on the device | accepted |
 | [0016](0016-theme-editor.md) | the design system screen edits one theme value at a time, through the engine | accepted, amended by 0023 |
 | [0017](0017-kid-mode-and-handoff.md) | kid mode, handoff, and host device commands | accepted, amended by 0023 |
@@ -28,15 +28,17 @@ history.
 | [0020](0020-location.md) | location: geofences only while open, `away`, the car's spot and the map | accepted, amended by 0031 |
 | [0021](0021-calendar.md) | calendar sync: a picked account calendar, a ledger of the app's own events, a plan to confirm | accepted, amended by 0023 |
 | [0022](0022-data-sync.md) | data sync: the engine builds requests and reads replies, the host fetches; climate first | accepted |
-| [0023](0023-drift-review.md) | the drift review of phase 7: what was fixed, what is kept on purpose, the spec's extras as phases | accepted |
+| [0023](0023-drift-review.md) | the drift review of phase 7: what was fixed, what is kept on purpose, the spec's extras as phases | accepted, amended by 0036 |
 | [0024](0024-public-repo-ci-and-security.md) | the public repo: remote, CI for gate and Android, security audit, community files | accepted |
-| [0025](0025-the-day-in-hand.md) | the day in hand: edits as facts keyed by `event`, checkable sheets, the set-off notice, two shell settings | accepted, amended by 0030 and 0032 |
+| [0025](0025-the-day-in-hand.md) | the day in hand: edits as facts keyed by `event`, checkable sheets, the set-off notice, two shell settings | accepted, amended by 0030, 0032 and 0035 |
 | [0026](0026-maps.md) | maps with nothing fetched: the day's chart, a place's plan, `road`, and the `Map` component | accepted, amended by 0031 |
 | [0027](0027-the-assistant.md) | the assistant in three tiers: the pack's menu of questions, the phone's own model, and shortcuts outside the app | accepted, amended by 0030 |
 | [0028](0028-performance-at-scale.md) | performance at scale: one calendar batch, one query per directory, a key per node; the stored facts measured and left where they are | accepted |
 | [0029](0029-the-authoring-plugin.md) | the authoring plugin: the repo as plugin and marketplace, the binary from git, `reference` and `preview` in the CLI, no MCP server yet | accepted |
 | [0030](0030-trying-a-moment-and-the-day-as-a-route.md) | a pretend clock and place in Settings, answers in a `Dialog`, the day's stops as a route, only the installed map apps | accepted |
 | [0031](0031-maps-to-guide-by.md) | maps to guide by: points with `at`, an order only when the pack gives one, the trip's tiles kept on a press, the Map card full screen on MapLibre | accepted |
-| [0032](0032-the-day-on-one-page.md) | the day on one page: legs between places from the pack or estimated, `lasts`, `timeline.reorder`, the `Day` component | accepted |
-| [0033](0033-the-trip-around-the-days.md) | the trip around the days: `jet_lag` steps, `tasks` to tick, alerts that end, repeat and ring, alarms with the app closed | accepted |
+| [0032](0032-the-day-on-one-page.md) | the day on one page: legs between places from the pack or estimated, `lasts`, the `Day` component | accepted, amended by 0035 |
+| [0033](0033-the-trip-around-the-days.md) | the trip around the days: `jet_lag` steps, `tasks` to tick, alerts that end, repeat and ring, alarms with the app closed | accepted, amended by 0036 |
 | [0034](0034-the-trip-phone-to-phone.md) | the trip phone to phone: one text file through any app, the later fact wins, a newer pack with it, the `log` of the car and notes | accepted |
+| [0035](0035-the-day-like-an-agenda.md) | the day like an agenda: drag a block or its edges in 15-minute steps, free time then push then shrink, a green or red placeholder, `would` | accepted |
+| [0036](0036-a-pack-in-its-own-words-and-on-its-own-clocks.md) | a pack in its own words and on its own clocks: `world.zones` from the host, one warning for what is left in English, a last block that ends | accepted |

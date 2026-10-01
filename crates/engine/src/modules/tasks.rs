@@ -8,9 +8,9 @@ use crate::value::{Map, Value, text, truthy};
 pub(crate) const STATUSES: [&str; 3] = ["open", "partial", "done"];
 
 impl Run<'_> {
-    /// `tasks` is `{open, items}`: every task the pack has not marked done, by deadline and the
-    /// undated last, each with the `fact` that ticks it, `done` once ticked, `late` past its
-    /// deadline and not done, and `about`, its deadline and who. `open` counts the ones not ticked.
+    /// `tasks` is `{open, items}`: every task not marked done, by deadline, the undated last; each
+    /// with the `fact` that ticks it, `done` once ticked, `late` past its deadline on its clock
+    /// and not ticked, and `about`, its deadline and who. `open` counts the ones not ticked.
     pub(super) fn tasks(&mut self, data: Option<&Value>) {
         let task = |t: &Value| {
             let status = self.keymap.value("status", self.read(t, "task", "status"));
@@ -21,7 +21,8 @@ impl Run<'_> {
             let fact = format!("task.{}", id(t));
             let done = truthy(self.world.store.get(&fact));
             let deadline = text(m.get("deadline"));
-            let late = !done && !deadline.is_empty() && deadline.as_str() < self.date;
+            let zone = self.zone_of(m.get("zone"), self.days, &deadline);
+            let late = !done && !deadline.is_empty() && deadline < self.today_in(&zone);
             let status = if status.is_empty() { "open".to_owned() } else { status };
             let who = text(m.get("who"));
             let about = [deadline.as_str(), who.as_str()].into_iter().filter(|s| !s.is_empty());
@@ -44,7 +45,7 @@ impl Run<'_> {
 #[cfg(test)]
 mod tests {
     use crate::engine::World;
-    use crate::modules::tests::run;
+    use crate::modules::tests::{in_bogota, run};
     use crate::value::{Map, Value, show};
 
     const TASKS: &str = r#"tasks:
@@ -89,5 +90,25 @@ mod tests {
         assert_eq!(each(&ticked, "done"), "true false false false false");
         assert_eq!(each(&ticked, "late"), "false false false false false");
         assert_eq!(show(ticked.get("open")), "4");
+    }
+
+    #[test]
+    fn a_deadline_passes_at_midnight_on_its_own_clock() {
+        let content = "days: [{date: 2026-09-30, zone: America/Bogota, blocks: []}]
+tasks:
+  - {id: visa, title: Visa, deadline: 2026-09-30}
+  - {id: own, title: Own, deadline: 2026-10-01, zone: America/Bogota}
+  - {id: plain, title: Plain, deadline: 2026-10-01}
+";
+        let late = |w: &World| {
+            each(&run("tasks", "", content, w, "").scope.get("tasks").cloned().unwrap(), "late")
+        };
+        // Not passed, Bogota reads as the pack's clock.
+        let w = World { now: "2026-10-01T06:59".into(), ..World::default() };
+        assert_eq!(late(&w), "true false false");
+        assert_eq!(late(&in_bogota("2026-10-01T06:59")), "false false false");
+        assert_eq!(late(&in_bogota("2026-10-01T07:00")), "true false false");
+        assert_eq!(late(&in_bogota("2026-10-02T06:59")), "true false true");
+        assert_eq!(late(&in_bogota("2026-10-02T07:00")), "true true true");
     }
 }

@@ -32,13 +32,13 @@ flowchart LR
 
 - **The engine** (`crates/engine`) is pure Rust, standard library only. It never reads a clock, a
   file, a sensor or the network; the host passes everything in. The main calls: `load(files)`,
-  `screen(world)`, `dispatch(world, action, arg)`, plus `calendar`, `hosts`, `requests` and
-  `received` for the calendar and data syncs, `zones` for the clocks the host passes, `alarms` for
-  what rings with the app closed, and the free functions `share` and `take` for the trip sent
-  phone to phone, `edit_theme`, `encode_facts` and `decode_facts`. On the phone it is a native library reached through UniFFI
-  (`crates/ffi`, phase 2), which generates typed Kotlin, later Swift, bindings. On the desk and in
-  the LLM plugin it is the `deskpress` binary (`crates/cli`), which prints trees as JSON, or as text
-  with `preview`.
+  `screen(world)`, `dispatch(world, action, arg)` and `would` (the same, keeping nothing), plus
+  `calendar`, `hosts`, `requests` and `received` for the calendar and data syncs, `zones` for the
+  clocks the host passes, `alarms` for what rings with the app closed, and the free functions
+  `share` and `take` for the trip sent phone to phone, `edit_theme`, `encode_facts` and
+  `decode_facts`. On the phone it is a native library reached through UniFFI (`crates/ffi`, phase
+  2), which generates typed Kotlin, later Swift, bindings. On the desk and in the LLM plugin it is
+  the `deskpress` binary (`crates/cli`), which prints trees as JSON, or as text with `preview`.
 - **The main machine** is the pack's `rules`: ordered `when` guards, first true wins, the last rule
   has no guard. Any input change re-evaluates it. It picks a screen name.
 - **A screen machine** is a screen's `state` + `actions` + `layout`. Actions are lists of effects

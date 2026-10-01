@@ -1,6 +1,8 @@
 # 0023: the drift review of phase 7, what was fixed and what is kept on purpose
 
-Status: accepted, 2026-09-28.
+Status: accepted, 2026-09-28. Amended by
+[0036](0036-a-pack-in-its-own-words-and-on-its-own-clocks.md): a last block with no `until` lasts an
+hour, not the day, and decisions and alerts read on their own zone, else their day's.
 
 ## Context
 

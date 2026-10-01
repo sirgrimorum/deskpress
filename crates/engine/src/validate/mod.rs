@@ -7,20 +7,22 @@ mod keymap;
 pub(crate) mod patterns;
 mod theme;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub use keymap::Keymap;
 use patterns::{
-    is_date, is_id, is_language, is_real_date, is_slug, is_stamp, is_time, is_timezone,
+    is_date, is_id, is_language, is_path, is_real_date, is_slug, is_stamp, is_time, is_timezone,
 };
 pub use theme::TOKENS as COLOR_TOKENS;
 
+use crate::define::MODULES;
 use crate::engine::Region;
 use crate::modules::chart::apart;
 use crate::modules::jet_lag::DOES;
 use crate::modules::region;
 use crate::modules::tasks::STATUSES;
 use crate::modules::travel::TRAVEL;
+use crate::template::base;
 use crate::value::{Map, Value, quote, show, text, truthy};
 
 /// How far around a place its offline map is kept at the least, in metres, as `Maps.kt` keeps it.
@@ -77,6 +79,29 @@ pub(crate) const SEVERITIES: [&str; 4] = ["critical", "high", "medium", "low"];
 /// A key of the manifest head, the test its value has to pass, and what to say when it does not.
 type Shape = (&'static str, fn(&str) -> bool, &'static str);
 
+/// Each list's items by id, the first of each, as `tree::reach` finds them.
+type Ids<'a> = HashMap<*const Value, HashMap<String, &'a Value>>;
+
+/// `tree::reach`, with each list indexed once: many references into one long list stay linear.
+fn reach_indexed<'a>(content: &'a Value, path: &str, ids: &mut Ids<'a>) -> Option<&'a Value> {
+    if !is_path(path) {
+        return None;
+    }
+    path.split('.').try_fold(content, |node, step| match node {
+        Value::List(items) => {
+            let index = ids.entry(node as *const Value).or_insert_with(|| {
+                let mut index = HashMap::new();
+                for item in items {
+                    index.entry(text(item.get("id"))).or_insert(item);
+                }
+                index
+            });
+            index.get(step).copied()
+        }
+        _ => node.get(step),
+    })
+}
+
 const NOT_AN_ID: &str = "is not an id: lowercase letters, digits and underscores";
 
 /// Checks a manifest, its content and its theme (when it has one) against each other.
@@ -89,6 +114,7 @@ pub fn validate(manifest: &Value, content: &Value, theme: Option<&Value>) -> Rep
         shown: HashSet::new(),
         people: HashSet::new(),
         kids: false,
+        types: BTreeSet::new(),
     };
     c.pack(manifest, content, theme);
     let (_, defined) = crate::define::define(manifest);
@@ -107,6 +133,8 @@ struct Checker<'a> {
     shown: HashSet<String>,
     people: HashSet<String>,
     kids: bool,
+    /// The block types the days use, for the ones a pack in another language has not named.
+    types: BTreeSet<String>,
 }
 
 impl Checker<'_> {
@@ -133,12 +161,19 @@ impl Checker<'_> {
         let hidden = convention("hidden_prefixes").and_then(Value::as_list).unwrap_or_default();
         self.hidden = hidden.iter().map(|p| text(Some(p))).collect();
 
+        let whole = content;
         let Some(content) = content.as_map() else {
             self.r.error("content", "the content file is missing or is not a mapping");
             return;
         };
         let keymap = self.keymap;
-        let root = |name: &str| keymap.root(content, name);
+        // What the engine reads: the first module on a root, at its `from` when it names one.
+        let modules = manifest.get("modules");
+        let root = |name: &str| {
+            let module = MODULES.iter().find(|(_, r, _)| *r == name).map_or(name, |(m, ..)| *m);
+            let from = text(modules.and_then(|m| m.get(module)).and_then(|m| m.get("from")));
+            keymap.root(content, if from.is_empty() { name } else { &from })
+        };
         let days = match root("days") {
             Some(Value::List(days)) => days,
             Some(_) => {
@@ -183,8 +218,88 @@ impl Checker<'_> {
         if let Some(climate) = root("climate") {
             self.climate(climate);
         }
+        self.references(whole, whole, &mut String::new(), &mut HashMap::new());
+        self.words(manifest, head);
         if let Some(theme) = theme.filter(|t| **t != Value::Null) {
             theme::check(&mut self.r, theme);
+        }
+    }
+
+    /// What a pack in another language left in the template's English, as one warning to fix in
+    /// one pass: a label, a block type with no name in `ui.types`, a question's `ask`.
+    fn words(&mut self, manifest: &Map, head: &Map) {
+        let language = text(head.get("language"));
+        if language.is_empty() || language.starts_with("en") {
+            return;
+        }
+        let Some(base) = base(&text(head.get("extends"))) else {
+            return;
+        };
+        let mine = |section: &str, key: &str| manifest.get(section).and_then(|s| s.get(key));
+        let theirs = |section: &str| base.get(section).and_then(Value::as_map).map(Map::iter);
+        let mut left = Vec::new();
+        for (key, word) in theirs("ui").into_iter().flatten() {
+            if mine("ui", key) == Some(word) && text(Some(word)).chars().any(char::is_alphabetic) {
+                left.push(format!("ui.{key} ({})", show(Some(word))));
+            }
+        }
+        let named = mine("ui", "types");
+        for kind in self.types.iter().filter(|k| named.and_then(|t| t.get(k)).is_none()) {
+            left.push(format!("ui.types.{kind} ({})", quote(kind)));
+        }
+        for (id, question) in theirs("questions").into_iter().flatten() {
+            let ask = question.get("ask");
+            if mine("questions", id).and_then(|q| q.get("ask")) == ask {
+                left.push(format!("questions.{id} ({})", show(ask)));
+            }
+        }
+        if !left.is_empty() {
+            let message = format!("still in English in a pack in {language}: {}", left.join(", "));
+            self.r.warn("ui", message);
+        }
+    }
+
+    /// A reference to another reference shows as text, as the tree refuses to follow it. `at` is
+    /// one buffer for the whole walk, and each list's ids are looked up once.
+    fn references<'a>(
+        &mut self,
+        content: &'a Value,
+        v: &'a Value,
+        at: &mut String,
+        ids: &mut Ids<'a>,
+    ) {
+        let len = at.len();
+        match v {
+            Value::String(s) => {
+                if let Some(Value::String(to)) = reach_indexed(content, s, ids)
+                    && is_path(to)
+                {
+                    let message = format!(
+                        "{} points at {}, another reference: it shows as text",
+                        quote(s),
+                        quote(to)
+                    );
+                    self.r.warn(at.as_str(), message);
+                }
+            }
+            Value::List(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    at.push_str(&format!("[{i}]"));
+                    self.references(content, item, at, ids);
+                    at.truncate(len);
+                }
+            }
+            Value::Map(m) => {
+                for (k, item) in m.iter() {
+                    if len > 0 {
+                        at.push('.');
+                    }
+                    at.push_str(k);
+                    self.references(content, item, at, ids);
+                    at.truncate(len);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -529,15 +644,17 @@ impl Checker<'_> {
             if let Some(fixed) = fixed {
                 self.blocks(&format!("{at}.fixed"), fixed);
             }
-            if let Some(options) = options {
-                if let Some(ids) = self.options(&at, options)
-                    && !date.is_empty()
-                {
-                    options_by_date.insert(date.clone(), ids);
-                }
+            if let Some(options) = options
+                && let Some(ids) = self.options(&at, options)
+                && !date.is_empty()
+            {
+                options_by_date.insert(date.clone(), ids);
+            }
+            if options.is_some() || read("decision").is_some() {
                 self.decision(&at, &date, read("decision"));
             }
             self.word(&at, "travel", &TRAVEL, read("travel"));
+            self.zone(&format!("{at}.zone"), read("zone"));
             let known = [
                 "date", "title", "who", "zone", "travel", "blocks", "fixed", "options", "decision",
             ];
@@ -680,6 +797,17 @@ impl Checker<'_> {
         if read("decides").is_some_and(|d| d.as_list().is_none()) {
             self.r.error(format!("{at}.decision.decides"), "has to be a list of dates");
         }
+        self.zone(&format!("{at}.decision.zone"), read("zone"));
+    }
+
+    /// An optional zone at `at`, the clock a thing reads on.
+    fn zone(&mut self, at: &str, zone: Option<&Value>) {
+        let named = text(zone);
+        if !named.is_empty() && !is_timezone(&named) {
+            let message =
+                format!("{} is not an IANA timezone name, like Europe/Madrid", show(zone));
+            self.r.error(at, message);
+        }
     }
 
     fn alerts(&mut self, alerts: &Value) {
@@ -724,12 +852,14 @@ impl Checker<'_> {
             if canon == "critical" {
                 critical += 1;
             }
-            for key in ["at", "notify_from"] {
-                let v = text(read(key));
-                if !v.is_empty() && !is_stamp(&v) && !is_date(&v) {
+            let (when, from, until) =
+                (text(read("at")), text(read("notify_from")), text(read("until")));
+            let shaped = |v: &str| is_date(v) || is_stamp(v);
+            for (key, v) in [("at", &when), ("notify_from", &from), ("until", &until)] {
+                if !v.is_empty() && !shaped(v) {
                     let message = format!(
                         "{} is not a date or a timestamp, YYYY-MM-DD or YYYY-MM-DDTHH:MM",
-                        quote(&v)
+                        quote(v)
                     );
                     self.r.error(format!("{at}.{key}"), message);
                 }
@@ -740,11 +870,18 @@ impl Checker<'_> {
                     .error(format!("{at}.time"), format!("{} is not a time, HH:MM", quote(&time)));
             }
             self.word(&at, "status", &STATUSES, read("status"));
-            let day = text(read("at")).get(..10).map(str::to_owned);
-            if let Some(repeat) = read("repeat") {
-                self.repeat(&format!("{at}.repeat"), repeat, day.as_deref());
+            self.whom(&format!("{at}.for"), read("for"));
+            self.zone(&format!("{at}.zone"), read("zone"));
+            // A date and a stamp compare on the date they share.
+            let n = until.len().min(when.len());
+            if shaped(&until) && shaped(&when) && until[..n] < when[..n] {
+                let message =
+                    format!("{} is before the alert's at, {}", quote(&until), quote(&when));
+                self.r.error(format!("{at}.until"), message);
             }
-            let (from, when) = (text(read("notify_from")), text(read("at")));
+            if let Some(repeat) = read("repeat") {
+                self.repeat(&format!("{at}.repeat"), repeat, when.get(..10));
+            }
             let rings = is_stamp(&from) || is_stamp(&when) || (is_date(&when) && is_time(&time));
             match read("alarm") {
                 Some(Value::Bool(true)) if !rings => self.r.error(
@@ -824,6 +961,7 @@ impl Checker<'_> {
             } else if !dates.insert(date.clone()) {
                 self.r.error(format!("{at}.date"), format!("{date} appears twice"));
             }
+            self.zone(&format!("{at}.zone"), read("zone"));
             let Some(steps) = read("steps").and_then(Value::as_list) else {
                 self.r.error(&at, "a jet-lag day needs steps, a list");
                 continue;
@@ -852,6 +990,7 @@ impl Checker<'_> {
         }
         self.word(at, "do", &DOES, read("do"));
         self.whom(&format!("{at}.for"), read("for"));
+        self.zone(&format!("{at}.zone"), read("zone"));
         match read("alarm") {
             Some(Value::Bool(true)) if text(read("time")).is_empty() => {
                 self.r.error(format!("{at}.alarm"), "an alarm needs the step's time to ring at")
@@ -892,6 +1031,7 @@ impl Checker<'_> {
                 self.r.error(format!("{at}.deadline"), message);
             }
             self.word(&at, "status", &STATUSES, read("status"));
+            self.zone(&format!("{at}.zone"), read("zone"));
         }
     }
 
@@ -959,11 +1099,11 @@ impl Checker<'_> {
             self.r.error("climate", "has to be a mapping with units and entries");
             return;
         };
-        let units = climate.get("units");
+        let units = self.keymap.field(climate, "climate", "units");
         if units.is_some_and(|u| !["metric", "imperial"].contains(&text(Some(u)).as_str())) {
             self.r.error("climate.units", format!("{} is not metric or imperial", show(units)));
         }
-        let Some(entries) = climate.get("entries") else {
+        let Some(entries) = self.keymap.field(climate, "climate", "entries") else {
             return;
         };
         let Some(entries) = entries.as_list() else {
@@ -1166,6 +1306,46 @@ mod tests {
         let content = yaml(include_str!("../../../../examples/one-day/content.yaml"));
         let theme = yaml(include_str!("../../../../examples/one-day/theme.yaml"));
         assert_eq!(said(&validate(&manifest, &content, Some(&theme))), "");
+    }
+
+    #[test]
+    fn a_pack_in_another_language_hears_once_what_it_left_in_english() {
+        let travel = base("travel").unwrap();
+        let keys = |section: &str| -> Vec<String> {
+            let words = travel.get(section).and_then(Value::as_map).unwrap();
+            words.keys().map(str::to_owned).collect()
+        };
+        let lettered = |k: &&String| {
+            text(travel.get("ui").and_then(|u| u.get(k))).chars().any(char::is_alphabetic)
+        };
+        // Every label but `cost` in Spanish, `star` as its symbol, every question but `now`.
+        let ui: String = keys("ui")
+            .iter()
+            .filter(lettered)
+            .filter(|k| *k != "cost")
+            .map(|k| format!("  {k}: Hola\n"))
+            .collect();
+        let asked: String = keys("questions")
+            .iter()
+            .filter(|q| *q != "now")
+            .map(|q| format!("  {q}: {{ask: '¿Sí?', answer: x}}\n"))
+            .collect();
+        let content = "days:\n  - date: 2026-04-11\n    title: Un día\n    blocks:\n      - ['10:00', 'Museo', {type: visit}]\n      - ['13:00', 'Comida', {type: meal}]\n";
+        let words = |language: &str, extends: &str| {
+            let head = MANIFEST.replace("language: en", &format!("language: {language}"));
+            let rest = format!("ui:\n{ui}  types: {{visit: Visita}}\nquestions:\n{asked}");
+            let manifest = yaml(&format!("{head}{extends}{rest}"));
+            let r = validate(&crate::template::extend(manifest).unwrap(), &yaml(content), None);
+            r.warnings.into_iter().filter(|f| f.at == "ui").map(|f| f.message).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            words("es", "  extends: travel\n"),
+            [
+                "still in English in a pack in es: ui.cost (\"Cost\"), ui.types.meal (\"meal\"), questions.now (\"What is happening now?\")"
+            ]
+        );
+        assert!(words("en-GB", "  extends: travel\n").is_empty());
+        assert!(words("es", "").is_empty());
     }
 
     #[test]
@@ -1482,7 +1662,7 @@ days:
     blocks:
       - ['10:00', 'x', {type: visit, place: azulejo, guide: rita, for: [rita], until: '11:00', locked: true}]
       - ['12:00', 'x', {type: zzz, place: nowhere, guide: nobody, for: nobody, until: '11:00', locked: 'yes', leave: soon}]
-      - ['13:00', 'x', {type: meal, until: noon, for: [rita, ~]}]
+      - ['13:00', 'x', {type: meal, until: noon, for: [rita, ~], zone: nowhere, until_zone: later}]
       - ['23:00', 'x', {until: '01:00', until_zone: Asia/Tokyo, leave: 20}]
 ";
         let s = said(&with("", content, None));
@@ -1497,6 +1677,8 @@ days:
             format!("{at}.leave: is a whole number of minutes"),
             "blocks[2].until: \"noon\" is not a time, HH:MM".into(),
             "blocks[2].for: \"\" is not one of the people".into(),
+            "blocks[2].zone: \"nowhere\" is not an IANA timezone name".into(),
+            "blocks[2].until_zone: \"later\" is not an IANA timezone name".into(),
         ] {
             assert!(s.contains(&needle), "wanted {needle:?} in:\n{s}");
         }
@@ -1561,6 +1743,9 @@ days:
             "has to be a list of dates",
         );
         says(&day(two, "    decision: {when: 2026-02-30}\n"), "\"2026-02-30\" is not a real date");
+        let alone = day("", "    decision: {when: soon, zone: nowhere}\n");
+        let s = said(&with("", &alone.replace("    options:\n", "    blocks: []\n"), None));
+        assert!(s.contains("\"soon\" is not a real date") && s.contains("decision.zone"), "{s}");
         let both = two.replace("{id: hill,", "{id: hill, recommended: true,");
         says(&day(&both, asked), "2 options are recommended. Only one can be");
         let neither = two.replace("recommended: true, ", "");
@@ -1710,6 +1895,34 @@ days:
     }
 
     #[test]
+    fn a_clock_is_a_real_zone_and_an_alert_is_for_someone_until_after_its_at() {
+        let people = "people: [{id: rita, name: Rita}]\n";
+        let ok = "{id: a, title: x, severity: low, at: 2026-04-11T10:00, until: 2026-04-12, for: rita, zone: America/Bogota}";
+        let same_day = "{id: b, title: x, severity: low, at: 2026-04-11, until: 2026-04-11T09:00}";
+        clean("", &day_and(&format!("{people}alerts:\n  - {ok}\n  - {same_day}\n")), None);
+        let content = day_and(&format!(
+            "  - {{date: 2026-04-12, title: B, zone: Bogota, blocks: [['10:00', x]], options: [{{id: a, name: A, blocks: []}}], decision: {{when: 2026-04-11, zone: Bogota}}}}
+{people}alerts:
+  - {{id: c, title: x, severity: low, at: 2026-04-11T10:00, until: 2026-04-10, for: [nobody], zone: Bogota}}
+  - {{id: d, title: x, severity: low, until: soon}}
+tasks: [{{id: t, title: x, zone: Bogota}}]
+"
+        ));
+        let s = said(&with("", &content, None));
+        for needle in [
+            "days.2026-04-12.zone: \"Bogota\" is not an IANA timezone name, like Europe/Madrid",
+            "days.2026-04-12.decision.zone: \"Bogota\" is not an IANA timezone name",
+            "alerts[0].until: \"2026-04-10\" is before the alert's at, \"2026-04-11T10:00\"",
+            "alerts[0].for: \"nobody\" is not one of the people in this pack",
+            "alerts[0].zone: \"Bogota\" is not an IANA timezone name",
+            "alerts[1].until: \"soon\" is not a date or a timestamp",
+            "tasks[0].zone: \"Bogota\" is not an IANA timezone name",
+        ] {
+            assert!(s.contains(needle), "wanted {needle:?} in:\n{s}");
+        }
+    }
+
+    #[test]
     fn a_jet_lag_day_has_a_date_and_steps_that_say_what_to_do() {
         let people = "people: [{id: rita, name: Rita}]\n";
         let ok = "{date: 2026-04-11, zone: Europe/Madrid, steps: [{time: '07:00', until: '09:00', text: Up, do: wake, for: rita, alarm: true}, {text: Water}]}";
@@ -1720,7 +1933,7 @@ days:
   - {ok}
   - text
   - {{date: 2026-02-30, steps: x}}
-  - {{date: 2026-04-12, steps: [x, {{time: 7am, until: '9', do: nap, for: [nobody], alarm: 'yes'}}, {{text: y, alarm: true}}]}}
+  - {{date: 2026-04-12, zone: Mars, steps: [x, {{time: 7am, until: '9', do: nap, for: [nobody], alarm: 'yes'}}, {{text: y, alarm: true, zone: soon}}]}}
 "
         ));
         let s = said(&with("", &content, None));
@@ -1737,6 +1950,8 @@ days:
             "jet_lag.2026-04-12.steps[1].for: \"nobody\" is not one of the people",
             "jet_lag.2026-04-12.steps[1].alarm: is true or false",
             "jet_lag.2026-04-12.steps[2].alarm: an alarm needs the step's time",
+            "jet_lag.2026-04-12.zone: \"Mars\" is not an IANA timezone name",
+            "jet_lag.2026-04-12.steps[2].zone: \"soon\" is not an IANA timezone name",
         ] {
             assert!(s.contains(needle), "wanted {needle:?} in:\n{s}");
         }
@@ -1917,11 +2132,47 @@ days:
         let good = "climate:\n  units: imperial\n  entries:\n    - {place: lisbon, month: 4, high: 68, low: 54, rain: 35, sunrise: '06:55', sunset: '20:10', summary: Spring}\n    - {date: 2026-04-11, high: 73}\n";
         clean("", &day_and(&format!("{places}{good}")), None);
         clean("", &day_and("climate: {}"), None);
+        let keymap = "keymap: {climate: {units: unidades, entries: datos, high: maxima}}\n";
+        let theirs = "climate: {unidades: imperial, datos: [{maxima: 68}]}\n";
+        clean(keymap, &day_and(&format!("{places}{theirs}")), None);
+        let bad = said(&with(
+            keymap,
+            &day_and("climate: {unidades: kelvin, datos: [{maxima: warm}]}"),
+            None,
+        ));
+        assert!(bad.contains("climate.units: \"kelvin\" is not metric or imperial"), "{bad}");
+        assert!(bad.contains("climate.entries[0].high: \"warm\" is not a number"), "{bad}");
+    }
+
+    #[test]
+    fn a_module_reading_another_root_has_that_root_checked() {
+        let content = day_and("avisos: [{id: x, severity: low, at: soon}]\n");
+        let s = said(&with("modules: {alerts: {from: avisos}}\n", &content, None));
+        assert!(s.contains("alerts[0].at"), "{s}");
+        clean("", &content, None);
     }
 
     #[test]
     fn the_definition_is_part_of_the_report() {
         let r = with("modules: {weather: {}}\n", &day_and(""), None);
         assert_eq!(r.errors[0].at, "modules.weather");
+    }
+
+    #[test]
+    fn a_reference_to_another_reference_warns() {
+        // A reference to text, and text that only looks like one, are clean.
+        let notes =
+            "notes:\n  plain: Bring water.\n  web: example.com\n  count: 3\n  first: notes.plain\n";
+        clean("", &day_and(notes), None);
+        let notes = format!("{notes}  second: notes.first\n  list: [notes.second]\n");
+        let to = "another reference: it shows as text";
+        let want = format!(
+            "notes.second: \"notes.first\" points at \"notes.plain\", {to}\nnotes.list[0]: \"notes.second\" points at \"notes.first\", {to}"
+        );
+        assert_eq!(said(&with("", &day_and(&notes), None)), want);
+        // Into a list by id, the first of two with one id, as the tree reads it.
+        let notes = "notes:\n  - {id: a, say: notes.b.say}\n  - {id: b, say: notes.a}\n  - {id: b, say: Hi}\n";
+        let want = format!("notes[0].say: \"notes.b.say\" points at \"notes.a\", {to}");
+        assert_eq!(said(&with("", &day_and(notes), None)), want);
     }
 }

@@ -181,6 +181,12 @@ impl Reader {
         if indent < min_indent {
             return Ok(Value::Null);
         }
+        // A flow collection on a line of its own, under a key or a bare dash.
+        if text.starts_with(['[', '{']) {
+            let line = self.line_no();
+            self.i += 1;
+            return scalar(&self.join_flow(&text, line)?, line);
+        }
         if is_seq_entry(&text) { self.sequence(indent) } else { self.mapping(indent) }
     }
 
@@ -783,6 +789,9 @@ mod tests {
             assert!(parse(&flow(open, close, 100)).is_ok());
             assert_refused(&flow(open, close, 101), 1, "nested deeper than 100 levels");
         }
+        let next = |levels: usize| format!("k:\n  {}{}\n", "[".repeat(levels), "]".repeat(levels));
+        assert!(parse(&next(100)).is_ok());
+        assert_refused(&next(101), 2, "nested deeper than 100 levels");
     }
 
     #[test]
@@ -1031,6 +1040,15 @@ flow: [\"a\\\"b\", 'c''d', L'Hospitalet, 'it''s]']
         assert_eq!(key(&v, &["k", "d"]), &Value::Map(Map::default()));
         assert_eq!(key(&v, &["k", "e", "f"]).as_list().unwrap()[1].get("g"), Some(&s("h")));
         assert_eq!(read("k: {a: 1}\n").get("k").unwrap().as_map().unwrap().keys().count(), 1);
+    }
+
+    #[test]
+    fn a_flow_collection_on_the_next_line() {
+        assert_eq!(read("k:\n  {a: 1}\n"), read("k: {a: 1}\n"));
+        assert_eq!(read("-\n  [a, b]\n- c\n"), read("- [a, b]\n- c\n"));
+        assert_eq!(read("k:\n  {a: 1,\n   b: 2}\nj: 3\n"), read("k: {a: 1, b: 2}\nj: 3\n"));
+        assert_refused("k:\n  {a: 1\n", 2, "a flow collection was never closed");
+        assert_refused("k:\n  {a: 1}\n  b: 2\n", 3, "unexpected indentation");
     }
 
     #[test]

@@ -3,6 +3,7 @@
 use std::io::Write;
 use std::path::Path;
 
+use deskpress_engine::clock::real;
 use deskpress_engine::engine::{Alarm, Engine, Nav, Region, View, World};
 use deskpress_engine::tree::{Node, Tree};
 use deskpress_engine::value::{Map, Value, show, text};
@@ -24,18 +25,22 @@ commands:
   preview <pack> --at <time> [world] [action]...  print the screen after any actions, as text a person reads
   alarms <pack> --at <time> [world]               list the alarms the phone would set, one a line
   reference                                       print the pack format and the templates, to write a pack by
-  version                                         print the screen tree version
+  version, --version                              print the version and the screen tree version
 
 <time> is local to the pack, YYYY-MM-DDTHH:MM. [world] is any of --holder <person id>,
---inside <place id>, --store <key>=<value> and --can <name>, the last three once per value. Any
---inside means the device is located; --inside '' says it is inside none. An action is a name,
-or name=<value> to send it a value. A value is YAML, like 3, true, b or [a, b].";
+--inside <place id>, --store <key>=<value>, --can <name> and --zone <zone>=<time>, the last four
+once per value. Any --inside means the device is located; --inside '' says it is inside none.
+--zone is the local time in another zone the pack names; a zone not given reads on the pack's
+clock. An action is a name, or name=<value> to send it a value. A value is YAML, like 3, true, b
+or [a, b].";
 
 /// Runs one command and returns the exit code.
 pub fn run(args: &[String], out: &mut impl Write, err: &mut impl Write) -> u8 {
     let (code, stdout, stderr) = match args {
-        [command] if command == "version" => {
-            (0, format!("tree {}\n", deskpress_engine::TREE_VERSION), String::new())
+        [command] if command == "version" || command == "--version" => {
+            let version = env!("CARGO_PKG_VERSION");
+            let tree = deskpress_engine::TREE_VERSION;
+            (0, format!("deskpress {version}, tree {tree}\n"), String::new())
         }
         [command] if command == "reference" => (0, REFERENCE.to_owned(), String::new()),
         [command, target] if command == "validate" => validate(target),
@@ -118,7 +123,7 @@ fn validate(target: &str) -> (u8, String, String) {
 fn screen(target: &str, args: &[String], command: &str) -> (u8, String, String) {
     let act = command == "act";
     let usage = |message: String| (2, String::new(), format!("{message}\n\n{USAGE}\n"));
-    let (mut world, actions) = match world(args) {
+    let (world, actions) = match world(args) {
         Ok(parsed) => parsed,
         Err(message) => return usage(message),
     };
@@ -143,6 +148,22 @@ fn screen(target: &str, args: &[String], command: &str) -> (u8, String, String) 
             format!("the pack does not load: deskpress validate {target}\n"),
         );
     };
+    let unread = engine.zones().into_iter().filter(|z| world.zones.get(z).is_none());
+    let hint: String = unread
+        .map(|z| format!("read on the pack's clock: {z} (give --zone {z}=<local time>)\n"))
+        .collect();
+    let (code, out, err) = shown(&engine, world, actions, command);
+    (code, out, hint + &err)
+}
+
+/// What `screen` prints once the pack has loaded.
+fn shown(
+    engine: &Engine,
+    mut world: World,
+    actions: Vec<String>,
+    command: &str,
+) -> (u8, String, String) {
+    let act = command == "act";
     if command == "alarms" {
         return match engine.alarms(&world) {
             Ok(all) if all.is_empty() => (0, "nothing to ring\n".to_owned(), String::new()),
@@ -223,6 +244,12 @@ fn world(args: &[String]) -> Result<(World, Vec<String>), String> {
                 };
                 world.store.set(key, value(v));
             }
+            "--zone" => match v.split_once('=') {
+                Some((zone, at)) if !zone.is_empty() && real(at) => {
+                    world.zones.set(zone, Value::String(at.to_owned()))
+                }
+                _ => return Err(format!("--zone takes zone=YYYY-MM-DDTHH:MM, not {v}")),
+            },
             _ => return Err(format!("{arg} is not an option")),
         }
     }
@@ -649,8 +676,10 @@ Rooted: loads. 0 warnings.
     }
 
     #[test]
-    fn version_prints_the_screen_tree_version() {
-        assert_eq!(call(&["version"]), (0, "tree 4\n".to_owned(), String::new()));
+    fn version_prints_this_version_and_the_screen_tree_version() {
+        let expected = format!("deskpress {}, tree 4\n", env!("CARGO_PKG_VERSION"));
+        assert_eq!(call(&["version"]), (0, expected.clone(), String::new()));
+        assert_eq!(call(&["--version"]), (0, expected, String::new()));
     }
 
     #[test]
@@ -688,11 +717,19 @@ rules:
     #[test]
     fn screen_act_and_preview_refuse_arguments_that_say_no_world() {
         let dir = machine("args");
-        let cases: [(&str, &[&str], &str); 9] = [
+        let zone = "--zone takes zone=YYYY-MM-DDTHH:MM, not";
+        let cases: [(&str, &[&str], &str); 12] = [
             ("screen", &[], "--at <time> is needed: the moment to show, YYYY-MM-DDTHH:MM"),
             ("screen", &["--at"], "--at needs a value"),
             ("screen", &["--at", "x", "--store", "k"], "--store takes key=value, not k"),
             ("screen", &["--at", "x", "--when", "y"], "--when is not an option"),
+            ("screen", &["--at", "x", "--zone", "UTC"], &format!("{zone} UTC")),
+            ("screen", &["--at", "x", "--zone", "UTC=soon"], &format!("{zone} UTC=soon")),
+            (
+                "screen",
+                &["--at", "x", "--zone", "=2026-04-11T10:00"],
+                &format!("{zone} =2026-04-11T10:00"),
+            ),
             ("screen", &["--at", "x", "go"], "screen takes no actions: use act"),
             ("alarms", &["--at", "x", "go"], "alarms takes no actions"),
             ("act", &["--at", "x"], "act needs an action"),
@@ -736,7 +773,7 @@ rules:
         let pack = manifest(&format!("  name: M\n{modules}"));
         let dir = folder("screen", &[("pack.yaml", &pack), ("content.yaml", &content)]);
         let (code, out, err) = at(&dir, "screen", &world);
-        let expected = r#"{"version": 4, "screen": "a", "nodes": [{"key": "0", "kind": "Label", "props": {"text": "x  1"}, "on": {"tap": "go"}, "children": []}], "theme": "", "kid": false, "watch": {"until": "2026-04-12T00:00", "regions": [{"id": "home", "lat": 1, "lon": 2, "radius_m": 100}]}}"#;
+        let expected = r#"{"version": 4, "screen": "a", "nodes": [{"key": "0", "kind": "Label", "props": {"text": "x  1"}, "on": {"tap": "go"}, "children": []}], "theme": "", "kid": false, "watch": {"until": "2026-04-11T11:00", "regions": [{"id": "home", "lat": 1, "lon": 2, "radius_m": 100}]}}"#;
         assert_eq!((code, out.as_str(), err.as_str()), (0, format!("{expected}\n").as_str(), ""));
     }
 
@@ -746,7 +783,7 @@ rules:
         let (code, out, _) =
             at(&dir, "act", &["--at", "2026-04-11T10:30", "go=[a, b]", "go=hello"]);
         assert_eq!(code, 0);
-        let tail = r#""props": {"text": "x hello "}, "on": {"tap": "go"}, "children": []}], "theme": "", "kid": false, "watch": {"until": "2026-04-12T00:00", "regions": []}, "store": {"seen.2026-04-11": "hello"}, "commands": [{"name": "map.open", "args": {}}, {"name": "map.open", "args": {}}]}"#;
+        let tail = r#""props": {"text": "x hello "}, "on": {"tap": "go"}, "children": []}], "theme": "", "kid": false, "watch": {"until": "2026-04-11T11:00", "regions": []}, "store": {"seen.2026-04-11": "hello"}, "commands": [{"name": "map.open", "args": {}}, {"name": "map.open", "args": {}}]}"#;
         assert!(out.ends_with(&format!("{tail}\n")), "{out}");
         // What YAML cannot read goes as text.
         let (_, out, _) = at(&dir, "act", &["--at", "2026-04-11T10:30", "go={"]);
@@ -770,11 +807,40 @@ alerts: [{{id: tide, title: Tide, severity: low, at: '2026-04-11T12:00', alarm: 
 2026-04-11T22:00 Asia/Tokyo  Bed  [jet_lag.2026-04-11.0]
 ";
         let (code, out, err) = at(&dir, "alarms", &["--at", "2026-04-11T08:00"]);
-        assert_eq!((code, out.as_str(), err.as_str()), (0, expected, ""));
+        let hint = "read on the pack's clock: Asia/Tokyo (give --zone Asia/Tokyo=<local time>)\n";
+        assert_eq!((code, out.as_str(), err.as_str()), (0, expected, hint));
         let (_, out, _) = at(&dir, "alarms", &["--at", "2026-04-12T08:00"]);
         assert_eq!(out, "nothing to ring\n");
         let message = "\"x\" is not a time: YYYY-MM-DDTHH:MM, in the pack's timezone\n".to_owned();
-        assert_eq!(at(&dir, "alarms", &["--at", "x"]), (1, String::new(), message));
+        assert_eq!(
+            at(&dir, "alarms", &["--at", "x"]),
+            (1, String::new(), hint.to_owned() + &message)
+        );
+    }
+
+    #[test]
+    fn a_zone_given_moves_its_day_and_one_not_given_says_so_once() {
+        let content = "days:
+  - {date: 2026-04-11, zone: America/Bogota, title: A}
+  - {date: 2026-04-12, zone: America/Bogota, title: B}
+  - {date: 2026-04-13, zone: Asia/Tokyo, title: C}
+";
+        let screens = "modules:\n  timeline:\nscreens:\n  a:\n    layout:\n      - Label: {text: day.date}\nrules:\n  - {screen: a}\n";
+        let pack = manifest(&format!("  name: Z\n{screens}"));
+        let dir = folder("zone", &[("pack.yaml", &pack), ("content.yaml", content)]);
+        let tokyo = "read on the pack's clock: Asia/Tokyo (give --zone Asia/Tokyo=<local time>)\n";
+        let hint =
+            "read on the pack's clock: America/Bogota (give --zone America/Bogota=<local time>)\n"
+                .to_owned()
+                + tokyo;
+        for command in ["preview", "alarms"] {
+            let (code, _, err) = at(&dir, command, &["--at", "2026-04-12T02:00"]);
+            assert_eq!((code, err.as_str()), (0, hint.as_str()), "{command}");
+        }
+        let (_, out, _) = at(&dir, "preview", &["--at", "2026-04-12T02:00"]);
+        assert_eq!(out, "2026-04-12\n");
+        let given = ["--at", "2026-04-12T02:00", "--zone", "America/Bogota=2026-04-11T21:00"];
+        assert_eq!(at(&dir, "preview", &given), (0, "2026-04-11\n".to_owned(), tokyo.to_owned()));
     }
 
     const SHOWN: &str = r#"modules:

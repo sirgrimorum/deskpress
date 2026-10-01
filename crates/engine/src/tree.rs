@@ -4,7 +4,7 @@ use crate::TREE_VERSION;
 use crate::define::{Component, Screen};
 use crate::pack::Pack;
 use crate::validate::Keymap;
-use crate::validate::patterns::dated_key;
+use crate::validate::patterns::{dated_key, is_path};
 use crate::value::{Map, Value, text, truthy};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -247,8 +247,9 @@ impl Reader<'_> {
         }
     }
 
+    /// A key no screen draws: a hidden one, or `verified`, when a fact was checked.
     fn hidden(&self, key: &str) -> bool {
-        self.conventions.hidden.iter().any(|p| key.starts_with(p.as_str()))
+        key == "verified" || self.conventions.hidden.iter().any(|p| key.starts_with(p.as_str()))
     }
 
     /// A value as the text of a card: a path reference by what it points to, a list one line per
@@ -276,29 +277,24 @@ impl Reader<'_> {
         }
     }
 
-    /// What a path reference like `bookings.azulejo` points to in the content: a mapping walks by
-    /// key, a list by `id`. Text that is not one, or points nowhere, is nothing, and so is one that
-    /// points at another reference: following those could loop.
+    /// What a path reference points to, or nothing when it points at another reference:
+    /// following those could loop.
     fn resolve(&self, path: &str) -> Option<&Value> {
-        if !is_path(path) {
-            return None;
-        }
-        let found = path.split('.').try_fold(self.scope.get("content")?, |node, step| match node {
-            Value::List(items) => items.iter().find(|i| text(i.get("id")) == step),
-            _ => node.get(step),
-        });
+        let found = reach(self.scope.get("content")?, path);
         found.filter(|f| !matches!(f, Value::String(s) if is_path(s)))
     }
 }
 
-/// `^[a-z_][a-z0-9_]*(\.[a-z0-9_]+)+$`, the shape of a path reference.
-fn is_path(s: &str) -> bool {
-    let word = |w: &str| {
-        !w.is_empty()
-            && w.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
-    };
-    let first = s.split('.').next().unwrap_or_default();
-    s.contains('.') && s.split('.').all(word) && !first.starts_with(|c: char| c.is_ascii_digit())
+/// What a path reference like `bookings.azulejo` points to in the content: a mapping walks by
+/// key, a list by `id`. Text that is not one, or points nowhere, is nothing.
+pub(crate) fn reach<'a>(content: &'a Value, path: &str) -> Option<&'a Value> {
+    if !is_path(path) {
+        return None;
+    }
+    path.split('.').try_fold(content, |node, step| match node {
+        Value::List(items) => items.iter().find(|i| text(i.get("id")) == step),
+        _ => node.get(step),
+    })
 }
 
 #[cfg(test)]
@@ -466,7 +462,7 @@ tags: x",
     const FACTS: &str = r#"now: {date: 2026-04-11}
 ui: {to_confirm: to confirm}
 content:
-  bookings: [{id: museum, code: M-1, source: web, gate: ""}, {id: loop, next: bookings.museum}, {id: pass, see: places.park}]
+  bookings: [{id: museum, code: M-1, source: web, gate: "", verified: 2026-03-01}, {id: loop, next: bookings.museum}, {id: pass, see: places.park}]
   hops: bookings.museum
   places: {park: {ticket: bookings.pass}}
 store:
@@ -488,6 +484,7 @@ store:
   price: "[to confirm]"
   empty: ""
   skipped: yes
+  verified: 2026-03-02
 "#;
 
     #[test]
@@ -511,6 +508,7 @@ store:
             "Card numbers|1\n2\n3",
             "Missing price|[to confirm]",
         ];
+        // `verified` is never drawn, as a card or as a line of one.
         assert_eq!(got, want);
         // With no conventions nothing is hidden, and warn and alert both warn.
         let got = drawn("pack: {}", layout, FACTS);

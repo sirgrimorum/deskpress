@@ -9,7 +9,7 @@ use crate::value::{Map, Value, text};
 pub(crate) const TRAVEL: [&str; 3] = ["walking", "driving", "transit"];
 
 /// Types that are the way between two places themselves, so no leg goes next to one.
-const MOVING: [&str; 5] = ["train", "driving", "walking", "flight", "transfer"];
+pub(super) const MOVING: [&str; 5] = ["train", "driving", "walking", "flight", "transfer"];
 
 /// How much longer the road is than the straight line, about.
 const ROAD: f64 = 1.3;
@@ -41,9 +41,9 @@ fn said(m: i64) -> String {
     }
 }
 
-impl Run<'_> {
+impl<'a> Run<'a> {
     /// The day as its page draws it: a leg before each block a different place comes before, and
-    /// every timed entry with `lasts`, its minutes, to its `until` or else to the next one.
+    /// every timed entry with `lasts`, its minutes: to its `until`, else the next, else an hour.
     pub(super) fn page(&self, date: &str, day: &Value, blocks: &[Map]) -> Vec<Map> {
         let travel = self.keymap.value("travel", self.read(day, "day", "travel"));
         let mut page: Vec<Map> = Vec::with_capacity(blocks.len() * 2);
@@ -79,9 +79,9 @@ impl Run<'_> {
         page
     }
 
-    /// The way from block `a` to block `b`, arriving at `b`'s hour: both at places, not the same
-    /// one, on one clock, neither a way of moving itself, and a time to give it.
-    fn leg(&self, a: &Map, b: &Map, travel: &str) -> Option<Map> {
+    /// Minutes from block `a` to block `b`, whether the pack gave them, and the place it ends at:
+    /// both at places, not the same one, on one clock, neither a way of moving itself.
+    pub(super) fn way(&self, a: &Map, b: &Map, travel: &str) -> Option<(i64, bool, &'a Value)> {
         let (from, to) = (text(a.get("place")), text(b.get("place")));
         let moving = |m: &Map| MOVING.contains(&text(m.get("type")).as_str());
         let apart =
@@ -95,15 +95,19 @@ impl Run<'_> {
             let m = plan::whole(self.read(p, "place", "legs")?.get(other));
             (m > 0).then_some(m)
         };
-        let (lasts, duration) = match given(start, &to).or_else(|| given(end, &from)) {
-            Some(m) => (m, said(m)),
-            None => {
-                let at = |id: &str, p: &Value| region(id, self.read(p, "place", "at")?);
-                let (p, q) = (at(&from, start)?, at(&to, end)?);
-                let m = estimate(travel, chart::apart(p.lat, p.lon, q.lat, q.lon));
-                (m, format!("≈ {}", said(m)))
-            }
-        };
+        if let Some(m) = given(start, &to).or_else(|| given(end, &from)) {
+            return Some((m, true, end));
+        }
+        let at = |id: &str, p: &Value| region(id, self.read(p, "place", "at")?);
+        let (p, q) = (at(&from, start)?, at(&to, end)?);
+        Some((estimate(travel, chart::apart(p.lat, p.lon, q.lat, q.lon)), false, end))
+    }
+
+    /// The way from block `a` to block `b` as a block of its own, arriving at `b`'s hour.
+    fn leg(&self, a: &Map, b: &Map, travel: &str) -> Option<Map> {
+        let (lasts, given, end) = self.way(a, b, travel)?;
+        let duration = if given { said(lasts) } else { format!("≈ {}", said(lasts)) };
+        let (from, to) = (text(a.get("place")), text(b.get("place")));
         let until = text(b.get("time"));
         let time = plan::moved(&until, -lasts);
         let name = Some(text(self.read(end, "place", "name"))).filter(|n| !n.is_empty());

@@ -16,7 +16,7 @@ flowchart LR
 | `yaml` | reads the YAML subset a pack is written in, refusing what it does not know |
 | `pack` | loads a pack's files through a callback the host supplies |
 | `define` | compiles the definition: modules, derive, rules and each screen's state, actions and layout |
-| `engine` | `screen` and `dispatch`: the world in, the view and its watch out, and the nav stack |
+| `engine` | `screen`, `dispatch` and `would`: the world in, the view and its watch out, and the nav stack |
 | `modules` | what each module adds to the scope, and when its answer changes |
 | `clock` | the pack-local minute: parsing, adding, comparing |
 | `tree` | the screen tree a layout builds, and the outline of a pack with no rules |

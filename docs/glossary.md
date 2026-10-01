@@ -9,7 +9,7 @@ entry is the short answer; the linked document has the rest.
 | --- | --- |
 | **action** | something that can happen on a screen, like `confirm`. A named list of effects |
 | **alarm** | a time the phone rings with the app closed: a jet-lag step or an alert that asks for one, and the set-off notice of a block with a `leave` |
-| **alert** | a warning the pack wrote, shown by severity (`critical` to `low`) and by time. Never computed |
+| **alert** | a warning the pack wrote, shown by severity (`critical` to `low`) and by time, on its own clock and `for` whom it names. Never computed |
 | **as of** | when synced data was fetched. Shown so a stale forecast reads as stale |
 | **block** | one line of a day: a time, a text, and an optional map that makes it a moment |
 | **canonical key** | the English key the shell reads, like `days` or `title`. Values can be in any language |
@@ -60,7 +60,7 @@ entry is the short answer; the linked document has the rest.
 | **template** | a definition bundled with the engine, like `travel`, that a pack names in `pack.extends` and only overrides where it differs. See `docs/templates.md` |
 | **theme** | the design system as data, in `theme.yaml`: color, type, spacing and radius tokens |
 | **sync** | fetching a module's data from a source the pack names, on a button or automatically every so often while the app is open. Only `climate` so far |
-| **task** | one line of `tasks`: something to do around the trip, with a deadline and who, ticked on the phone |
+| **task** | one line of `tasks`: something to do around the trip, with a deadline on its own clock and who, ticked on the phone |
 | **token** | one named value of the theme. Components read tokens and never a theme's name |
 | **tool** | a device capability the engine can ask the host for: map, calendar, geofence, fingerprint, alarms |
 | **trip sent** | one text file a phone hands to another holding the same pack: its facts, their stamps, and the pack when it is newer |
@@ -69,7 +69,7 @@ entry is the short answer; the linked document has the rest.
 | **validate** | load a pack and list its errors and warnings. `deskpress validate <pack>` on the desk, `load` in the app |
 | **warning** | something worth fixing that does not stop the pack from loading, like a place with no coordinates |
 | **watch** | what comes with each tree to say what would change it: the next instant (`until`) and the geofences that matter. The host calls the engine again only then |
-| **world** | what the host pushes in on each call, as opposed to a module's data: the local time in the pack's timezone and in each zone the days name, the places whose region the device is inside and whether it is located, the holder and the stored facts |
+| **world** | what the host pushes in on each call, as opposed to a module's data: the local time in the pack's timezone and in each zone the pack names, the places whose region the device is inside and whether it is located, the holder and the stored facts |
 | **write back** | a theme edit in the app is saved to the loaded theme file, keeping its comments and order |
 
 ## Technical terms

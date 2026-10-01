@@ -3,7 +3,12 @@
 //! stamp needs arithmetic. The host passes the clock already in the pack's zone, and in any other
 //! zone the pack names, so the engine carries no timezone database.
 
-use crate::validate::patterns::days_in_month;
+use crate::validate::patterns::{days_in_month, is_real_date, is_stamp};
+
+/// A `YYYY-MM-DDTHH:MM` on a day the calendar has.
+pub fn real(stamp: &str) -> bool {
+    is_stamp(stamp) && is_real_date(&stamp[..10])
+}
 
 fn number(s: &str) -> u32 {
     s.parse().unwrap_or_default()

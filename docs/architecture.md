@@ -39,13 +39,14 @@ On the phone it is a native library: UniFFI generates the Kotlin types, so the h
 any Kotlin API and gets a typed screen tree back. On the desk the `deskpress` binary prints the
 same tree as JSON. See [decision 0010](decisions/0010-rust-core-uniffi.md).
 
-Three calls:
+Four calls:
 
 | call | when | what it does |
 | --- | --- | --- |
 | `load(files)` | once per pack | parse YAML, merge the template it `extends` ([templates.md](templates.md)), apply the keymap, validate everything, compile expressions. Returns errors and warnings, or a loaded pack |
 | `screen(world)` | only when an input changes or `watch.until` is reached | run the modules, the derived values and the rules; build the screen tree and its `watch` |
 | `dispatch(world, action, arg)` | on a tap | run the action's effects; return the new tree and its `watch`, a store patch and tool commands for the host |
+| `would(world, action, arg)` | while a drag is held | the store patch `dispatch` would return, keeping nothing |
 
 ```mermaid
 sequenceDiagram
@@ -68,11 +69,11 @@ Same world, same tree: the host never calls the engine to find out that nothing 
 host waits on one timer instead of polling. See [decision 0013](decisions/0013-call-only-on-change.md).
 
 The world is five things: the local time in the pack's timezone as `YYYY-MM-DDTHH:MM`, with the
-local time of each other zone the days name (the host converts, so the engine carries no
-timezone database), the ids of the places whose region the
-device is inside (never coordinates) and whether it knows where it is, who holds the phone, the
-stored facts, and what this device can do, like carrying a model of its own. The regions come from the pack: `watch` carries each place's circle, and the host
-works out which it is inside.
+local time of each other zone the pack names (the host converts, so the engine carries no timezone
+database), the ids of the places whose region the device is inside (never coordinates) and whether
+it knows where it is, who holds the phone, the stored facts, and what this device can do, like
+carrying a model of its own. The regions come from the pack: `watch` carries each place's circle,
+and the host works out which it is inside.
 
 ### Two machines
 
@@ -151,7 +152,7 @@ renderer keeps the current tree on screen until a different one arrives, so a ca
 
 A renderer knows the closed set of components and the theme tokens, and nothing about packs.
 
-What the person does to a day on the device, moving, resizing, swapping, dropping or adding a
+What the person does to a day on the device, moving, resizing, dropping or adding a
 block, is never written back into the pack: each edit is a stored fact keyed by the block's `event`
 id, and the timeline applies them every time it builds the day. Those actions are the one kind the
 engine answers itself rather than handing to the host. See

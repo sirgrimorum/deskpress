@@ -21,8 +21,8 @@ pub fn extend(manifest: Value) -> Result<Value, String> {
     let Some(extends) = pack.get("pack").and_then(|h| h.get("extends")) else {
         return Ok(Value::Map(pack));
     };
-    let named = |(n, _): &&(&str, &str)| matches!(extends, Value::String(s) if s == n);
-    let Some((_, source)) = TEMPLATES.iter().find(named) else {
+    let named = if let Value::String(name) = extends { base(name) } else { None };
+    let Some(base) = named else {
         let names: Vec<&str> = TEMPLATES.iter().map(|(n, _)| *n).collect();
         let message = format!(
             "pack.extends: {} is not a template: {}",
@@ -31,8 +31,6 @@ pub fn extend(manifest: Value) -> Result<Value, String> {
         );
         return Err(message);
     };
-    // A bundled template parses to a mapping; a test holds every one to it.
-    let base = yaml::parse(source).unwrap_or(Value::Null);
     let mut merged = base.as_map().cloned().unwrap_or_default();
     for (key, theirs) in pack.0 {
         let value = match (merged.get(&key), theirs) {
@@ -55,11 +53,10 @@ pub fn extend(manifest: Value) -> Result<Value, String> {
     Ok(Value::Map(merged))
 }
 
-/// A template's manifest by name, for the tests and the docs.
-#[cfg(test)]
-fn source(name: &str) -> Value {
-    let (_, source) = TEMPLATES.iter().find(|(n, _)| *n == name).unwrap();
-    yaml::parse(source).unwrap()
+/// A template's own manifest by name. Each one parses to a mapping; a test holds it to that.
+pub(crate) fn base(name: &str) -> Option<Value> {
+    let (_, source) = TEMPLATES.iter().find(|(n, _)| *n == name)?;
+    yaml::parse(source).ok()
 }
 
 #[cfg(test)]
@@ -109,7 +106,7 @@ mod tests {
         ))
         .unwrap();
         let ui = m.get("ui").and_then(Value::as_map).unwrap();
-        let base = source("travel");
+        let base = base("travel").unwrap();
         let keys: Vec<&str> = ui.keys().collect();
         let mut expected: Vec<&str> =
             base.get("ui").and_then(Value::as_map).unwrap().keys().collect();
@@ -126,7 +123,7 @@ mod tests {
         let m = over(&format!("{HEAD}rules: [{{when: 'now.time > \"23:00\"', screen: days}}]\n"))
             .unwrap();
         let rules = m.get("rules").and_then(Value::as_list).unwrap();
-        let base = source("travel");
+        let base = base("travel").unwrap();
         assert_eq!(rules.len(), base.get("rules").and_then(Value::as_list).unwrap().len() + 1);
         assert_eq!(rules[0].get("screen"), Some(&Value::String("days".into())));
     }
@@ -290,7 +287,7 @@ packing: {check: true, items: [Hat, Bottle]}
         let (e, mut nav) = (trip(), Nav::default());
         let w = world("2026-04-11T12:30", "", &[]);
         let agenda = e.screen(&w, &mut nav).unwrap().tree;
-        let out = e.dispatch(&w, &mut nav, "sheet", carried(&agenda, "packing")).unwrap();
+        let out = e.dispatch(&w, &mut nav, "sheet", carried(&agenda, "Packing")).unwrap();
         assert_eq!(said(&out.view.tree)[1..], ["Check  Hat", "Check  Bottle"]);
         let hat = carried(&out.view.tree, "Hat");
         let out = e.dispatch(&w, &mut nav, "tick", hat.clone()).unwrap();
@@ -308,7 +305,8 @@ packing: {check: true, items: [Hat, Bottle]}
         let out = e.dispatch(&night, &mut nav, "adjust", Value::Null).unwrap();
         let dinner = hour(&out.view.tree, "Dinner");
         e.dispatch(&night, &mut nav, "pick", dinner.clone()).unwrap();
-        let out = e.dispatch(&night, &mut nav, "later", Value::Null).unwrap();
+        let arg = Map(vec![("block".into(), dinner.clone()), ("by".into(), Value::Number(15.0))]);
+        let out = e.dispatch(&night, &mut nav, "move", Value::Map(arg)).unwrap();
         // The pack is untouched: the new hour comes from the fact, every time the day is built.
         assert_eq!(said(&after(&e, "2026-04-11T21:30", &out.store))[1], "BigValue  19:15");
         let out = e.dispatch(&night, &mut nav, "drop", Value::Null).unwrap();
@@ -319,12 +317,23 @@ packing: {check: true, items: [Hat, Bottle]}
     #[test]
     fn an_hour_dragged_down_the_day_trades_places_with_the_ones_it_passes() {
         let (e, mut nav) = (trip(), Nav::default());
-        let noon = world("2026-04-11T14:00", "", &[]);
-        let out = e.dispatch(&noon, &mut nav, "adjust", Value::Null).unwrap();
+        let early = world("2026-04-11T08:00", "", &[]);
+        e.dispatch(&early, &mut nav, "agenda", Value::Null).unwrap();
+        let out = e.dispatch(&early, &mut nav, "adjust", Value::Null).unwrap();
         let park = hour(&out.view.tree, "Park");
-        let arg = Map(vec![("block".into(), park), ("to".into(), Value::Number(1.0))]);
-        let out = e.dispatch(&noon, &mut nav, "reorder", Value::Map(arg)).unwrap();
-        assert_eq!(hours(&out.view.tree), [" A note", "10:00 Museum", "12:00 Park", "13:00 Drive"]);
+        let arg = |edge: &str, by: f64| {
+            let edge = Value::String(edge.into());
+            let pairs = [("block", park.clone()), ("edge", edge), ("by", Value::Number(by))];
+            Value::Map(Map(pairs.map(|(k, v)| (k.to_owned(), v)).to_vec()))
+        };
+        let out = e.dispatch(&early, &mut nav, "move", arg("", 60.0)).unwrap();
+        assert_eq!(hours(&out.view.tree), [" A note", "10:00 Museum", "11:00 Park", "13:00 Drive"]);
+        let early = World { store: out.store, ..early };
+        let out = e.dispatch(&early, &mut nav, "resize", arg("end", 30.0)).unwrap();
+        assert_eq!(
+            show(out.store.get("plan.2026-04-11.blocks.1")),
+            r#"{"at": "11:00", "until": "12:30"}"#
+        );
     }
 
     #[test]
@@ -374,6 +383,10 @@ packing: {check: true, items: [Hat, Bottle]}
         assert_eq!(kid("2026-04-11T10:45", &given).0, "complete");
         let (_, hand_back) = kid("2026-04-11T10:30", &[]);
         assert_eq!(hand_back[2..], ["Button Give the phone back", "Button 15 more minutes"]);
+        // Whose turn it is, and why it stopped: never given time, or the time given ran out.
+        let tree = trip().screen(&world("2026-04-11T10:30", "leo", &[]), &mut Nav::default());
+        assert_eq!(said(&tree.unwrap().tree)[..2], ["Screen Leo ", "BigValue  Not safe here"]);
+        assert_eq!(kid("2026-04-11T10:45", &given).1[1], "BigValue Time is up");
     }
 
     #[test]
@@ -477,7 +490,8 @@ packing: {check: true, items: [Hat, Bottle]}
 
     #[test]
     fn a_free_lot_says_so_one_with_no_price_says_its_time_and_types_speak_the_pack_s_words() {
-        let manifest = over(&format!("{HEAD}ui: {{free: Gratis, types: {{parking: Parqueo}}}}\n"));
+        let ui = "ui: {free: Gratis, where: Dónde, types: {parking: Parqueo}}";
+        let manifest = over(&format!("{HEAD}{ui}\n"));
         let content = parse(
             r#"days: [{date: 2026-04-11, title: One, blocks: [["10:00", "A", {type: parking, place: free}], ["11:00", "B", {type: parking, place: open}]]}]
 places: {free: {name: Free, parking: {price: 0}}, open: {name: Open, parking: {where: West}}}
@@ -493,7 +507,11 @@ places: {free: {name: Free, parking: {price: 0}}, open: {name: Open, parking: {w
         let (free, lines) = big("2026-04-11T10:30");
         assert_eq!(free, "BigValue  Gratis");
         assert!(lines.contains(&"Label  Now · Parqueo".to_owned()), "{lines:?}");
-        assert_eq!(big("2026-04-11T11:30").0, "BigValue  11:00");
+        let (open, lines) = big("2026-04-11T11:30");
+        assert_eq!(open, "BigValue  11:00");
+        // The lot's where under the pack's word for it, and not again as a card of its own.
+        let wheres: Vec<&String> = lines.iter().filter(|l| l.contains("West")).collect();
+        assert_eq!(wheres, ["Card Dónde West"]);
     }
 
     #[test]
@@ -779,7 +797,7 @@ jet_lag: [{date: 2026-04-11, steps: [{time: "12:45", text: Nap, do: bed}, {time:
     #[test]
     fn the_agenda_lists_the_sheets_and_opens_one_whole() {
         let (_, agenda) = shown("2026-04-11T12:30", "ana", &[]);
-        assert!(agenda.contains(&"Row phrases".to_owned()), "{agenda:?}");
+        assert!(agenda.contains(&"Row Phrases".to_owned()), "{agenda:?}");
         let e = trip();
         let w = world("2026-04-11T12:30", "ana", &[]);
         let sheet = parse("{id: phrases, title: phrases, value: {hi: hola}}").unwrap();
@@ -833,12 +851,82 @@ jet_lag: [{date: 2026-04-11, steps: [{time: "12:45", text: Nap, do: bed}, {time:
     }
 
     #[test]
+    fn before_the_trip_the_days_show_its_alerts_and_the_body_clock_already_moving() {
+        let extra = "jet_lag: [{date: 2026-04-10, steps: [{time: '22:00', text: Bed early}]}]
+alerts:
+  - {id: check, title: Check in, severity: critical, detail: Online}
+  - {id: bags, title: Bags, severity: high, detail: Weigh them}
+";
+        let e = load(&format!("{TRIP}{extra}"));
+        let tree = e.screen(&world("2026-04-10T09:00", "", &[]), &mut Nav::default()).unwrap().tree;
+        let lines = said(&tree);
+        assert_eq!(tree.screen, "days");
+        assert_eq!(
+            lines[1..4],
+            ["Alert Check in Online", "Label  The plan does not cover today.", "Group Body clock "]
+        );
+        assert_eq!(lines.last().map(String::as_str), Some("Alert Bags Weigh them"));
+        let steps: Vec<String> =
+            tree.nodes[3].children.iter().map(|n| text(at(n, "text"))).collect();
+        assert!(steps.iter().any(|s| s.contains("Bed early")), "{steps:?}");
+    }
+
+    #[test]
+    fn who_a_day_is_for_is_never_a_card_in_the_morning_or_at_night() {
+        let who = TRIP.replace("    title: One\n", "    title: One\n    who: [ana, leo]\n");
+        let e = load(&who.replace("    title: Two\n", "    title: Two\n    who: [ana]\n"));
+        for (now, screen) in [("2026-04-11T09:00", "morning"), ("2026-04-11T21:30", "night")] {
+            let tree = e.screen(&world(now, "", &[]), &mut Nav::default()).unwrap().tree;
+            let lines = said(&tree);
+            assert_eq!(tree.screen, screen);
+            assert!(!lines.iter().any(|l| l.contains("who") || l.contains("ana")), "{lines:?}");
+        }
+    }
+
+    #[test]
+    fn an_option_shows_its_name_with_no_why_and_its_cost_in_the_pack_s_words() {
+        let manifest = over(&format!("{HEAD}ui: {{cost: Coste, consequence: Si no}}\n")).unwrap();
+        let content = parse(
+            r#"days:
+  - date: 2026-04-12
+    title: Two
+    options: [{id: sea, name: Sea, recommended: true, blocks: []}, {id: town, name: Town, blocks: []}]
+    decision: {when: 2026-04-10, at: "20:00", question: Sea or town?}
+  - date: 2026-04-13
+    title: Three
+    options:
+      - {id: coast, name: Coast, recommended: true, why: Early, cost: Parking, consequence: Late lunch, requires: {date: 2026-04-12, option: sea}, blocks: [["09:30", "Go"]]}
+      - {id: hill, name: Hill, blocks: [["09:00", "Train"]]}
+    decision: {when: 2026-04-12, at: "20:00", question: Coast or hill?}
+"#,
+        );
+        let e = Engine::load(Pack { manifest, content: content.unwrap(), theme: None }).unwrap().0;
+        let choose = |store: &[(&str, &str)]| {
+            let tree = e.screen(&world("2026-04-12T20:30", "", store), &mut Nav::default());
+            let tree = tree.unwrap().tree;
+            assert_eq!(tree.screen, "choose");
+            said(&tree)
+        };
+        let until = "Label  Until somebody chooses, the day follows the recommended plan.";
+        let kept = ["Card Coast Early", "Card Coste Parking", "Card Si no Late lunch"];
+        let sea = choose(&[("choice.2026-04-12", "sea")]);
+        assert_eq!(sea[2..6], [&[until][..], &kept].concat());
+        // `requires` drops the recommended: no line says it is followed, and the plan in force
+        // shows by its name.
+        let town = choose(&[("choice.2026-04-12", "town")]);
+        assert_eq!(town[1..3], ["BigValue  Coast or hill?", "Card  Hill"]);
+    }
+
+    #[test]
     fn the_night_starts_at_seven_after_the_last_block_and_no_day_says_so() {
         assert_ne!(shown("2026-04-11T18:30", "", &[]).0, "night");
         assert_eq!(shown("2026-04-11T19:00", "", &[]).0, "night");
         assert_eq!(shown("2026-04-11T19:30", "", &[]).0, "night");
         // A last block still running keeps its moment until its `until`.
         assert_eq!(shown("2026-04-12T19:30", "", &[]).0, "moment");
+        // One with no `until` is over an hour after it began, so the night comes.
+        assert_ne!(shown("2026-04-14T10:30", "", &[]).0, "night");
+        assert_eq!(shown("2026-04-14T19:30", "", &[]).0, "night");
         let (screen, texts) = shown("2026-04-20T10:00", "", &[]);
         assert_eq!(
             (screen.as_str(), &texts[..2]),
@@ -847,5 +935,124 @@ jet_lag: [{date: 2026-04-11, steps: [{time: "12:45", text: Nap, do: bed}, {time:
                 &["Screen ".to_owned(), "Label The plan does not cover today.".to_owned()][..]
             )
         );
+    }
+
+    /// A pack in Spanish on two clocks says nothing in the template's English.
+    #[test]
+    fn a_pack_in_its_own_words_and_on_its_own_clocks_never_speaks_english() {
+        let content = r#"viajeros: [{id: ana, name: Ana}, {id: leo, name: Leo, adult: false}]
+lugares:
+  parking_norte: {nombre: Parking norte, aparcamiento: {where: Lado norte, price: 0, verified: 2026-04-01}}
+  museo: {nombre: Museo del mar}
+dias:
+  - fecha: 2026-04-10
+    titulo: Salida
+    zona: America/Bogota
+    bloques: [["22:00", "Vuelo a Madrid", {tipo: flight, boarding: "21:15"}]]
+  - fecha: 2026-04-11
+    titulo: Llegada
+    who: [ana, leo]
+    bloques:
+      - ["15:00", "Dejar el coche", {tipo: parking, lugar: parking_norte}]
+      - ["16:00", "Museo", {tipo: visit, lugar: museo, hasta: "18:00"}]
+      - ["20:00", "Paseo por el puerto", {tipo: walking, duration: 30 min}]
+  - fecha: 2026-04-12
+    titulo: Playa o sierra
+    opciones:
+      - {id: playa, name: Playa, recommended: true, why: Hace calor, cost: Aparcar, consequence: Comer tarde, blocks: [["09:30", "Salir", {tipo: driving, duration: 1 h}]]}
+      - {id: sierra, name: Sierra, blocks: [["09:00", "Tren", {tipo: train}]]}
+    decision: {when: 2026-04-10, at: "18:00", question: "¿Playa o sierra?"}
+avisos:
+  - {id: maletas, titulo: Pesar las maletas, gravedad: alta, detalle: 23 kg cada una, at: 2026-04-10, until: 2026-04-10}
+tareas:
+  - {id: seguro, titulo: Imprimir el seguro, limite: 2026-04-10}
+"#;
+        let keymap = "keymap:
+  root: {days: dias, places: lugares, people: viajeros, alerts: avisos, tasks: tareas}
+  day: {date: fecha, title: titulo, blocks: bloques, zone: zona, options: opciones}
+  block: {type: tipo, place: lugar, until: hasta}
+  place: {name: nombre, parking: aparcamiento}
+  alert: {title: titulo, severity: gravedad, detail: detalle}
+  task: {title: titulo, deadline: limite}
+  values: {severity: {high: alta}}
+";
+        let head =
+            HEAD.replace("language: en, timezone: UTC", "language: es, timezone: Europe/Madrid");
+        let mut manifest = over(&format!("{head}{keymap}")).unwrap().as_map().cloned().unwrap();
+        let english = base("travel").unwrap();
+        let section = |name: &str| english.get(name).and_then(Value::as_map).unwrap().clone();
+        let mut ui = Map::default();
+        for (i, (key, word)) in section("ui").iter().enumerate() {
+            let lettered = text(Some(word)).chars().any(char::is_alphabetic);
+            ui.set(key, if lettered { Value::String(format!("ES{i}")) } else { word.clone() });
+        }
+        let types = "{flight: Vuelo, parking: Aparcamiento, visit: Visita, walking: A pie, driving: Coche, train: Tren}";
+        ui.set("types", parse(types).unwrap());
+        let mut questions = Map::default();
+        for (id, q) in section("questions").iter() {
+            let mut q = q.as_map().unwrap().clone();
+            q.set("ask", Value::String(format!("¿Pregunta {id}?")));
+            questions.set(id, Value::Map(q));
+        }
+        manifest.set("ui", Value::Map(ui));
+        manifest.set("questions", Value::Map(questions));
+        let pack =
+            Pack { manifest: Value::Map(manifest), content: parse(content).unwrap(), theme: None };
+        let (e, warnings) = Engine::load(pack).unwrap();
+        assert!(!warnings.iter().any(|w| w.at == "ui"), "{warnings:?}");
+
+        let words: Vec<String> =
+            (section("ui").iter()).map(|(_, w)| text(Some(w))).filter(|w| w.len() > 3).collect();
+        let keys = [
+            "cost",
+            "consequence",
+            "where",
+            "who",
+            "verified",
+            "parking",
+            "visit",
+            "walking",
+            "flight",
+            "boarding",
+            "duration",
+        ];
+        // Madrid is seven hours ahead of Bogota in April; after the decision, the beach is chosen.
+        let moments = [
+            ("2026-04-11T00:30", "2026-04-10T17:30", "", "morning"),
+            ("2026-04-11T01:00", "2026-04-10T18:00", "", "choose"),
+            ("2026-04-11T15:30", "2026-04-11T08:30", "", "moment"),
+            ("2026-04-11T21:30", "2026-04-11T14:30", "", "night"),
+            ("2026-04-11T16:30", "2026-04-11T09:30", "leo", "complete"),
+        ];
+        for (now, bogota, holder, screen) in moments {
+            let store: &[_] =
+                if now > "2026-04-11T01:00" { &[("choice.2026-04-12", "playa")] } else { &[] };
+            let mut world = world(now, holder, store);
+            world.zones.set("America/Bogota", Value::String(bogota.to_owned()));
+            let tree = e.screen(&world, &mut Nav::default()).unwrap().tree;
+            // Every prop a host draws as words, on every node and inside every group.
+            let shown =
+                ["title", "text", "label", "caption", "foot", "foot_label", "hint", "value"];
+            let (mut lines, mut nodes) = (Vec::new(), tree.nodes.iter().collect::<Vec<_>>());
+            while let Some(n) = nodes.pop() {
+                lines.extend(shown.iter().filter_map(|k| at(n, k)).map(|v| text(Some(v))));
+                nodes.extend(&n.children);
+            }
+            assert_eq!(tree.screen, screen, "{now}: {lines:?}");
+            for line in &lines {
+                let english = words.iter().find(|w| line.contains(w.as_str()));
+                let lower = line.to_lowercase();
+                let key = lower.split(|c: char| !c.is_alphanumeric()).find(|w| keys.contains(w));
+                assert!(english.is_none() && key.is_none(), "{now}: {line:?} in {lines:?}");
+            }
+            if screen == "morning" {
+                assert!(lines.iter().any(|l| l == "Pesar las maletas"), "{lines:?}");
+                let tasks = show(e.decide(&world).unwrap().scope.get("tasks"));
+                assert!(tasks.contains(r#""late": false"#), "{tasks}");
+            }
+            if screen == "moment" {
+                assert!(lines.iter().any(|l| l == "Lado norte"), "{lines:?}");
+            }
+        }
     }
 }

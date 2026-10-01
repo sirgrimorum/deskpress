@@ -123,6 +123,9 @@ alerts:
 
 # The body clock, a day at a time: what to do and when, on the day's own clock.
 jet_lag:
+  - date: 2026-04-10
+    steps:
+      - {time: "22:00", text: "To bed an hour before home time", do: bed}
   - date: 2026-04-11
     steps:
       - {time: "08:00", until: "11:00", text: "Morning light on the walk, sunglasses off", do: light}

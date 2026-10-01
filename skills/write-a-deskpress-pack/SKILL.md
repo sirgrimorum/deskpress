@@ -13,7 +13,7 @@ screens and actions of each template, come from the `deskpress` binary.
 
 ## First, the binary
 
-Run `deskpress version`. If it is not there, install it from the repo (it needs a Rust toolchain,
+Run `deskpress --version`. If it is not there, install it from the repo (it needs a Rust toolchain,
 [rustup](https://rustup.rs)); run the same line again to update it:
 
 ```sh
@@ -56,7 +56,8 @@ A fact with no moment was never going to be read. Leave it out.
    and a date only when you know better. Leave out what you do not know; a forecast can sync later.
 10. **Add `jet_lag` and `tasks`** when the notes have them: the steps to move the body clock across
    zones, and what has to be done before and during the trip, each with a real deadline. Set
-   `alarm: true` only where a ring with the phone in a pocket is worth it.
+   `alarm: true` only where a ring with the phone in a pocket is worth it. A day on another clock
+   gets a `zone`; its alerts, tasks and decision follow it.
 11. **Put everything else under its own top level key.** Bookings, phrases, budget, packing, contacts.
    They become sheets with no shell support needed.
 12. **Run the validator** and fix what it reports: `deskpress validate <pack>`. Errors block the
@@ -69,8 +70,8 @@ This is the part that makes a pack worth carrying.
 - A price, a phone number, an opening time or an address that is not in the notes goes in as
   `[to confirm]`, which renders as a visible hole. A guessed one is worse than a hole: it looks
   answered.
-- Where a fact was checked and when, put `verified: YYYY-MM-DD` on the place. A card older than a
-  month says so on screen.
+- Where a fact was checked and when, put `verified: YYYY-MM-DD` on the place. It is for whoever
+  keeps the pack: no screen shows it.
 - When something is genuinely undecided, do not pick for them. If there are two real plans, that is
   an option day (below). If there is one plan with a gap, that is a hole.
 - **Ask.** A short list of questions at the end beats a pack with invented details in it.
@@ -84,7 +85,8 @@ context, and the loader does it once at load. See `deskpress reference`.
 Enum values are structure, not prose: the thirteen `type` values and the four severities are English,
 or mapped under `keymap.values`.
 
-The shell's own labels follow `pack.language`, and `ui:` in the manifest overrides any of them.
+The shell's labels are English. A pack in another language writes `ui:` in its words, `ui.types`
+for the block types and its own `questions`; `deskpress validate` lists any left in English.
 
 ## Alerts are a budget
 
@@ -96,6 +98,9 @@ Four real alerts get read. Twenty get swiped past, and then the real one gets sw
 | `high` | worth interrupting the moment | under the moment's cards |
 | `medium` | worth a row in the day | the agenda |
 | `low` | worth having written down | the alerts sheet |
+
+An alert for one adult takes `for: <id>`, not their name in the text. One that lasts several days
+takes `until`, not a daily repeat.
 
 ## A day with options
 
@@ -144,4 +149,5 @@ not. A place with nothing for a kid is not a gap to fill with a made up game.
   they would ask it, and see whether the answer is the thing they wanted.
   `deskpress preview <pack> --at 2026-10-03T08:40` prints that screen as text; add actions after
   it, like `agenda`, to open another. Show the person what it says. `deskpress alarms <pack> --at
-  <time>` lists what the phone would ring from then on.
+  <time>` lists what the phone would ring from then on. A day on another clock needs that clock's
+  time too, like `--zone America/Bogota=2026-10-02T21:40`; the binary says when one is missing.

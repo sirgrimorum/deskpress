@@ -8,9 +8,10 @@ pub use screens::{COMPONENTS, Component, Does, Effect, Piece, Prop, Screen, fill
 pub(crate) use sync::key;
 pub use sync::{FLOOR, Fetch};
 
+use crate::clock::real;
 use crate::expr::{Expr, Op, column_of, parse};
 use crate::validate::Report;
-use crate::validate::patterns::{is_id, is_language, is_real_date, is_stamp, is_time};
+use crate::validate::patterns::{is_id, is_language, is_time};
 use crate::value::{Map, Value, quote, text};
 
 /// The modules in the order they run, the content root each reads unless told otherwise (`log`
@@ -398,7 +399,7 @@ impl Definer {
             };
             let clock = match path.iter().map(String::as_str).collect::<Vec<_>>()[..] {
                 ["now" | "day", "time"] => is_time(at),
-                ["now", "stamp"] => is_stamp(at) && is_real_date(&at[..10]),
+                ["now", "stamp"] => real(at),
                 _ => false,
             };
             if !clock {

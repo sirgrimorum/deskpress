@@ -103,6 +103,16 @@ pub(crate) fn is_stamp(s: &str) -> bool {
     s.split_once('T').is_some_and(|(date, time)| is_date(date) && is_time(time))
 }
 
+/// `^[a-z_][a-z0-9_]*(\.[a-z0-9_]+)+$`, the shape of a path reference.
+pub(crate) fn is_path(s: &str) -> bool {
+    let word = |w: &str| {
+        !w.is_empty()
+            && w.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
+    };
+    let first = s.split('.').next().unwrap_or_default();
+    s.contains('.') && s.split('.').all(word) && !first.starts_with(|c: char| c.is_ascii_digit())
+}
+
 /// Text that says it still has to be checked, and renders as a hole until it is.
 pub(crate) fn to_confirm(s: &str) -> bool {
     let lower = s.to_lowercase();

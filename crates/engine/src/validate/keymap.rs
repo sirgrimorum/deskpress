@@ -44,6 +44,13 @@ impl<'a> Keymap<'a> {
             .collect()
     }
 
+    /// `canonical` and every name any section gives it, for a walk that does not know the kind.
+    pub fn names(&self, canonical: &str) -> Vec<String> {
+        let sections = self.map.map(Map::iter).into_iter().flatten();
+        let renamed = sections.map(|(_, s)| text(s.get(canonical))).filter(|r| !r.is_empty());
+        std::iter::once(canonical.to_owned()).chain(renamed).collect()
+    }
+
     /// A root collection of the content, by its canonical name or the dotted path the keymap
     /// gives it (`keymap.root.days: itinerario.dias`).
     pub fn root<'v>(&self, content: &'v Map, canonical: &str) -> Option<&'v Value> {

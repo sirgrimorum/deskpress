@@ -1,11 +1,11 @@
 //! The alarms the phone rings with the app closed (decision 0033): jet-lag steps and alerts that
 //! ask for one, and the set-off notice of every block with a `leave`.
 
-use super::{Run, id, list, plan};
+use super::{Run, holds, id, list, plan};
 use crate::clock::shift;
 use crate::engine::Alarm;
 use crate::validate::patterns::is_stamp;
-use crate::value::{text, truthy};
+use crate::value::{Value, text, truthy};
 
 impl Run<'_> {
     /// Every alarm still to come, by time, from the content roots of the days, the jet lag and the
@@ -45,20 +45,26 @@ impl Run<'_> {
                 }
             }
         }
-        for alert in alerts.iter().filter(|a| truthy(self.read(a, "alert", "alarm"))) {
+        let holder = self.holder_id();
+        let rings = |a: &&Value| truthy(self.read(a, "alert", "alarm"));
+        for alert in alerts.iter().filter(rings).filter(|a| holds(&self.canon(a, "alert"), &holder))
+        {
             let field = |k: &str| text(self.read(alert, "alert", k));
             let (time, says) = (field("time"), [field("action"), field("detail")]);
-            for (at, from) in self.falls(alert) {
-                // It rings when it says to notify, else at its hour.
+            let own = self.read(alert, "alert", "zone");
+            for [at, from, _] in self.falls(alert) {
+                let zone = self.zone_of(own, days, at.get(..10).unwrap_or_default());
+                // It rings when it says to notify, else at its hour, on the alert's clock.
                 let hour = format!("{at}T{time}");
                 let ring = [from, at, hour].into_iter().find(|r| is_stamp(r));
-                let Some(ring) = ring.filter(|r| r > now) else {
+                let Some(ring) = ring.filter(|r| self.stamp(&r[..10], &r[11..], &zone) > *now)
+                else {
                     continue;
                 };
                 let key = format!("alert.{}.{ring}", id(alert));
                 let words = says.iter().find(|s| !s.is_empty()).cloned().unwrap_or_default();
                 let title = field("title");
-                alarms.push(Alarm { key, at: ring, zone: String::new(), title, text: words });
+                alarms.push(Alarm { key, at: ring, zone, title, text: words });
             }
         }
         alarms.sort_by(|a, b| a.at.cmp(&b.at));
@@ -91,6 +97,7 @@ jet_lag:
     steps:
       - {time: "10:15", text: Up, do: wake, alarm: true}
       - {time: "10:20", text: Light, alarm: false}
+      - {time: "10:30", text: Late, alarm: true, zone: Europe/Madrid}
       - {text: All day, alarm: true}
       - {time: "09:00", text: Early, alarm: true}
 alerts:
@@ -98,6 +105,7 @@ alerts:
   - {id: call, title: Call, at: "2026-04-11T15:00", notify_from: "2026-04-11T14:00", alarm: true, detail: Ring}
   - {id: daily, title: Daily, at: 2026-04-11, time: "09:00", alarm: true, repeat: {every: 1, until: 2026-04-13}}
   - {id: quiet, title: Quiet, at: "2026-04-11T16:00"}
+  - {id: early, title: Early, at: "2026-04-11T10:30", alarm: true}
   - {id: undated, title: Undated, at: 2026-04-11, alarm: true}
   - {id: over, title: Over, at: "2026-04-11T16:00", alarm: true, status: done}
 "#;
@@ -125,14 +133,16 @@ alerts:
 
     #[test]
     fn what_asks_for_an_alarm_rings_once_to_come_and_a_set_off_notice_for_each_leave() {
+        // Gone, Late and Early are past on Madrid's clock, though not yet on the pack's.
         let all: Vec<String> = alarms(&[]).iter().map(line).collect();
         assert_eq!(
             all,
             [
                 "jet_lag.2026-04-11.0 2026-04-11T10:15  | Up | ",
                 "leave.2026-04-11.blocks.2 2026-04-11T11:10 Europe/Madrid | Ferry | Set off now",
-                "alert.tide.2026-04-11T12:00 2026-04-11T12:00  | Tide | Move the car",
-                "alert.call.2026-04-11T14:00 2026-04-11T14:00  | Call | Ring",
+                // On a Madrid day an alert rings on Madrid's clock, an hour ahead of the pack's.
+                "alert.tide.2026-04-11T12:00 2026-04-11T12:00 Europe/Madrid | Tide | Move the car",
+                "alert.call.2026-04-11T14:00 2026-04-11T14:00 Europe/Madrid | Call | Ring",
                 "leave.2026-04-12.blocks.0 2026-04-12T07:45  | Car | Set off now",
                 "alert.daily.2026-04-12T09:00 2026-04-12T09:00  | Daily | ",
                 "alert.daily.2026-04-13T09:00 2026-04-13T09:00  | Daily | ",
@@ -169,6 +179,23 @@ alerts:
         let run = Run::new(Keymap::of(&Value::Null), &content, &world, Map::default());
         let all = run.alarms([None, None, Some("alerts")], "");
         assert_eq!((all.len(), all[365].at.as_str()), (366, "2027-04-11T09:00"));
+    }
+
+    #[test]
+    fn an_alert_for_somebody_else_rings_no_alarm() {
+        let content = "alerts:
+  - {id: mine, title: M, at: '2026-04-11T12:00', alarm: true, for: rita}
+  - {id: theirs, title: T, at: '2026-04-11T12:00', alarm: true, for: tomas}
+";
+        let content = parse(content).unwrap().as_map().cloned().unwrap();
+        let world =
+            World { now: "2026-04-11T10:00".into(), holder: "rita".into(), ..World::default() };
+        let run = Run::new(Keymap::of(&Value::Null), &content, &world, Map::default());
+        let all = run.alarms([None, None, Some("alerts")], "");
+        assert_eq!(
+            all.iter().map(|a| a.key.as_str()).collect::<Vec<_>>(),
+            ["alert.mine.2026-04-11T12:00"]
+        );
     }
 
     #[test]
