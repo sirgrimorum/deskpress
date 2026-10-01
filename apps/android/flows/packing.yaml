@@ -7,14 +7,14 @@ appId: dev.deskpress.app
       now: "2026-04-11T11:30"
 - tapOn: "Today"
 - scrollUntilVisible:
-    element: "packing"
-- tapOn: "packing"
+    element: "Packing"
+- tapOn: "Packing"
 - assertVisible: "Sun hat for each of them"
 - assertVisible: "Coins for the museum lockers"
 - assertVisible: "Two changes each.*"
 - tapOn: "Sun hat for each of them"
 - tapOn: "Back"
 - scrollUntilVisible:
-    element: "packing"
-- tapOn: "packing"
+    element: "Packing"
+- tapOn: "Packing"
 - assertVisible: "Sun hat for each of them"

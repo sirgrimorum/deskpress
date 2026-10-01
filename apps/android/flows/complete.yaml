@@ -16,7 +16,7 @@ appId: dev.deskpress.app
     stopApp: true
     arguments:
       now: "2026-04-11T18:50"
-- assertVisible: "Time is up"
+- assertVisible: "Not safe here"
 # The caption says it too; the button is the one below it.
 - tapOn:
     text: "Give the phone back"
@@ -51,11 +51,11 @@ appId: dev.deskpress.app
     arguments:
       now: "2026-04-11T11:30"
       at: "38.7300,-9.1000"
-- assertVisible: "Time is up"
+- assertVisible: "Not safe here"
 - launchApp:
     stopApp: true
     arguments:
       now: "2026-04-11T11:30"
       at: "38.7248,-9.1139"
 - assertVisible: "Count the lions.*"
-- assertNotVisible: "Time is up"
+- assertNotVisible: "Not safe here"

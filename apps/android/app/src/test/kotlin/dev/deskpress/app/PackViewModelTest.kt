@@ -216,6 +216,27 @@ class PackViewModelTest {
     }
 
     @Test
+    fun aDragAsksWhetherItFitsAndKeepsNothing() = runTest {
+        val facts = Facts(File(temp.root, "facts"))
+        val model = model({ example }, "2026-04-11T11:30", facts)
+        assertEquals(false, model.would("move", Value.Null))
+        runCurrent()
+        for (action in listOf("agenda", "adjust")) {
+            model.act(action, Value.Null)
+            runCurrent()
+        }
+        val lunch = Value.Text("2026-04-11.blocks.3")
+        val kept = facts.read("one-day")
+        assertEquals(true, model.would("move", dragged(lunch, 15)))
+        // Ten hours later runs past midnight; an action the screen lacks is refused.
+        assertEquals(false, model.would("move", dragged(lunch, 600)))
+        assertEquals(false, model.would("nope", Value.Null))
+        runCurrent()
+        assertEquals("adjust", model.screen)
+        assertEquals(kept, facts.read("one-day"))
+    }
+
+    @Test
     fun aChildOutOfTheSafePlaceIsCalledBackOnceTheDeviceKnowsWhereItIs() = runTest {
         val facts = Facts(File(temp.root, "facts"))
         facts.write("one-day", "holder: tomas\nreturns_to: rita\n")

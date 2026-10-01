@@ -299,6 +299,17 @@ class PackViewModel(
         return withContext(io) { pack.calendar(world, scope, known) }
     }
 
+    /** Whether an action would store anything, asked without keeping it (decision 0035). */
+    suspend fun would(action: String, arg: Value): Boolean {
+        val pack = pack ?: return false
+        val world = here()
+        return try {
+            withContext(io) { pack.would(world, action, arg) }.isNotEmpty()
+        } catch (_: CallException.Refused) {
+            false
+        }
+    }
+
     private fun here(local: LocalDateTime = clock()): World {
         val at = local.atZone(timezone)
         val others = zones.mapValues { at.withZoneSameInstant(it.value).toLocalDateTime() }

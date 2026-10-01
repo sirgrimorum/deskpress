@@ -44,11 +44,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -60,20 +61,27 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.coerceIn
 import androidx.compose.ui.zIndex
@@ -81,6 +89,7 @@ import androidx.core.view.WindowCompat
 import dev.deskpress.engine.Finding
 import dev.deskpress.engine.Node
 import dev.deskpress.engine.Value
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -99,6 +108,9 @@ val LocalPackFile = staticCompositionLocalOf<(String) -> ByteArray?> { { null } 
 
 /** Opens a Map card full screen on a real map, where the host has one (decision 0031). */
 val LocalGuide = staticCompositionLocalOf<((Node) -> Unit)?> { null }
+
+/** Whether an action would store anything, asked of the engine while a drag is held (decision 0035). */
+val LocalWould = staticCompositionLocalOf<suspend (String, Value) -> Boolean> { { _, _ -> true } }
 
 /** The id of the theme drawn for the holder, if the file has one, and its tokens. */
 @Composable
@@ -565,78 +577,177 @@ private fun Line(
 private const val DP_A_MINUTE = 0.8f
 private val TALLEST = 240.dp
 
+/** A drag held on a Day: the row and its span, the edge (none for the whole block), where it began, the axis then. */
+private class Drag(val row: Int, val span: Span, val edge: String?, val action: String, val event: Value, val from: Float, val spans: List<Span>) {
+    var offset by mutableFloatStateOf(0f)
+    val minutes by derivedStateOf { draggedBy(spans, span, edge, from + offset) }
+    /** The engine's answer for the step held now; none while it is asked. */
+    var fits by mutableStateOf<Boolean?>(null)
+}
+
+/** The tint of a landing that fits; one that does not is the alert color. */
+private val FITS = Color(0xFF2E7D32)
+
 /**
- * The Day (decision 0032): each hour as tall as it lasts, the way between two places in small
- * muted ink, alert when it does not fit, and a handle on each hour that moves, to drag it about.
+ * The Day (decisions 0032, 0035): each hour as tall as it lasts, the page its time axis. A handle
+ * drags an hour, the picked one's edges drag its start and end, and a placeholder shows the landing.
  */
 @Composable
 private fun Day(node: Node, act: (String, Value) -> Unit) {
     val tokens = LocalTokens.current
+    val would = LocalWould.current
+    val density = LocalDensity.current
     val items = (node.props["blocks"] as? Value.Items)?.items.orEmpty()
     val picked = node.props["picked"].text()
     val word = node.props["move"].text().ifEmpty { "Move" }
-    val hours = hours(items)
-    val hour = IntArray(items.size) { -1 }.also { at -> hours.forEachIndexed { k, i -> at[i] = k } }
-    val locked = hours.map { items[it].field("locked") == Value.Bool(true) }
-    val centres = remember(hours.size) { FloatArray(hours.size) }
-    var dragging by remember(items) { mutableIntStateOf(-1) }
-    var offset by remember(items) { mutableFloatStateOf(0f) }
+    val steps =
+        listOf("earlier" to "15 minutes earlier", "later" to "15 minutes later", "shorter" to "15 minutes shorter", "longer" to "15 minutes longer")
+            .map { (key, said) -> node.props[key].text().ifEmpty { said } }
+    val moving = node.on["move"]
+    val resizing = node.on["resize"]
+    val haptic = LocalHapticFeedback.current
+    val spans = remember(items) { arrayOfNulls<Span>(items.size) }
+    var drag by remember(items) { mutableStateOf<Drag?>(null) }
+    val held = drag
+    val by = held?.minutes ?: 0
+    LaunchedEffect(held, by) {
+        if (held == null || by == 0) return@LaunchedEffect
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        held.fits = null
+        held.fits = would(held.action, dragged(held.event, by, held.edge))
+    }
+    // Only the drag a gesture began ends it: a second finger never drops the first one's.
+    fun drop(mine: Drag?) {
+        if (mine == null || drag !== mine) return
+        drag = null
+        if (mine.minutes != 0) act(mine.action, dragged(mine.event, mine.minutes, mine.edge))
+    }
     val rule = tokens.color("rule")
     val thin = tokens.size("border.rule")
-    Column(Modifier.fillMaxWidth()) {
-        items.forEachIndexed { i, item ->
-            val h = hour[i]
-            val event = item.field("event") ?: Value.Null
-            val leg = item.field("leg") == Value.Bool(true)
-            val state = if (picked.isNotEmpty() && event.text() == picked) "picked" else item.field("state").text()
-            val now = state == "now" || state == "picked"
-            val late = leg && item.field("late") == Value.Bool(true)
-            val ink = if (late) "alert" else if (leg || state == "past") "ink-muted" else if (now) "highlight-ink" else "ink"
-            val tap = node.on["tap"]?.takeIf { h >= 0 }?.let { a -> { act(a, event) } }
-            val move = node.on["move"]?.takeIf { h >= 0 && !locked[h] }
-            val least = if (leg) tokens.size("touch.min") / 2 else if (h >= 0) tokens.size("touch.row-height") else 0.dp
-            val minutes = (item.field("lasts") as? Value.Number)?.value?.toFloat() ?: 0f
-            Row(
-                Modifier.fillMaxWidth()
-                    .onPlaced { if (h >= 0) centres[h] = it.positionInParent().y + it.size.height / 2f }
-                    .then(if (h >= 0 && h == dragging) Modifier.zIndex(1f).graphicsLayer { translationY = offset } else Modifier)
-                    .heightIn(min = (minutes * DP_A_MINUTE).dp.coerceIn(least, maxOf(least, TALLEST)))
-                    .then(if (now) Modifier.background(tokens.color("highlight-bg")) else Modifier)
-                    .drawBehind {
-                        drawLine(rule, Offset(0f, size.height), Offset(size.width, size.height), thin.toPx())
-                        if (now) drawLine(tokens.color("highlight-line"), Offset(0f, 0f), Offset(0f, size.height), 8.dp.toPx())
-                    }
-                    .then(if (tap != null) Modifier.clickable(role = Role.Button, onClick = tap) else Modifier)
-                    .padding(horizontal = tokens.size("spacing.gap-s"), vertical = tokens.size("spacing.gap-s")),
-                horizontalArrangement = Arrangement.spacedBy(tokens.size("spacing.gap-s")),
-            ) {
+    Box(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth()) {
+            items.forEachIndexed { i, item ->
+                val event = item.field("event") ?: Value.Null
+                val leg = item.field("leg") == Value.Bool(true)
                 val time = item.field("time").text()
-                Text(time, Modifier.width(66.dp), style = style(if (leg) "body-s" else "value", if (state == "locked") "alert" else ink))
-                Column(Modifier.weight(1f)) {
-                    Text(item.field("text").text(), style = style(if (leg) "body-s" else "body", ink))
-                    val caption = item.field("duration").text()
-                    if (caption.isNotEmpty()) Text(caption, style = style("body-s", if (late) "alert" else "ink-muted"))
-                }
-                if (move != null) {
-                    Box(
-                        Modifier.size(tokens.size("touch.min"))
-                            // A node of its own, not merged into the row: tests and readers find the handle.
-                            .semantics(mergeDescendants = true) { contentDescription = "$word ${item.field("text").text()}" }
-                            .pointerInput(items, h) {
-                                detectVerticalDragGestures(
-                                    onDragStart = { dragging = h; offset = 0f },
-                                    onDragEnd = {
-                                        val to = landing(centres.toList(), locked, h, offset)
-                                        dragging = -1
-                                        if (to != h) act(move, moved(event, to))
-                                    },
-                                    onDragCancel = { dragging = -1 },
-                                ) { change, dy -> change.consume(); offset += dy }
+                val timed = time.isNotEmpty() && !leg
+                val real = item.field("state").text()
+                val chosen = timed && picked.isNotEmpty() && event.text() == picked
+                val state = if (chosen) "picked" else real
+                val now = state == "now" || state == "picked"
+                val late = leg && item.field("late") == Value.Bool(true)
+                val ink = if (late) "alert" else if (leg || state == "past") "ink-muted" else if (now) "highlight-ink" else "ink"
+                val tap = node.on["tap"]?.takeIf { timed }?.let { a -> { act(a, event) } }
+                // A locked hour never changes; one begun keeps its start; one over keeps both.
+                val fixed = item.field("locked") == Value.Bool(true) || real == "past"
+                val begun = real == "now"
+                val move = moving?.takeIf { timed && !fixed && !begun }
+                val resize = resizing?.takeIf { chosen && !fixed }
+                val least = if (leg) tokens.size("touch.min") / 2 else if (timed) tokens.size("touch.row-height") else 0.dp
+                val minutes = (item.field("lasts") as? Value.Number)?.value?.toFloat() ?: 0f
+                val start = clock(time)
+                // A drag on this row from `from` px down the Day, against the axis as it stands; none while another is held.
+                fun Modifier.drags(edge: String?, action: String, from: (Span) -> Float) =
+                    pointerInput(items, i, edge) {
+                        var mine: Drag? = null
+                        detectVerticalDragGestures(
+                            onDragStart = {
+                                val s = spans[i]
+                                mine = if (drag != null || s == null) null else Drag(i, s, edge, action, event, from(s), spans.filterNotNull())
+                                mine?.let { drag = it }
                             },
-                        contentAlignment = Alignment.Center,
-                    ) { Text("≡", style = style("value", "ink-muted")) }
+                            onDragEnd = { drop(mine) },
+                            onDragCancel = { if (drag === mine) drag = null },
+                        ) { change, dy -> change.consume(); mine?.let { it.offset += dy } }
+                    }
+                Box(
+                    Modifier.fillMaxWidth()
+                        .onPlaced {
+                            val top = it.positionInParent().y
+                            spans[i] = start?.let { at -> Span(top, it.size.height.toFloat(), at, minutes.toInt()) }
+                        }
+                        // The dragged row over the rest, and the picked one over its neighbours, whose edges its grips straddle.
+                        .then(
+                            if (held?.row == i && held.edge == null) Modifier.zIndex(2f).graphicsLayer { translationY = held.offset }
+                            else if (chosen) Modifier.zIndex(1f)
+                            else Modifier
+                        ),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .heightIn(min = (minutes * DP_A_MINUTE).dp.coerceIn(least, maxOf(least, TALLEST)))
+                            .then(if (now) Modifier.background(tokens.color("highlight-bg")) else Modifier)
+                            .drawBehind {
+                                drawLine(rule, Offset(0f, size.height), Offset(size.width, size.height), thin.toPx())
+                                if (now) drawLine(tokens.color("highlight-line"), Offset(0f, 0f), Offset(0f, size.height), 8.dp.toPx())
+                            }
+                            // TalkBack's way to the same edits a drag sends, fifteen minutes at a time.
+                            .then(
+                                if (!chosen) Modifier
+                                else Modifier.semantics {
+                                    customActions =
+                                        listOfNotNull(
+                                            move?.let { a -> CustomAccessibilityAction(steps[0]) { act(a, dragged(event, -15)); true } },
+                                            move?.let { a -> CustomAccessibilityAction(steps[1]) { act(a, dragged(event, 15)); true } },
+                                            resize?.let { a -> CustomAccessibilityAction(steps[2]) { act(a, dragged(event, -15, "end")); true } },
+                                            resize?.let { a -> CustomAccessibilityAction(steps[3]) { act(a, dragged(event, 15, "end")); true } },
+                                        )
+                                }
+                            )
+                            .then(if (tap != null) Modifier.clickable(role = Role.Button, onClick = tap) else Modifier)
+                            .padding(horizontal = tokens.size("spacing.gap-s"), vertical = tokens.size("spacing.gap-s")),
+                        horizontalArrangement = Arrangement.spacedBy(tokens.size("spacing.gap-s")),
+                    ) {
+                        Text(time, Modifier.width(66.dp), style = style(if (leg) "body-s" else "value", if (real == "locked") "alert" else ink))
+                        Column(Modifier.weight(1f)) {
+                            Text(item.field("text").text(), style = style(if (leg) "body-s" else "body", ink))
+                            val caption = item.field("duration").text()
+                            if (caption.isNotEmpty()) Text(caption, style = style("body-s", if (late) "alert" else "ink-muted"))
+                        }
+                        if (move != null) {
+                            Box(
+                                Modifier.size(tokens.size("touch.min"))
+                                    // A node of its own, not merged into the row: tests and readers find the handle.
+                                    .semantics(mergeDescendants = true) { contentDescription = "$word ${item.field("text").text()}" }
+                                    .drags(null, move) { s -> s.top },
+                                contentAlignment = Alignment.Center,
+                            ) { Text("≡", style = style("value", "ink-muted")) }
+                        }
+                    }
+                    if (resize != null) {
+                        for (edge in listOf("start", "end")) {
+                            if (edge == "start" && begun) continue
+                            val grip = tokens.size("touch.min") / 2
+                            Box(
+                                Modifier.align(if (edge == "start") Alignment.TopCenter else Alignment.BottomCenter)
+                                    .offset(y = if (edge == "start") -grip / 2 else grip / 2)
+                                    .size(tokens.size("touch.min"), grip)
+                                    .drags(edge, resize) { s -> if (edge == "start") s.top else s.top + s.height },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Box(Modifier.size(32.dp, 4.dp).clip(CircleShape).background(tokens.color("ink-muted")))
+                            }
+                        }
+                    }
                 }
             }
+        }
+        // Where the drag lands, tinted by the engine's answer and dashed when it does not fit; nothing while
+        // it reads as no change. An edge dragged past the other still shows a sliver.
+        if (held != null && by != 0) {
+            val (top, bottom) = landing(held.spans, held.span, held.edge, by).let { (a, b) -> minOf(a, b) to maxOf(a, b) }
+            val fits = held.fits
+            val tint = when (fits) { true -> FITS; false -> tokens.color("alert"); null -> rule }
+            Box(
+                Modifier.fillMaxWidth()
+                    .offset { IntOffset(0, top.roundToInt()) }
+                    .height(with(density) { (bottom - top).toDp() }.coerceAtLeast(thin * 4))
+                    .background(tint.copy(alpha = 0.2f))
+                    .drawBehind {
+                        val dash = if (fits == false) PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx())) else null
+                        drawRect(tint, style = Stroke(thin.toPx(), pathEffect = dash))
+                    },
+            )
         }
     }
 }

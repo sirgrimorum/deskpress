@@ -1,6 +1,6 @@
-# Moving the day about: an hour shifts and the day keeps it, one dragged down the day trades places
-# and the way to it follows, and a block of your own joins in time order. Nothing is written back
-# to the pack: every edit is a fact of its own.
+# The day like an agenda: an edge dragged shortens an hour and the rest follow, a drag past the
+# locked ferry changes nothing, a handle moves an hour, an added block joins in time order.
+# Swipes are pixels on the 1080x2400 AVD, the screen at its top.
 appId: dev.deskpress.app
 ---
 - launchApp:
@@ -11,25 +11,34 @@ appId: dev.deskpress.app
 - scrollUntilVisible:
     element: "Move the day about"
 - tapOn: "Move the day about"
-- assertVisible: "Pick an hour to move.*"
+- assertVisible: "Drag an hour by its handle.*"
+- assertNotVisible: "15 minutes later"
 - tapOn: "Lunch in the museum cloister.*"
-- scrollUntilVisible:
-    element: "15 minutes later"
-- tapOn: "15 minutes later"
-- scrollUntilVisible:
-    element: "13:30"
-    direction: UP
-# Dragged as far down as it goes: the ferry is locked, so the museum stops after the market, and
-# the way from the market to it shows.
-- scrollUntilVisible:
-    element: "Move Museu Nacional do Azulejo.*"
-    direction: UP
+# Lunch's bottom edge up half an hour: the way and the market come earlier with it.
 - swipe:
-    from: "Move Museu Nacional do Azulejo.*"
+    start: 540, 1183
+    end: 540, 1096
+    duration: 1000
+- assertVisible: "14:35"
+- assertVisible: "15:00"
+# Dragged far down, past the ferry, a locked hour: it does not fit, and nothing moves.
+- swipe:
+    from: "Move Lunch in the museum cloister.*"
     direction: DOWN
-- scrollUntilVisible:
-    element: "→ Museu Nacional do Azulejo"
-- assertVisible: "16:25"
+- assertVisible: "13:15"
+- assertVisible: "14:35"
+- assertVisible: "15:00"
+# By its handle, half an hour later.
+- swipe:
+    start: 954, 1026
+    end: 954, 1136
+    duration: 1000
+- assertVisible: "13:45"
+- assertNotVisible: "13:15"
+# Scrolled from the hours' column: the picked hour's grip sits mid-screen, where a scroll starts.
+- swipe:
+    start: 100, 1800
+    end: 100, 600
 - scrollUntilVisible:
     element: "Add something"
 - tapOn: "Add something"
@@ -42,8 +51,9 @@ appId: dev.deskpress.app
     element: "Ice cream by the river"
 - tapOn: "Back"
 - scrollUntilVisible:
-    element: "16:25"
-- assertVisible: "Ice cream by the river"
+    element: "13:45"
+- scrollUntilVisible:
+    element: "Ice cream by the river"
 # The ferry is a locked hour, so it stays where the pack put it.
 - scrollUntilVisible:
     element: "18:40"

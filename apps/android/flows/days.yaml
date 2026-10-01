@@ -1,4 +1,4 @@
-# Before the trip: the list of days.
+# Before the trip: the list of days, and the body clock already moving.
 appId: dev.deskpress.app
 ---
 - launchApp:
@@ -9,3 +9,4 @@ appId: dev.deskpress.app
 - assertVisible: "The plan does not cover today."
 - assertVisible: "The tile museum and the late ferry"
 - assertVisible: "2026-04-11"
+- assertVisible: "To bed an hour before home time"

@@ -11,3 +11,5 @@ appId: dev.deskpress.app
 - assertVisible: "Morning light on the walk, sunglasses off"
 - assertVisible: "See the day"
 - assertNotVisible: "Point by point"
+# Who the day is for is the pack's to know, not a card.
+- assertNotVisible: "WHO"

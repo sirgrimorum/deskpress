@@ -457,7 +457,8 @@ class MainActivity : FragmentActivity() {
             val packFile = remember(folder) {
                 { path: String -> runCatching { file(folder, path) }.getOrNull() }
             }
-            CompositionLocalProvider(LocalShell provides shell, LocalPackFile provides packFile, LocalGuide provides walk) {
+            val would = remember(model) { model::would }
+            CompositionLocalProvider(LocalShell provides shell, LocalPackFile provides packFile, LocalGuide provides walk, LocalWould provides would) {
                 MaterialTheme(if (dark) darkColorScheme() else lightColorScheme()) {
                     val close = { page = null }
                     if (page != null) BackHandler(onBack = close)
