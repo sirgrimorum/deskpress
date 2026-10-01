@@ -70,7 +70,7 @@ dependencies {
 // Coverage of the code that is not drawing: the view model, the pack files, facts, sync,
 // calendar, location, maps and theme. Screens, the activity and the generated bindings are left to
 // the e2e flows, and keeping the maps offline to a phone. The floor is the level measured when it was set: what stays uncovered needs a
-// device or a composition (the calendar provider, the Keystore, a picked folder, the network,
+// device or a composition (the calendar provider, the alarm service, the Keystore, a picked folder, the network,
 // the state a screen holds).
 kover {
     reports {
@@ -83,6 +83,8 @@ kover {
                     "dev.deskpress.app.Asking*",
                     "dev.deskpress.app.Syncing*",
                     "dev.deskpress.app.Menu",
+                    "dev.deskpress.app.Ringer*",
+                    "dev.deskpress.app.AlarmReceiver*",
                     "dev.deskpress.app.ScreenKt*",
                     "dev.deskpress.app.SettingsKt*",
                     "dev.deskpress.app.Shell",

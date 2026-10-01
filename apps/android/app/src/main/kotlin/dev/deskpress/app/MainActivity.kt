@@ -2,11 +2,13 @@ package dev.deskpress.app
 
 import android.Manifest.permission.ACCESS_COARSE_LOCATION
 import android.Manifest.permission.ACCESS_FINE_LOCATION
+import android.Manifest.permission.POST_NOTIFICATIONS
 import android.Manifest.permission.READ_CALENDAR
 import android.Manifest.permission.WRITE_CALENDAR
 import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
@@ -27,8 +29,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts.CreateDocument
+import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
 import androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree
 import androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions
+import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
 import androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
@@ -48,6 +52,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.content.edit
@@ -60,6 +65,8 @@ import dev.deskpress.engine.Edit
 import dev.deskpress.engine.Node
 import dev.deskpress.engine.Plan
 import dev.deskpress.engine.Shortcut
+import dev.deskpress.engine.Taken
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.time.LocalDateTime
@@ -82,6 +89,9 @@ private const val SHIFT = "shift"
 private const val AT = "at"
 private const val KEPT = "kept"
 private const val KEPT_BYTES = "kept_bytes"
+
+/** A trip file is the pack's text and its facts: anything past this is not one. */
+private const val MAX_TRIP = 4 shl 20
 
 /** The id of a question a launcher or the phone's assistant opened the app at (decision 0027). */
 private const val QUESTION = "dev.deskpress.question"
@@ -281,6 +291,44 @@ class MainActivity : FragmentActivity() {
                 }
             }
 
+            // The trip to another phone through any app that sends a file, and one sent back
+            // taken once the person says so (decision 0034).
+            var trip by remember { mutableStateOf<Taken?>(null) }
+            val send: () -> Unit = {
+                scope.launch {
+                    val text = model.send() ?: return@launch
+                    val file = File(cacheDir, "shared/${model.packId}.deskpress")
+                    try {
+                        withContext(Dispatchers.IO) { file.parentFile?.mkdirs(); file.writeText(text) }
+                    } catch (e: IOException) {
+                        say("The trip could not be written: ${e.message}")
+                        return@launch
+                    }
+                    val uri = FileProvider.getUriForFile(this@MainActivity, "$packageName.shared", file)
+                    // ClipData carries the read grant to the app picked in the chooser.
+                    val intent = Intent(Intent.ACTION_SEND).setType("application/octet-stream")
+                        .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        .apply { clipData = ClipData.newRawUri(null, uri) }
+                    startActivity(Intent.createChooser(intent, "Send the trip"))
+                }
+            }
+            val taker = rememberLauncherForActivityResult(OpenDocument()) { uri ->
+                if (uri == null) return@rememberLauncherForActivityResult
+                scope.launch {
+                    val taken =
+                        try {
+                            model.weigh(withContext(Dispatchers.IO) { readTrip(uri) })
+                        } catch (e: CallException.Refused) {
+                            say(e.detail)
+                            null
+                        } catch (e: IOException) {
+                            say("The trip could not be read: ${e.message}")
+                            null
+                        } ?: return@launch
+                    if (taken.facts.isEmpty() && taken.files.isEmpty()) say(brings(taken)) else trip = taken
+                }
+            }
+
             // A data sync: the hosts each pack may fetch from, its sealed secrets, and the question
             // on screen. One left open when the screen goes is dropped, and the fetch with it.
             val approved = remember { Facts(File(filesDir, "hosts"), "txt") }
@@ -288,7 +336,26 @@ class MainActivity : FragmentActivity() {
             var asking by remember { mutableStateOf<Asking?>(null) }
             DisposableEffect(Unit) { onDispose { asking?.answer?.cancel() } }
 
+            // The pack's alarms, set with the phone so they ring with the app closed; asked to
+            // notify once a session, and never under a frozen clock.
+            var notifyAsked by rememberSaveable { mutableStateOf(false) }
+            val askNotify = rememberLauncherForActivityResult(RequestPermission()) { granted ->
+                if (!granted) say("Without notifications, the alarms stay silent.")
+            }
+
             LaunchedEffect(model) {
+                if (frozen == null) {
+                    val app = applicationContext
+                    val ringer = Ringer(app)
+                    model.alarms = { all ->
+                        val rings = rings(all, model.timezone, System.currentTimeMillis())
+                        ringer.set(rings)
+                        if (rings.isNotEmpty() && !app.canNotify() && !notifyAsked) {
+                            notifyAsked = true
+                            askNotify.launch(POST_NOTIFICATIONS)
+                        }
+                    }
+                }
                 model.allow = { hosts ->
                     val list = hosts.joinToString("\n")
                     withContext(Dispatchers.IO) { approved.read(model.packId) } == list || run {
@@ -396,8 +463,8 @@ class MainActivity : FragmentActivity() {
                     if (page != null) BackHandler(onBack = close)
                     val open = doc
                     val menu =
-                        remember(picker) {
-                            Menu({ picker.launch(null) }, { page = "check" }, { page = "design" }, { page = "settings" })
+                        remember(picker, model) {
+                            Menu({ picker.launch(null) }, { page = "check" }, { page = "design" }, { page = "settings" }, send, { taker.launch(arrayOf("*/*")) })
                         }
                     when (val s = syncing) {
                         is Syncing.Pick -> PickCalendar(s.calendars, { id ->
@@ -406,6 +473,12 @@ class MainActivity : FragmentActivity() {
                         }) { syncing = null }
                         is Syncing.Confirm -> ConfirmSync(s.plan, { write(s.plan, s.ledger) }) { syncing = null }
                         null -> {}
+                    }
+                    trip?.let { t ->
+                        TakeTrip(t, {
+                            trip = null
+                            model.take(t) { why -> say(if (why == null) "The trip is taken." else "The facts are taken, not the pack: $why") }
+                        }) { trip = null }
                     }
                     when (val a = asking) {
                         is Asking.Hosts -> AllowHosts(a.hosts) { asking = null; a.answer.complete(it) }
@@ -515,6 +588,19 @@ class MainActivity : FragmentActivity() {
             .sortedBy { it.first }
 
     private fun say(text: String) = Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+
+    /** The text of a trip file the person picked; anything too big to be one is not read. */
+    private fun readTrip(uri: Uri): String {
+        val stream = contentResolver.openInputStream(uri) ?: throw IOException("the file is gone")
+        // Read up to one byte past the limit, since a provider may not say how big the file is.
+        val out = ByteArrayOutputStream()
+        stream.use { s ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (out.size() <= MAX_TRIP) out.write(buffer, 0, s.read(buffer).takeIf { it >= 0 } ?: break)
+        }
+        if (out.size() > MAX_TRIP) throw IOException("it is too big to be a trip")
+        return out.toString(Charsets.UTF_8.name())
+    }
 
     private fun canCalendar() = CALENDAR.all { ContextCompat.checkSelfPermission(this, it) == PERMISSION_GRANTED }
 

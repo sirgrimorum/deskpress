@@ -12,9 +12,9 @@ appId: dev.deskpress.app
     element: "Put this day in the calendar"
 - tapOn: "Put this day in the calendar"
 - tapOn: "Deskpress e2e.*"
-- assertVisible: "4 new, 0 changed, 0 removed"
+- assertVisible: "5 new, 0 changed, 0 removed"
 - tapOn: "Apply"
-- assertVisible: "The calendar is updated: 4 new, 0 changed, 0 removed."
+- assertVisible: "The calendar is updated: 5 new, 0 changed, 0 removed."
 # Asked again, there is nothing left to write.
 - tapOn: "Put this day in the calendar"
 - extendedWaitUntil:

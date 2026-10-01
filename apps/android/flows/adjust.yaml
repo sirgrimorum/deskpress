@@ -1,5 +1,6 @@
-# Moving the day about: an hour shifts and the day keeps it, and a block of your own joins in time
-# order. Nothing is written back to the pack: every edit is a fact of its own.
+# Moving the day about: an hour shifts and the day keeps it, one dragged down the day trades places
+# and the way to it follows, and a block of your own joins in time order. Nothing is written back
+# to the pack: every edit is a fact of its own.
 appId: dev.deskpress.app
 ---
 - launchApp:
@@ -10,10 +11,25 @@ appId: dev.deskpress.app
 - scrollUntilVisible:
     element: "Move the day about"
 - tapOn: "Move the day about"
-- assertVisible: "Pick an hour to move."
+- assertVisible: "Pick an hour to move.*"
 - tapOn: "Lunch in the museum cloister.*"
+- scrollUntilVisible:
+    element: "15 minutes later"
 - tapOn: "15 minutes later"
-- assertVisible: "13:30"
+- scrollUntilVisible:
+    element: "13:30"
+    direction: UP
+# Dragged as far down as it goes: the ferry is locked, so the museum stops after the market, and
+# the way from the market to it shows.
+- scrollUntilVisible:
+    element: "Move Museu Nacional do Azulejo.*"
+    direction: UP
+- swipe:
+    from: "Move Museu Nacional do Azulejo.*"
+    direction: DOWN
+- scrollUntilVisible:
+    element: "→ Museu Nacional do Azulejo"
+- assertVisible: "16:25"
 - scrollUntilVisible:
     element: "Add something"
 - tapOn: "Add something"
@@ -22,9 +38,12 @@ appId: dev.deskpress.app
 - tapOn: "What is it"
 - inputText: "Ice cream by the river"
 - tapOn: "Add it"
-- assertVisible: "Ice cream by the river"
+- scrollUntilVisible:
+    element: "Ice cream by the river"
 - tapOn: "Back"
-- assertVisible: "13:30"
+- scrollUntilVisible:
+    element: "16:25"
 - assertVisible: "Ice cream by the river"
 # The ferry is a locked hour, so it stays where the pack put it.
-- assertVisible: "18:40"
+- scrollUntilVisible:
+    element: "18:40"

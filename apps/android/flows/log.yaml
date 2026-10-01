@@ -1,0 +1,36 @@
+# The car and the trip's notes, kept as facts: a field kept only once typed, a note on its own, both
+# there after a restart.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T11:30"
+- tapOn: "Today"
+- scrollUntilVisible:
+    element: "Car and notes"
+- tapOn: "Car and notes"
+- assertNotVisible: "Keep"
+- tapOn: "Plate"
+- inputText: "1234 ABC"
+- tapOn: "Keep"
+- scrollUntilVisible:
+    element: "Car and notes"
+- tapOn: "Car and notes"
+- assertVisible: "1234 ABC"
+- tapOn: "Write a note"
+- assertNotVisible: "Keep the note"
+- tapOn: "The note"
+- inputText: "Filled up"
+- tapOn: "Keep the note"
+- assertVisible: "Filled up"
+- launchApp:
+    stopApp: true
+    arguments:
+      now: "2026-04-11T11:30"
+- tapOn: "Today"
+- scrollUntilVisible:
+    element: "Car and notes"
+- tapOn: "Car and notes"
+- assertVisible: "1234 ABC"
+- assertVisible: "Filled up"

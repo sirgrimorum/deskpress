@@ -9,5 +9,7 @@ appId: dev.deskpress.app
 - tapOn: "Tomas"
 - assertVisible: "Tomas"
 - assertNotVisible: "Menu"
+- scrollUntilVisible:
+    element: "Give the phone back"
 - tapOn: "Give the phone back"
 - assertVisible: "Now · meal"

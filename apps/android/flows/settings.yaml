@@ -6,6 +6,9 @@ appId: dev.deskpress.app
     arguments:
       now: "2026-04-11T11:30"
 - tapOn: "Menu"
+# The trip goes to another phone and comes back through the menu; the flows never send one.
+- assertVisible: "Send the trip…"
+- assertVisible: "Take a trip sent to you…"
 - tapOn: "Settings"
 - assertVisible: "TEXT SIZE"
 - assertVisible: "MAPS OPEN IN"

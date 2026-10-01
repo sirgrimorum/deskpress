@@ -1,0 +1,13 @@
+# The trip's to-do from the morning: by deadline with who, and a tick kept that the count follows.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T09:00"
+- tapOn: "To do · 2"
+- assertVisible: "2026-04-11 · Rita"
+- assertNotVisible: "Print the museum tickets"
+- tapOn: "Check the ferry times again"
+- tapOn: "Back"
+- assertVisible: "To do · 1"

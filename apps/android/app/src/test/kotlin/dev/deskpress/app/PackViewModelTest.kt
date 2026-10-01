@@ -1,6 +1,8 @@
 package dev.deskpress.app
 
+import dev.deskpress.engine.CallException
 import dev.deskpress.engine.Edit
+import dev.deskpress.engine.Taken
 import dev.deskpress.engine.Value
 import java.io.File
 import java.io.IOException
@@ -295,6 +297,32 @@ class PackViewModelTest {
     }
 
     @Test
+    fun whatIsStillToRingGoesToTheHostOnLoadAndWhenAFactIsKept() = runTest {
+        val model = model({ example }, "2026-04-11T08:00")
+        val handed = mutableListOf<List<String>>()
+        model.alarms = { all -> handed += all.map { it.key } }
+        runCurrent()
+        val keys = listOf(
+            "alert.sunscreen.2026-04-11T12:00",
+            "leave.2026-04-11.blocks.5",
+            "jet_lag.2026-04-11.2",
+            "alert.sunscreen.2026-04-12T12:00",
+        )
+        assertEquals(listOf(keys), handed)
+        // Opening a screen keeps nothing; a tick is a fact, so the alarms are asked for again.
+        model.act("tasks", Value.Null)
+        runCurrent()
+        assertEquals(1, handed.size)
+        model.act("tick", Value.Text("task.ferry_times"))
+        runCurrent()
+        assertEquals(listOf(keys, keys), handed)
+        // A hook set once the pack is open is handed them at once.
+        model.alarms = { all -> handed += all.map { it.key } }
+        runCurrent()
+        assertEquals(3, handed.size)
+    }
+
+    @Test
     fun aQuestionIsOfferedOutsideTheAppAndOpensTheScreenAtIt() = runTest {
         val model = model({ asking }, "2026-04-11T11:30")
         runCurrent()
@@ -518,4 +546,78 @@ class PackViewModelTest {
         runCurrent()
         assertEquals(Value.Text("20px"), again.theme.at("spacing", "margin"))
     }
+
+    @Test
+    fun aTripGoesToAnotherPhoneThatTakesItsNewerFactsAndPack() = runTest {
+        val pack = example.getValue("pack.yaml")
+        val newer = example + ("pack.yaml" to pack.replace("updated: 2026-04-01", "updated: 2026-04-10"))
+        val there = model({ newer }, "2026-04-11T11:30", Facts(temp.newFolder("there")))
+        runCurrent()
+        // Stamped on the real clock, not the test's nor one set by hand.
+        val before = System.currentTimeMillis()
+        there.shift = 3_600
+        there.act("parked", point(38.7, -9.1))
+        runCurrent()
+        val sent = there.send()!!
+        val overlay = Overlay(temp.newFolder("pack"))
+        val facts = Facts(temp.newFolder("here"))
+        val here = model({ overlay.over(example) }, "2026-04-11T11:30", facts, overlay::write)
+        runCurrent()
+        val taken = here.weigh(sent)!!
+        assertEquals(setOf("car", "log.parked", "log.spot"), taken.facts.keys)
+        assertTrue(taken.stamps.getValue("car") in before..System.currentTimeMillis())
+        assertEquals("3 newer facts from the other phone, and the pack as updated 2026-04-10.", brings(taken))
+        var why: String? = "not done"
+        here.take(taken) { why = it }
+        runCurrent()
+        assertEquals(null, why)
+        // Only the file that changed is written over the pack.
+        assertEquals(newer.getValue("pack.yaml"), File(temp.root, "pack/pack.yaml").readText())
+        assertEquals(listOf("pack.yaml"), File(temp.root, "pack").list()!!.toList())
+        // After a restart the facts, when each was kept, and the pack are there: nothing is newer.
+        val again = model({ overlay.over(example) }, "2026-04-11T11:30", facts, overlay::write)
+        runCurrent()
+        val same = again.weigh(sent)!!
+        assertEquals(emptyMap<String, Value>() to emptyMap<String, String>(), same.facts to same.files)
+        // The stamps came back too: a car kept earlier on a third phone does not win.
+        assertEquals(emptyMap<String, Value>(), again.weigh(trip("car", "elsewhere", 5))!!.facts)
+        val refused = runCatching { again.weigh("deskpress: theme\n") }.exceptionOrNull() as CallException.Refused
+        assertEquals("this is not a trip DeskPress shared", refused.detail)
+    }
+
+    @Test
+    fun aPackSentThatDoesNotLoadOrCannotBeWrittenLeavesTheFactsTaken() = runTest {
+        val facts = Facts(temp.newFolder("facts"))
+        val written = mutableListOf<String>()
+        var full = false
+        val model = model({ example }, "2026-04-11T11:30", facts, write = { path, _ -> if (full) throw IOException("no room") else written += path })
+        runCurrent()
+        // A stamp past now is kept as now, so a later edit still wins.
+        val pack = mapOf("pack.yaml" to "pack: [", "notes.yaml" to "a: 1\n")
+        val broken = Taken(mapOf("log.fuel" to Value.Text("hi")), mapOf("log.fuel" to Long.MAX_VALUE), pack, "2026-04-12")
+        var why: String? = null
+        model.take(broken) { why = it }
+        runCurrent()
+        // Nothing of a pack that does not load is written, and it says why.
+        assertEquals(emptyList<String>(), written)
+        assertTrue(why!!, why!!.isNotEmpty() && !why!!.startsWith("not written"))
+        assertEquals("moment", model.screen)
+        assertEquals(setOf("log.fuel"), model.weigh(trip("log.fuel", "later", System.currentTimeMillis() + 60_000))!!.facts.keys)
+        // The manifest is written last.
+        val valid = broken.copy(files = pack + ("pack.yaml" to example.getValue("pack.yaml") + "\n"))
+        model.take(valid) { why = it }
+        runCurrent()
+        assertEquals(null, why)
+        assertEquals(listOf("notes.yaml", "pack.yaml"), written)
+        full = true
+        model.take(valid.copy(files = mapOf("pack.yaml" to example.getValue("pack.yaml") + "\n\n"))) { why = it }
+        runCurrent()
+        assertEquals("not written: no room", why)
+        assertTrue(facts.read("one-day")!!.contains("hi"))
+        assertTrue(facts.read("one-day.stamps")!!.contains("log.fuel"))
+    }
+
+    // A trip of the example pack with one fact, kept at `at`.
+    private fun trip(key: String, value: String, at: Long) =
+        "deskpress: trip\npack: one-day\nupdated: \"\"\nfacts:\n  $key: $value\nstamps:\n  $key: $at\nfiles: {}\n"
 }

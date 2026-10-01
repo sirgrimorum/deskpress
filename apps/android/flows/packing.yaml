@@ -14,5 +14,7 @@ appId: dev.deskpress.app
 - assertVisible: "Two changes each.*"
 - tapOn: "Sun hat for each of them"
 - tapOn: "Back"
+- scrollUntilVisible:
+    element: "packing"
 - tapOn: "packing"
 - assertVisible: "Sun hat for each of them"

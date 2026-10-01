@@ -18,7 +18,7 @@ flowchart LR
     sensors[/"clock, location, holder"/]
     store[("stored facts")]
     renderer["Compose renderer"]
-    tools["tools: map, calendar, geofence, biometric, model"]
+    tools["tools: map, calendar, alarms, geofence, biometric, model"]
   end
   pack --> load
   sensors --> world
@@ -91,7 +91,8 @@ The details, and why, are in [decision 0002](decisions/0002-main-machine-and-scr
 
 Shared, tested domain logic that a pack opts into: `timeline` (which day, which block), `places`
 (which place, geofences), `people` (who holds the phone), `choices` (stored decisions), `alerts`,
-`documents`, `climate` (the weather here, today), `sheets` (reference tables). Each exposes names to expressions and may ask the host for tools. A module mixes
+`jet_lag` (the body clock), `tasks`, `log` (the car and the notes), `documents`, `climate` (the
+weather here, today), `sheets` (reference tables). Each exposes names to expressions and may ask the host for tools. A module mixes
 two inputs: its data, which the pack says where to take from (the pack, a sync, or both), and the
 world, which the host pushes in and the module's code decides which parts it reads. See
 [decision 0004](decisions/0004-modules-and-derive.md).
@@ -182,7 +183,11 @@ the tools: open a map, sync a calendar, fetch a module's data, watch geofences, 
 fingerprint, dial a number, show a pack file full screen, ask the phone's own model, keep the trip's maps offline and open a
 Map card full screen. For a calendar sync the engine says what the events are
 and what changed against what the host wrote before; the host writes only its own rows. See
-[decision 0021](decisions/0021-calendar.md).
+[decision 0021](decisions/0021-calendar.md). For alarms the engine lists what is still to ring and
+the host sets it with the phone's alarm service, so it rings with the app closed
+([decision 0033](decisions/0033-the-trip-around-the-days.md)). For the trip sent to another phone
+the engine writes the file and says what of one sent is newer; the host stamps each fact it keeps
+and hands the file to whatever app sends it ([decision 0034](decisions/0034-the-trip-phone-to-phone.md)).
 
 Some choices belong to the host and not to any pack: how big the text is drawn, which scales every
 type step over the theme; which of the phone's map apps `map.open` and `map.route` are sent to;

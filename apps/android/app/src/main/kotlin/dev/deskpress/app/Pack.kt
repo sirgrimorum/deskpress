@@ -175,9 +175,22 @@ fun Context.bytes(folder: Uri, path: String): ByteArray {
     return stream.use { it.readBytes() }
 }
 
-/** Writes `text` over the file at `path` inside the folder the person picked. */
+/** Writes `text` over the file at `path` inside the folder the person picked, made with its folders when new. */
 fun Context.write(folder: Uri, path: String, text: String) {
-    val uri = find(folder, path)
+    var dir = DocumentFile.fromTreeUri(this, folder) ?: throw IOException("the folder is gone")
+    val names = path.split('/')
+    for (name in names.dropLast(1)) {
+        dir = dir.findFile(name)?.takeIf { it.isDirectory } ?: dir.createDirectory(name) ?: throw IOException("$path cannot be written")
+    }
+    val name = names.last()
+    // A provider may rename a new file it already holds one of; that one is not the file asked for.
+    val file = dir.findFile(name) ?: dir.createFile("application/octet-stream", name)?.also {
+        if (it.name != name) {
+            it.delete()
+            throw IOException("$path cannot be written")
+        }
+    }
+    val uri = file?.takeIf { it.isFile }?.uri ?: throw IOException("$path cannot be written")
     val stream = contentResolver.openOutputStream(uri, "wt") ?: throw IOException("$path cannot be written")
     stream.bufferedWriter().use { it.write(text) }
 }

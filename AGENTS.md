@@ -33,8 +33,9 @@ flowchart LR
 - **The engine** (`crates/engine`) is pure Rust, standard library only. It never reads a clock, a
   file, a sensor or the network; the host passes everything in. The main calls: `load(files)`,
   `screen(world)`, `dispatch(world, action, arg)`, plus `calendar`, `hosts`, `requests` and
-  `received` for the calendar and data syncs, `zones` for the clocks the host passes, and the free
-  functions `edit_theme`, `encode_facts` and `decode_facts`. On the phone it is a native library reached through UniFFI
+  `received` for the calendar and data syncs, `zones` for the clocks the host passes, `alarms` for
+  what rings with the app closed, and the free functions `share` and `take` for the trip sent
+  phone to phone, `edit_theme`, `encode_facts` and `decode_facts`. On the phone it is a native library reached through UniFFI
   (`crates/ffi`, phase 2), which generates typed Kotlin, later Swift, bindings. On the desk and in
   the LLM plugin it is the `deskpress` binary (`crates/cli`), which prints trees as JSON, or as text
   with `preview`.
@@ -47,7 +48,7 @@ flowchart LR
   fact, which is an input, so it can move the main machine. A module action goes to the host as a
   command.
 - **Modules** hold shared domain logic a pack opts into: `timeline`, `places`, `people`, `choices`,
-  `alerts`, `documents`, `climate`, `sheets`. Each declares its config schema, the names it exposes, its actions and the
+  `alerts`, `jet_lag`, `tasks`, `log`, `documents`, `climate`, `sheets`. Each declares its config schema, the names it exposes, its actions and the
   host tools it needs. `derive` adds named values, in order, from expressions.
 - **Expressions** are our own small grammar (in `docs/pack-format.md`), parsed to an AST at load and
   never evaluated as code. A bad expression is a load error with key path and column.
@@ -106,7 +107,7 @@ SDK in the Makefile, Gradle in its wrapper, the app's libraries in
 | --- | --- |
 | `.github/` | CI workflows (gate, Android host), security audit, Dependabot, issue and PR templates |
 | `crates/engine` | yaml, expressions, loader, validator, definition, modules, the engine: the screen for a world and its watch, screen machines, the nav stack. Std only |
-| `crates/cli` | the `deskpress` binary: `validate`, `screen`, `act`, `preview`, `reference` |
+| `crates/cli` | the `deskpress` binary: `validate`, `screen`, `act`, `preview`, `alarms`, `reference` |
 | `crates/ffi` | the UniFFI bindings and their bindgen, the only crate that depends on UniFFI |
 | `apps/android` | the host: a ViewModel and the Compose renderer. See its README |
 | `Makefile` | every development task; `make check` is the one that must pass |

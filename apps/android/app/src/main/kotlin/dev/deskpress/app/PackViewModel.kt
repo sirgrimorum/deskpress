@@ -2,6 +2,7 @@ package dev.deskpress.app
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dev.deskpress.engine.Alarm
 import dev.deskpress.engine.CallException
 import dev.deskpress.engine.Edit
 import dev.deskpress.engine.Field
@@ -9,6 +10,7 @@ import dev.deskpress.engine.Finding
 import dev.deskpress.engine.LoadException
 import dev.deskpress.engine.LoadedPack
 import dev.deskpress.engine.Plan
+import dev.deskpress.engine.Taken
 import dev.deskpress.engine.Value
 import dev.deskpress.engine.View
 import dev.deskpress.engine.World
@@ -36,6 +38,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -68,9 +72,14 @@ class PackViewModel(
         private set
     private var theme: Value = Value.Null
     private var warnings = emptyList<Finding>()
-    // What actions kept, saved under the pack's id after each one.
+    // What actions kept, saved under the pack's id after each one, and when each was kept in
+    // milliseconds, for a trip another phone sends (decision 0034).
     private val store = mutableMapOf<String, Value>()
+    private val stamps = mutableMapOf<String, Long>()
     private var timer: Job? = null
+    private var ringing: Job? = null
+    // One write of the facts at a time, in the order they were asked for.
+    private val disk = Mutex()
     private val _position = MutableStateFlow<Pair<Double, Double>?>(null)
     /** Where the device is, once it knows: the regions and the full-screen map follow it. */
     val position: StateFlow<Pair<Double, Double>?> = _position.asStateFlow()
@@ -109,10 +118,18 @@ class PackViewModel(
     var secret: suspend (name: String, host: String) -> String? = { _, _ -> null }
     var forget: (name: String, host: String) -> Unit = { _, _ -> }
 
+    // The phone's alarm service, handed every alarm still to ring each time the pack or its facts change.
+    var alarms: (List<Alarm>) -> Unit = {}
+        set(value) {
+            field = value
+            ring()
+        }
+
     init {
         viewModelScope.launch {
             _state.value = attempt { open(withContext(io) { files() }) }
             watch()
+            ring()
         }
     }
 
@@ -129,7 +146,12 @@ class PackViewModel(
         packId = loaded.id()
         theme = loaded.theme()
         warnings = loaded.warnings()
-        withContext(io) { facts?.read(packId)?.let { store.putAll(decodeFacts(it)) } }
+        withContext(io) {
+            facts?.read(packId)?.let { store.putAll(decodeFacts(it)) }
+            facts?.read("$packId.stamps")?.let { t ->
+                for ((k, v) in decodeFacts(t)) if (v is Value.Number) stamps[k] = v.value.toLong()
+            }
+        }
         val world = here()
         return show(withContext(io) { loaded.screen(world) }, warnings, theme)
     }
@@ -154,6 +176,7 @@ class PackViewModel(
                     withContext(io) { write(edited.file, edited.text) }
                     _state.value = attempt { open(files + (edited.file to edited.text)) }
                     watch()
+                    ring()
                     copy = null
                     null
                 } catch (e: LoadException.Unreadable) {
@@ -182,9 +205,11 @@ class PackViewModel(
                     return@launch
                 }
             store.putAll(out.store)
-            keep()
+            stamp(out.store.keys)
+            if (out.store.isNotEmpty()) keep()
             _state.value = attempt { show(out.view, warnings, theme) }
             watch()
+            if (out.store.isNotEmpty()) ring()
             for (cmd in out.commands) {
                 when (cmd.name) {
                     "device.unlock" -> unlock { ok ->
@@ -322,13 +347,85 @@ class PackViewModel(
                     val reply = if (url == null) Reply(0, "no ${r.secret} to ask with") else withContext(io) { fetch(url) }
                     if (r.secret.isNotEmpty() && (reply.status == 401 || reply.status == 403)) forget(r.secret, host)
                     val at = here(now(timezone))
-                    store.putAll(withContext(io) { pack.received(at, r, reply.status.toUShort(), reply.body) })
+                    val got = withContext(io) { pack.received(at, r, reply.status.toUShort(), reply.body) }
+                    store.putAll(got)
+                    stamp(got.keys)
                 }
             } finally {
                 syncing -= modules.toSet()
             }
             keep()
             redraw()
+        }
+    }
+
+    /** The trip as text for another phone holding this pack: its facts, when each was kept, its files. */
+    suspend fun send(): String? {
+        val pack = pack ?: return null
+        val (facts, kept) = store.toMap() to stamps.toMap()
+        return withContext(io) { pack.share(facts, kept, files) }
+    }
+
+    /** What this phone would take of `sent`, a trip another phone shared. Refused when it is not a trip, or another pack's. */
+    suspend fun weigh(sent: String): Taken? {
+        val pack = pack ?: return null
+        val (facts, kept) = store.toMap() to stamps.toMap()
+        return withContext(io) { pack.take(sent, facts, kept) }
+    }
+
+    /**
+     * Keeps the facts `taken` brings, then its files over the pack's when they load. `done` gets
+     * why the files were not taken, or null.
+     */
+    fun take(taken: Taken, done: (String?) -> Unit) {
+        viewModelScope.launch {
+            store.putAll(taken.facts)
+            // A stamp from past now would win over every later edit here, and travel on from here.
+            val real = System.currentTimeMillis()
+            stamps.putAll(taken.stamps.mapValues { minOf(it.value, real) })
+            keep()
+            val next = files + taken.files
+            val why =
+                try {
+                    if (taken.files.isNotEmpty()) {
+                        withContext(io) {
+                            load("pack.yaml", next).close()
+                            // The manifest last: it says when the pack was updated, so one written
+                            // half way is sent again.
+                            val order = taken.files.entries.sortedBy { it.key == "pack.yaml" }
+                            for ((path, text) in order) if (files[path] != text) write(path, text)
+                        }
+                    }
+                    null
+                } catch (e: LoadException.Unreadable) {
+                    e.detail
+                } catch (e: LoadException.Invalid) {
+                    e.errors.joinToString("\n") { it.message }
+                } catch (e: IOException) {
+                    "not written: ${e.message}"
+                } catch (e: SecurityException) {
+                    "not written: the folder can no longer be written. Open it again from the menu."
+                }
+            _state.value = attempt { open(if (why == null) next else files) }
+            watch()
+            ring()
+            done(why)
+        }
+    }
+
+    /** What is still to ring, on the real clock: the clock set by hand never sets an alarm. */
+    private fun ring() {
+        val pack = pack ?: return
+        // Only the latest ask is handed on, so an older list never lands last.
+        ringing?.cancel()
+        ringing = viewModelScope.launch {
+            val all =
+                try {
+                    withContext(io) { pack.alarms(here(now(timezone))) }
+                } catch (_: CallException.Refused) {
+                    return@launch
+                }
+            alarms(all)
         }
     }
 
@@ -354,8 +451,22 @@ class PackViewModel(
 
     private fun clock() = now(timezone).plusSeconds(shift)
 
-    /** What actions kept, saved under the pack's id. */
-    private suspend fun keep() = withContext(io) { facts?.write(packId, encodeFacts(store)) }
+    /** When `keys` were kept, on the real clock, as another phone compares them. */
+    private fun stamp(keys: Set<String>) {
+        val at = System.currentTimeMillis()
+        for (k in keys) stamps[k] = at
+    }
+
+    /** What actions kept and when, saved under the pack's id. */
+    private suspend fun keep() {
+        val (kept, at) = store.toMap() to stamps.mapValues { Value.Number(it.value.toDouble()) }
+        disk.withLock {
+            withContext(io) {
+                facts?.write(packId, encodeFacts(kept))
+                facts?.write("$packId.stamps", encodeFacts(at))
+            }
+        }
+    }
 }
 
 /** What the host keeps of each pack between runs: one file per pack id in `dir`. */

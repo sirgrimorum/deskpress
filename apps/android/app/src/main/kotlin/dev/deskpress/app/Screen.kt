@@ -8,6 +8,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,6 +47,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -59,15 +62,21 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.coerceIn
+import androidx.compose.ui.zIndex
 import androidx.core.view.WindowCompat
 import dev.deskpress.engine.Finding
 import dev.deskpress.engine.Node
@@ -81,6 +90,8 @@ class Menu(
     val check: () -> Unit,
     val design: () -> Unit,
     val settings: () -> Unit,
+    val send: () -> Unit,
+    val take: () -> Unit,
 )
 
 /** The bytes of a file inside the pack, for the pictures a pack carries. */
@@ -309,6 +320,8 @@ private fun More(menu: Menu, color: String) {
             DropdownMenuItem({ Text("Check the pack") }, { open = false; menu.check() })
             DropdownMenuItem({ Text("Design system") }, { open = false; menu.design() })
             DropdownMenuItem({ Text("Settings") }, { open = false; menu.settings() })
+            DropdownMenuItem({ Text("Send the trip…") }, { open = false; menu.send() })
+            DropdownMenuItem({ Text("Take a trip sent to you…") }, { open = false; menu.take() })
         }
     }
 }
@@ -407,7 +420,8 @@ internal fun Draw(node: Node, act: (String, Value) -> Unit) {
             }
         "Segmented" -> Segmented(node, act)
         "Map" -> Paper(node)
-        "Check" -> Ticked(prop("text"), node.props["checked"] == Value.Bool(true), tap)
+        "Day" -> Day(node, act)
+        "Check" -> Ticked(prop("text"), prop("caption"), node.props["checked"] == Value.Bool(true), tap)
         "Field" -> Typed(node, act)
         "Group" -> Grouped(prop("title"), node.children, act)
         "Dialog" -> Popup(prop("title"), prop("text"), prop("close")) { node.on["close"]?.let { act(it, Value.Null) } }
@@ -547,6 +561,86 @@ private fun Line(
     }
 }
 
+/** Minutes to a dp of a Day's hours, and the tallest one gets: an overnight flight stays a row. */
+private const val DP_A_MINUTE = 0.8f
+private val TALLEST = 240.dp
+
+/**
+ * The Day (decision 0032): each hour as tall as it lasts, the way between two places in small
+ * muted ink, alert when it does not fit, and a handle on each hour that moves, to drag it about.
+ */
+@Composable
+private fun Day(node: Node, act: (String, Value) -> Unit) {
+    val tokens = LocalTokens.current
+    val items = (node.props["blocks"] as? Value.Items)?.items.orEmpty()
+    val picked = node.props["picked"].text()
+    val word = node.props["move"].text().ifEmpty { "Move" }
+    val hours = hours(items)
+    val hour = IntArray(items.size) { -1 }.also { at -> hours.forEachIndexed { k, i -> at[i] = k } }
+    val locked = hours.map { items[it].field("locked") == Value.Bool(true) }
+    val centres = remember(hours.size) { FloatArray(hours.size) }
+    var dragging by remember(items) { mutableIntStateOf(-1) }
+    var offset by remember(items) { mutableFloatStateOf(0f) }
+    val rule = tokens.color("rule")
+    val thin = tokens.size("border.rule")
+    Column(Modifier.fillMaxWidth()) {
+        items.forEachIndexed { i, item ->
+            val h = hour[i]
+            val event = item.field("event") ?: Value.Null
+            val leg = item.field("leg") == Value.Bool(true)
+            val state = if (picked.isNotEmpty() && event.text() == picked) "picked" else item.field("state").text()
+            val now = state == "now" || state == "picked"
+            val late = leg && item.field("late") == Value.Bool(true)
+            val ink = if (late) "alert" else if (leg || state == "past") "ink-muted" else if (now) "highlight-ink" else "ink"
+            val tap = node.on["tap"]?.takeIf { h >= 0 }?.let { a -> { act(a, event) } }
+            val move = node.on["move"]?.takeIf { h >= 0 && !locked[h] }
+            val least = if (leg) tokens.size("touch.min") / 2 else if (h >= 0) tokens.size("touch.row-height") else 0.dp
+            val minutes = (item.field("lasts") as? Value.Number)?.value?.toFloat() ?: 0f
+            Row(
+                Modifier.fillMaxWidth()
+                    .onPlaced { if (h >= 0) centres[h] = it.positionInParent().y + it.size.height / 2f }
+                    .then(if (h >= 0 && h == dragging) Modifier.zIndex(1f).graphicsLayer { translationY = offset } else Modifier)
+                    .heightIn(min = (minutes * DP_A_MINUTE).dp.coerceIn(least, maxOf(least, TALLEST)))
+                    .then(if (now) Modifier.background(tokens.color("highlight-bg")) else Modifier)
+                    .drawBehind {
+                        drawLine(rule, Offset(0f, size.height), Offset(size.width, size.height), thin.toPx())
+                        if (now) drawLine(tokens.color("highlight-line"), Offset(0f, 0f), Offset(0f, size.height), 8.dp.toPx())
+                    }
+                    .then(if (tap != null) Modifier.clickable(role = Role.Button, onClick = tap) else Modifier)
+                    .padding(horizontal = tokens.size("spacing.gap-s"), vertical = tokens.size("spacing.gap-s")),
+                horizontalArrangement = Arrangement.spacedBy(tokens.size("spacing.gap-s")),
+            ) {
+                val time = item.field("time").text()
+                Text(time, Modifier.width(66.dp), style = style(if (leg) "body-s" else "value", if (state == "locked") "alert" else ink))
+                Column(Modifier.weight(1f)) {
+                    Text(item.field("text").text(), style = style(if (leg) "body-s" else "body", ink))
+                    val caption = item.field("duration").text()
+                    if (caption.isNotEmpty()) Text(caption, style = style("body-s", if (late) "alert" else "ink-muted"))
+                }
+                if (move != null) {
+                    Box(
+                        Modifier.size(tokens.size("touch.min"))
+                            // A node of its own, not merged into the row: tests and readers find the handle.
+                            .semantics(mergeDescendants = true) { contentDescription = "$word ${item.field("text").text()}" }
+                            .pointerInput(items, h) {
+                                detectVerticalDragGestures(
+                                    onDragStart = { dragging = h; offset = 0f },
+                                    onDragEnd = {
+                                        val to = landing(centres.toList(), locked, h, offset)
+                                        dragging = -1
+                                        if (to != h) act(move, moved(event, to))
+                                    },
+                                    onDragCancel = { dragging = -1 },
+                                ) { change, dy -> change.consume(); offset += dy }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) { Text("≡", style = style("value", "ink-muted")) }
+                }
+            }
+        }
+    }
+}
+
 /** How wide a pin is, and the share of the map its scale line measures. */
 private val DOT = 10.dp
 private const val SCALE = 0.25f
@@ -644,9 +738,9 @@ private fun Paper(node: Node) {
 private fun Named(pin: Value, now: Boolean) =
     Text(pin.field("name").text(), style = style("label", if (now) "ink" else "ink-muted"))
 
-/** A line to tick off: the box, then what it says. The whole row is the touch target. */
+/** A line to tick off: the box, then what it says and its caption. The whole row is the touch target. */
 @Composable
-private fun Ticked(text: String, done: Boolean, tap: (() -> Unit)?) {
+private fun Ticked(text: String, caption: String, done: Boolean, tap: (() -> Unit)?) {
     val tokens = LocalTokens.current
     val box = RoundedCornerShape(tokens.size("radius.control"))
     Row(
@@ -666,7 +760,10 @@ private fun Ticked(text: String, done: Boolean, tap: (() -> Unit)?) {
         ) {
             if (done) Text("\u2713", style = style("value", "action-ink"))
         }
-        Text(text, Modifier.weight(1f), style = style("body", if (done) "ink-muted" else "ink"))
+        Column(Modifier.weight(1f)) {
+            Text(text, style = style("body", if (done) "ink-muted" else "ink"))
+            if (caption.isNotEmpty()) Text(caption, style = style("body-s", "ink-muted"))
+        }
     }
 }
 
