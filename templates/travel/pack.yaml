@@ -270,6 +270,7 @@ screens:
   agenda:
     actions:
       back: [back]
+      relay: [{open: relay}]
       alerts: [{open: sheet, with: {title: ui.alerts, rows: alerts}}]
       documents: [{open: documents}]
       car: [{do: map.open, with: {lat: store.car.lat, lon: store.car.lon, label: ui.car}}]
@@ -286,6 +287,7 @@ screens:
     layout:
       - Screen: {title: day.title, back: ui.back, on_back: back}
       - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
+      - Chip: {if: "not empty(people)", text: holder.name or ui.whose_phone, on_tap: relay}
       - Label: {if: weather.high, text: "{weather.summary}, {weather.low} {ui.to} {weather.high}"}
       - Label: {if: weather.failed, text: "{ui.weather_failed} {weather.failed}"}
       - Row: {each: day.blocks, text: item.text, time: item.time, caption: item.duration, state: item.state}
