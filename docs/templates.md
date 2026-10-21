@@ -76,7 +76,7 @@ and `add` to change a day, `tasks`, and the car's `log` with a `note`.
 | `kid` | child holding the phone: their name and their `sprite` when they have one, the place's map when its points have `at`, points for kids, what comes next, no menu, give back button; when the block names them its guide, "You could be the guide" and the place's `guide` script | `give_back` (unlocks via host, then `returned`), `returned`, `answer` (shows the script's answer), `ask` (opens `ask`, while the pack has questions) |
 | `complete` | alarm screen with whose turn it is, their `sprite` when they have one: big "Time is up" once the time given ran out, "Not safe here" otherwise; give back and 15 more minutes | `give_back` (unlocks then `returned`), `more_time` (unlocks then `extend`), `returned`, `extend` |
 | `ask` | the questions the pack can answer, each opening its answer in a `Dialog`; on a phone with a model of its own, a field to type in and the model's words in a card | `back`, `show` (opens the tapped question's answer), `close`, `type`, `say` (`assistant.ask` with the typed question and the day as facts), `answered` |
-| `relay` | one chip per person (children offered only if safe or adult), a star on the block's guide | `hold` stores `holder`, `returns_to` and clears `holder_until`; `back` |
+| `relay` | one chip per person, a star on the block's guide; a child handed the phone where it is not safe meets `complete` | `hold` stores `holder`, `returns_to` and clears `holder_until`; `back` |
 
 **Questions:** what is happening now, what is next, where we are going, what we are doing tomorrow,
 the weather, and what papers we have. Each is offered only while its data is there; `where` and

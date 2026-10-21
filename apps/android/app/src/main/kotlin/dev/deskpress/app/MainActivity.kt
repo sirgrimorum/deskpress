@@ -425,14 +425,16 @@ class MainActivity : FragmentActivity() {
             val kid = tree?.kid == true
             val alarm = tree?.nodes?.firstOrNull { it.kind == "Screen" }?.props?.get("alarm")?.text() == "true"
 
-            // A child holds the phone: pin the app so it cannot be left. Not under a frozen
-            // clock: the e2e flows would meet the system's pin dialog, which outlives the app.
-            LaunchedEffect(kid) {
+            // A child meets the alarm: pin the app until a parent takes the phone back; elsewhere
+            // they may leave it, for the camera. Not under a frozen clock: the e2e flows would meet
+            // the system's pin dialog, which outlives the app.
+            val lock = kid && alarm
+            LaunchedEffect(lock) {
                 if (frozen != null) return@LaunchedEffect
                 val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
                 val pinned = am.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
                 try {
-                    if (kid && !pinned) startLockTask() else if (!kid && pinned) stopLockTask()
+                    if (lock && !pinned) startLockTask() else if (!lock && pinned) stopLockTask()
                 } catch (_: IllegalStateException) {
                     // Where the device does not allow pinning, the app simply stays unpinned.
                 }

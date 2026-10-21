@@ -602,8 +602,8 @@ screens:
       - Segmented: {if: others, items: decision.options, value: picked, on_tap: pick}
       - Button: {label: ui.keep, on_tap: confirm}
 
-  # Who holds the phone. The choice is stored, and the rules decide again. A child is offered
-  # only where it is safe, and the adult handing over is kept to hand back to.
+  # Who holds the phone. The choice is stored, and the rules decide again: a child handed the
+  # phone where it is not safe meets the alarm. The adult handing over is kept to hand back to.
   relay:
     actions:
       hold:
@@ -615,5 +615,5 @@ screens:
     layout:
       - Screen: {title: ui.whose_phone, back: ui.back, on_back: back}
       # A star marks the one the current block suggests as its guide.
-      - Chip: {each: people, if: (item.adult != false or safe) and block.guide == item.id, text: "{ui.star} {item.name}", value: item.id, on_tap: hold}
-      - Chip: {each: people, if: (item.adult != false or safe) and block.guide != item.id, text: item.name, value: item.id, on_tap: hold}
+      - Chip: {each: people, if: block.guide == item.id, text: "{ui.star} {item.name}", value: item.id, on_tap: hold}
+      - Chip: {each: people, if: block.guide != item.id, text: item.name, value: item.id, on_tap: hold}

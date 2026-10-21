@@ -30,12 +30,13 @@ immediately (`done(true)`), ensuring the interface does not lock out developers 
 Any other reason the prompt cannot show refuses ([0023](0023-drift-review.md)).
 
 **Handoff facts and storage.** The relay screen stores `returns_to` (the adult handing over),
-sets `holder` to the chosen child, and clears `holder_until`. A child is only offered as holder if
-`item.adult or safe`. Returning the phone restores `returns_to` as holder and clears `holder_until`.
+sets `holder` to the chosen child, and clears `holder_until`. A child is offered anywhere (amended
+2026-10-04); handed the phone where it is not safe, the child meets `complete`. Returning the phone restores `returns_to` as holder and clears `holder_until`.
 Extending time sets `holder_until` to `later(now.stamp, 15)`.
 
-**Screen alarm and host lock task.** When the screen tree specifies `kid: true`, the Android host
-initiates screen pinning via `startLockTask()`, and clears it via `stopLockTask()` when `kid` is false.
+**Screen alarm and host lock task.** When the screen tree specifies `kid: true` on an alarm screen, the
+Android host pins it via `startLockTask()`, and unpins otherwise; a child may leave the app elsewhere,
+for the camera (amended 2026-10-04).
 The menu button is hidden during kid mode. When a screen specifies `Screen: {alarm: true}` (such as the
 `complete` screen) and the previous view did not, the host vibrates the device and plays the default
 notification sound.

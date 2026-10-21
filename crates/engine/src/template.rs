@@ -411,7 +411,7 @@ packing: {check: true, items: [Hat, Bottle]}
     }
 
     #[test]
-    fn the_handoff_offers_a_child_where_it_is_safe_and_a_parent_takes_it_back() {
+    fn the_handoff_offers_a_child_anywhere_and_a_parent_takes_it_back() {
         let e = trip();
         let offered = |now| {
             let mut nav = Nav::default();
@@ -419,7 +419,13 @@ packing: {check: true, items: [Hat, Bottle]}
                 e.dispatch(&world(now, "", &[("holder", "ana")]), &mut nav, "relay", Value::Null);
             out.unwrap().view.tree.nodes.len() - 1
         };
-        assert_eq!((offered("2026-04-11T13:30"), offered("2026-04-11T10:30")), (2, 1));
+        assert_eq!((offered("2026-04-11T13:30"), offered("2026-04-11T10:30")), (2, 2));
+        // Handed over where it is not safe, the child meets the alarm.
+        let mut nav = Nav::default();
+        let w = world("2026-04-11T10:30", "", &[("holder", "ana")]);
+        e.dispatch(&w, &mut nav, "relay", Value::Null).unwrap();
+        let out = e.dispatch(&w, &mut nav, "hold", Value::String("leo".into())).unwrap();
+        assert_eq!(out.view.tree.screen, "complete");
         // Handing over keeps who to hand back to.
         let mut nav = Nav::default();
         let w = world("2026-04-11T13:30", "", &[("holder", "ana")]);
