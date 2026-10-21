@@ -6,7 +6,7 @@ use crate::validate::patterns::is_id;
 use crate::value::{Map, Value, quote, text};
 
 /// The components a layout can use. The set grows only with a shell release (decision 0005).
-pub const COMPONENTS: [&str; 18] = [
+pub const COMPONENTS: [&str; 19] = [
     "BigValue",
     "Label",
     "Card",
@@ -20,6 +20,7 @@ pub const COMPONENTS: [&str; 18] = [
     "Field",
     "Map",
     "Day",
+    "Sprite",
     "Missing",
     "Auto",
     "Group",

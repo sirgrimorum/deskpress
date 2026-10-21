@@ -545,6 +545,7 @@ screens:
     layout:
       - Screen: {title: place.name or day.title, foot_label: next and ui.next, foot_time: next.time, foot: next.text or ui.nothing_more}
       - Chip: {text: holder.name}
+      - Sprite: {if: holder.sprite, rows: holder.sprite.rows, colors: holder.sprite.colors}
       - Label: {if: guiding, text: ui.guide}
       - BigValue: {text: block.time, caption: block.text}
       - Group:
@@ -571,6 +572,7 @@ screens:
       extend: [{store: holder_until, value: "later(now.stamp, 15)"}]
     layout:
       - Screen: {title: holder.name, alarm: true}
+      - Sprite: {if: holder.sprite, rows: holder.sprite.rows, colors: holder.sprite.colors}
       - BigValue: {text: (store.holder_until and ui.time_up) or ui.not_safe, caption: ui.give_back}
       - Button: {label: ui.give_back, on_tap: give_back}
       - Button: {label: ui.more_time, on_tap: more_time}

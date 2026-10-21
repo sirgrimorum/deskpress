@@ -182,7 +182,7 @@ mod tests {
         (tree.screen, texts.collect())
     }
 
-    const TRIP: &str = r#"people: [{id: ana, name: Ana}, {id: leo, name: Leo, adult: false}]
+    const TRIP: &str = r#"people: [{id: ana, name: Ana}, {id: leo, name: Leo, adult: false, sprite: {rows: [".a", aa], colors: {a: '#FF9EC4'}}}]
 days:
   - date: 2026-04-11
     title: One
@@ -382,11 +382,32 @@ packing: {check: true, items: [Hat, Bottle]}
         assert_eq!(kid("2026-04-11T10:30", &given).0, "kid");
         assert_eq!(kid("2026-04-11T10:45", &given).0, "complete");
         let (_, hand_back) = kid("2026-04-11T10:30", &[]);
-        assert_eq!(hand_back[2..], ["Button Give the phone back", "Button 15 more minutes"]);
+        assert_eq!(hand_back[3..], ["Button Give the phone back", "Button 15 more minutes"]);
         // Whose turn it is, and why it stopped: never given time, or the time given ran out.
         let tree = trip().screen(&world("2026-04-11T10:30", "leo", &[]), &mut Nav::default());
-        assert_eq!(said(&tree.unwrap().tree)[..2], ["Screen Leo ", "BigValue  Not safe here"]);
-        assert_eq!(kid("2026-04-11T10:45", &given).1[1], "BigValue Time is up");
+        assert_eq!(
+            said(&tree.unwrap().tree)[..3],
+            ["Screen Leo ", "Sprite  ", "BigValue  Not safe here"]
+        );
+        assert_eq!(kid("2026-04-11T10:45", &given).1[2], "BigValue Time is up");
+    }
+
+    #[test]
+    fn a_child_s_sprite_tops_their_screen_and_a_child_with_none_shows_none() {
+        let leo = |e: &Engine, now| e.screen(&world(now, "leo", &[]), &mut Nav::default());
+        let sprite =
+            |t: &Tree| t.nodes.iter().find(|n| n.kind == "Sprite").map(|n| at(n, "rows").cloned());
+        let plain =
+            load(&TRIP.replace(", sprite: {rows: [\".a\", aa], colors: {a: '#FF9EC4'}}", ""));
+        assert_eq!(sprite(&leo(&plain, "2026-04-11T13:30").unwrap().tree), None);
+        let kid = leo(&trip(), "2026-04-11T13:30").unwrap().tree;
+        assert_eq!(
+            (kid.screen.as_str(), &said(&kid)[1..3]),
+            ("kid", &["Chip  Leo".into(), "Sprite  ".into()][..])
+        );
+        assert_eq!(sprite(&kid), Some(Some(parse("[\".a\", aa]").unwrap())));
+        let complete = leo(&trip(), "2026-04-11T10:30").unwrap().tree;
+        assert_eq!(said(&complete)[1], "Sprite  ");
     }
 
     #[test]

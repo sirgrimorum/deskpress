@@ -244,7 +244,15 @@
         "id": { "$ref": "#/$defs/id" },
         "name": { "type": "string", "minLength": 1 },
         "adult": { "type": "boolean", "default": true, "description": "Decides the mode. Not a setting anyone can flip." },
-        "theme": { "type": "string", "description": "Theme family in the theme file." }
+        "theme": { "type": "string", "description": "Theme family in the theme file." },
+        "sprite": {
+          "type": "object",
+          "description": "A pixel drawing of the person: rows of one character per pixel, '.' or a space empty, and the color of each character.",
+          "properties": {
+            "rows": { "type": "array", "items": { "type": "string" } },
+            "colors": { "type": "object", "additionalProperties": { "type": "string" } }
+          }
+        }
       },
       "additionalProperties": true
     },

@@ -61,6 +61,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
@@ -433,6 +434,7 @@ internal fun Draw(node: Node, act: (String, Value) -> Unit) {
         "Segmented" -> Segmented(node, act)
         "Map" -> Paper(node)
         "Day" -> Day(node, act)
+        "Sprite" -> Pixels(node)
         "Check" -> Ticked(prop("text"), prop("caption"), node.props["checked"] == Value.Bool(true), tap)
         "Field" -> Typed(node, act)
         "Group" -> Grouped(prop("title"), node.children, act)
@@ -748,6 +750,27 @@ private fun Day(node: Node, act: (String, Value) -> Unit) {
                         drawRect(tint, style = Stroke(thin.toPx(), pathEffect = dash))
                     },
             )
+        }
+    }
+}
+
+/** How wide a Sprite is drawn, whatever its count of pixels. */
+private val SPRITE = 84.dp
+
+/** A Sprite: one character per pixel, `.` or a space empty, each square in its color and whole. */
+@Composable
+private fun Pixels(node: Node) {
+    val rows = (node.props["rows"] as? Value.Items)?.items.orEmpty().map { it.text() }
+    val colors = node.props["colors"].entries().mapNotNull { (k, v) -> hex(v.text())?.let { k to it } }.toMap()
+    val wide = rows.maxOfOrNull { it.length } ?: 0
+    if (wide == 0) return
+    // Whole device pixels per square, so no seam shows between two of them.
+    val px = with(LocalDensity.current) { (SPRITE.toPx() / wide).toInt().coerceAtLeast(1) }
+    val dp = with(LocalDensity.current) { px.toDp() }
+    Canvas(Modifier.size(dp * wide, dp * rows.size)) {
+        for ((y, row) in rows.withIndex()) for ((x, c) in row.withIndex()) {
+            val color = colors[c.toString()].takeIf { c != '.' && c != ' ' } ?: continue
+            drawRect(color, Offset((x * px).toFloat(), (y * px).toFloat()), Size(px.toFloat(), px.toFloat()))
         }
     }
 }

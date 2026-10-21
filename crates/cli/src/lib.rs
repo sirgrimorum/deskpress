@@ -357,6 +357,11 @@ fn lines(nodes: &[Node], depth: usize, out: &mut String) {
                     list(prop(n, "points")).iter().map(|p| text(p.get("name"))).collect();
                 format!("map: {}", joined([say("caption"), names.join(", ")]))
             }
+            "Sprite" => {
+                let rows = list(prop(n, "rows"));
+                let wide = rows.iter().map(|r| text(Some(r)).chars().count()).max().unwrap_or(0);
+                format!("sprite {wide}x{}", rows.len())
+            }
             "Day" => {
                 let picked = prop(n, "picked").map(|p| text(Some(p))).unwrap_or_default();
                 let item = |b: &Value| {
@@ -855,6 +860,7 @@ screens:
         - {time: "09:00", text: Walk, event: a, lasts: 45}
         - {time: "09:45", text: → Pier, duration: 15 min, leg: true}
         - {time: "10:00", text: Pier, event: b}
+      art: [".a.", aaaa]
     actions:
       back: []
       open: [{set: picked, to: $arg}]
@@ -875,6 +881,7 @@ screens:
       - Map: {points: "null"}
       - Day: {blocks: hours, picked: "'b'"}
       - Day: {blocks: "null"}
+      - Sprite: {rows: art, colors: "null"}
       - Group:
           title: "'Inside'"
           layout:
@@ -905,6 +912,7 @@ map:
 | 09:00 · Walk
 | 09:45 · → Pier · 15 min
 | 10:00 · *Pier*
+sprite 4x2
 Inside
   Hola · Hello
 [Go]

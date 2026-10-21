@@ -50,7 +50,7 @@ val LocalTokens = staticCompositionLocalOf { BUILT_IN }
 /** The sizes a theme file shares across its themes. */
 val GROUPS = listOf("spacing", "radius", "border", "touch")
 
-private fun hex(s: String): Color? {
+internal fun hex(s: String): Color? {
     val digits = s.removePrefix("#")
     val argb = digits.toLongOrNull(16) ?: return null
     return when (digits.length) {

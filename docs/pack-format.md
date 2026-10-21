@@ -292,7 +292,7 @@ with the stored facts, so a `store` can move the app to another screen.
 
 The closed set a layout can use. Every prop takes an expression, and a YAML list is taken as it
 is written, like `skip: [time, text]`; colors, sizes and fonts come from the theme and cannot be
-set here.
+set here, a `Sprite`'s pixels aside.
 
 | component | what it draws |
 | --- | --- |
@@ -308,6 +308,7 @@ set here.
 | `Check` | a line to tick off: `text`, `caption` a muted line under it, and `checked` for the box. A tap sends its `value` |
 | `Field` | a line to type on: `label` above, `hint` when empty; every keystroke sends the typed text as `on_change` |
 | `Map` | pins at their fractions of a drawing: `points` as `{name, x, y, lat, lon, state}` with `x` and `y` from 0 to 1 and `lat` and `lon` optional, `path` joining them in order, `image` a picture the pack carries, `caption`, and `span` metres as a scale line. When the pins carry `lat` and `lon`, a tap opens them on a real map, full screen, in the card's words: `open` for the link and the title, `pick` before a pin is picked, `follow`, and `unplaced` when the phone has no position; English when left out |
+| `Sprite` | a pixel drawing: `rows`, a list of texts with one character per pixel, `.` or a space for none, and `colors`, each character's color as `#RRGGBB`. Drawn about 84dp wide, with square pixels |
 | `Day` | the day on one page: `blocks` as rows as tall as their `lasts`, legs smaller, the one equal to `picked` tinted. A tap sends the block's `event` as `on_tap`. The page is a time axis: dragging a row by its handle, labelled `move`, sends `on_move` with `{block, by}`, and the picked row's top or bottom edge sends `on_resize` with `{block, edge, by}`, in steps of 15 minutes, over a green or red placeholder. `earlier`, `later`, `shorter` and `longer` label the same steps for TalkBack |
 | `Missing` | a fact nobody confirmed, drawn as a striped hole |
 | `Auto` | expands a mapping by the unknown key rule, one node per key; a list is a `Card` per item, and any other value one `Card`. `skip: [keys]` leaves keys out |
@@ -553,7 +554,8 @@ people:
 `adult` decides the mode, and it is not a setting anyone can flip. `theme` names the theme drawn
 while that person holds the phone, and `language`, a tag like `pt-BR`, picks the words a question is
 offered in while they hold it, falling back to the pack's. Who is holding the phone is chosen once
-and changed on the handoff screen.
+and changed on the handoff screen. `sprite`, optional, is their pixel drawing as a `Sprite`'s
+`rows` and `colors`, like `{rows: [".a.", aaa], colors: {a: "#FF9EC4"}}`.
 
 ## alerts
 
