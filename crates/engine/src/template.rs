@@ -783,10 +783,16 @@ jet_lag: [{date: 2026-04-11, steps: [{time: "12:45", text: Nap, do: bed}, {time:
                 "Label Until somebody chooses, the day follows the recommended plan.",
                 "Card Early arrival",
                 "Card parking",
+                "Group ",
                 "Button See the other options",
                 "Button Keep this plan"
             ]
         );
+        // The option's blocks, so it is read whole before keeping it.
+        let tree = e.screen(&w, &mut Nav::default()).unwrap().tree;
+        let plan: Vec<String> =
+            tree.nodes[5].children.iter().map(|n| text(at(n, "text"))).collect();
+        assert_eq!(plan, ["Go"]);
         let mut nav = Nav::default();
         let kinds = |out: crate::engine::Outcome| -> Vec<String> {
             out.view.tree.nodes.iter().map(|n| n.kind.clone()).collect()

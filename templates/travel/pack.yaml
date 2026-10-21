@@ -598,6 +598,11 @@ screens:
       - Card: {each: decision.options, if: "item.id == (picked.id or decision.choice)", title: ui.cost, text: item.cost}
       - Card: {each: decision.options, if: "item.id == (picked.id or decision.choice)", title: ui.consequence, text: item.consequence}
       - Auto: {each: decision.options, if: "item.id == (picked.id or decision.choice)", value: item, skip: [id, name, why, cost, consequence, blocks, recommended, requires]}
+      - Group:
+          each: decision.options
+          if: "item.id == (picked.id or decision.choice)"
+          layout:
+            - Row: {each: group.blocks, time: "at(item, 0)", text: "at(item, 1)"}
       - Button: {if: not others, label: ui.other_options, on_tap: others}
       - Segmented: {if: others, items: decision.options, value: picked, on_tap: pick}
       - Button: {label: ui.keep, on_tap: confirm}
