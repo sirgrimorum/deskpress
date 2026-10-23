@@ -28,11 +28,10 @@ ui:
   whose_phone: Whose phone is it?
   for_you: For you
   go: Go
-  time_up: Time is up
   not_safe: Not safe here
+  adults_decide: A child can still hold the phone; the adults decide.
   give_back: Give the phone back
   to_confirm: to confirm
-  more_time: 15 more minutes
   documents: Documents
   open_file: Open the file
   call: Call
@@ -115,14 +114,12 @@ modules:
 
 derive:
   kid: holder and holder.adult == false
-  # Where a child may hold the phone: seated on the way, or in a place marked safe where the
-  # device is, at the table or at the lodging too. Leaving the place's region ends it.
+  # Where a child is fine holding the phone: seated on the way, or in a place marked safe where
+  # the device is, at the table or at the lodging too. Elsewhere the relay says so; adults decide.
   safe: >-
     here.safe
     or block.type == 'train' or block.type == 'driving' or block.type == 'flight'
     or (not away and (place.safe or block.type == 'meal' or block.type == 'lodging'))
-  # The extra time a parent gave at the handoff, until it runs out.
-  extended: now.stamp < store.holder_until
   # The current block names the person holding the phone.
   guiding: block and holder and block.guide == holder.id
   mine: guiding or (block and holder and holder.id in block.for)
@@ -172,10 +169,9 @@ questions:
 
 # First true when wins. A pack's own rules are tried before these.
 rules:
-  - {when: kid and not safe and not extended, screen: complete}
   - {when: decision.due and not decision.answered and not kid, screen: choose}
   - {when: not day, screen: days}
-  - {when: mine, screen: suggestion}
+  - {when: mine and not kid, screen: suggestion}
   - {when: kid, screen: kid}
   - {when: night, screen: night}
   - {when: not day.started, screen: morning}
@@ -196,6 +192,7 @@ screens:
       park: [{do: location.get, with: {then: "'parked'"}}]
       parked: [{store: car, value: $arg}, {store: log.parked, value: now.stamp}, {store: log.spot, value: "null"}]
       calendar: [{do: calendar.sync, with: {scope: block.event}}]
+      paper: [{do: document.open, with: {file: $arg.file, title: $arg.title}}]
     layout:
       - Screen: {title: day.title, today: ui.today, on_today: agenda, foot_label: next and ui.next, foot_time: next.time, foot: next.text or ui.nothing_more}
       - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
@@ -205,6 +202,9 @@ screens:
       - Label: {if: jet_lag.now, text: "{ui.body_clock} · {jet_lag.now.text}"}
       - Chip: {if: "not empty(people)", text: holder.name or ui.whose_phone, on_tap: relay}
       - BigValue: {text: hero, caption: block.text}
+      # The papers of this block's booking, then the next one's: the file in one tap.
+      - Row: {each: documents, if: "item.ticket and item.ticket == (block.ticket or place.during.ticket)", text: item.title, caption: ui.ticket, value: item, on_tap: paper}
+      - Row: {each: documents, if: "item.ticket and item.ticket == next.ticket and item.ticket != (block.ticket or place.during.ticket)", text: item.title, caption: "{ui.next} · {next.time}", value: item, on_tap: paper}
       - Label: {if: weather.summary, text: weather.summary}
       - Label: {if: block.road, text: ui.on_the_way}
       - Row: {each: block.road, text: item.name, caption: item.what, time: item.at}
@@ -230,6 +230,7 @@ screens:
       agenda: [{open: agenda}]
       relay: [{open: relay}]
       tasks: [{open: tasks}]
+      paper: [{do: document.open, with: {file: $arg.file, title: $arg.title}}]
     layout:
       - Screen: {title: day.title, today: ui.today, on_today: agenda}
       - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
@@ -237,6 +238,7 @@ screens:
       - Alert: {if: next.leaving, title: ui.set_off_now, text: next.text}
       - Label: {if: next.leave_at and not next.leaving, text: "{ui.set_off_at} {next.leave_at}"}
       - BigValue: {if: next, text: next.time, caption: next.text}
+      - Row: {each: documents, if: "item.ticket and item.ticket == next.ticket", text: item.title, caption: ui.ticket, value: item, on_tap: paper}
       - Label: {if: weather.high, text: "{weather.summary}, {weather.low} {ui.to} {weather.high}"}
       - Alert: {each: jet_lag.steps, if: "item.clash and item.state != 'past'", title: ui.bed_clash, text: "{item.time} · {item.clash}"}
       - Group:
@@ -519,10 +521,10 @@ screens:
       - Field: {label: ui.what_is_it, value: what, on_change: set_what}
       - Button: {if: time and what, label: ui.save_block, on_tap: keep}
 
-  # What the current block proposes to the person holding the phone.
+  # What the current block proposes to the adult holding the phone; a child gets it on `kid`.
   suggestion:
     actions:
-      go: [{open: kid, if: kid}, {open: moment, if: not kid}]
+      go: [{open: moment}]
     layout:
       - Screen: {title: day.title}
       - Chip: {text: holder.name}
@@ -539,7 +541,7 @@ screens:
     state: {answer: false}
     actions:
       give_back: [{do: device.unlock, with: {then: "'returned'"}}]
-      returned: [{store: holder, value: store.returns_to}, {store: holder_until, value: "null"}, home]
+      returned: [{store: holder, value: store.returns_to}, home]
       answer: [{set: answer, to: "true"}]
       ask: [{open: ask}]
     layout:
@@ -548,6 +550,7 @@ screens:
       - Sprite: {if: holder.sprite, rows: holder.sprite.rows, colors: holder.sprite.colors}
       - Label: {if: guiding, text: ui.guide}
       - BigValue: {text: block.time, caption: block.text}
+      - Card: {if: block.suggestion, title: ui.for_you, text: block.suggestion}
       - Group:
           if: guiding and place.guide.facts
           title: ui.tell
@@ -561,21 +564,6 @@ screens:
       - Row: {each: points, if: item.for_kids, text: item.name, caption: item.for_kids}
       - Button: {if: questions, label: ui.ask, on_tap: ask}
       - Button: {label: ui.give_back, on_tap: give_back}
-
-  # One thing and no way out: a child holds the phone where it is not safe. The host sounds it,
-  # and a parent unlocks it back, or gives fifteen minutes more.
-  complete:
-    actions:
-      give_back: [{do: device.unlock, with: {then: "'returned'"}}]
-      more_time: [{do: device.unlock, with: {then: "'extend'"}}]
-      returned: [{store: holder, value: store.returns_to}, {store: holder_until, value: "null"}, home]
-      extend: [{store: holder_until, value: "later(now.stamp, 15)"}]
-    layout:
-      - Screen: {title: holder.name, alarm: true}
-      - Sprite: {if: holder.sprite, rows: holder.sprite.rows, colors: holder.sprite.colors}
-      - BigValue: {text: (store.holder_until and ui.time_up) or ui.not_safe, caption: ui.give_back}
-      - Button: {label: ui.give_back, on_tap: give_back}
-      - Button: {label: ui.more_time, on_tap: more_time}
 
   # A day with options, asked from its decision's `when` at `at`: the recommended plan first,
   # the others behind a button. Confirming stores the choice and writes the day to the calendar.
@@ -607,18 +595,18 @@ screens:
       - Segmented: {if: others, items: decision.options, value: picked, on_tap: pick}
       - Button: {label: ui.keep, on_tap: confirm}
 
-  # Who holds the phone. The choice is stored, and the rules decide again: a child handed the
-  # phone where it is not safe meets the alarm. The adult handing over is kept to hand back to.
+  # Who holds the phone. The choice is stored, and the rules decide again. Where it is not safe
+  # that is said, and the adults decide. The adult handing over is kept to hand back to.
   relay:
     actions:
       hold:
         - {store: returns_to, value: holder.id, if: holder.adult != false}
         - {store: holder, value: $arg}
-        - {store: holder_until, value: "null"}
         - home
       back: [back]
     layout:
       - Screen: {title: ui.whose_phone, back: ui.back, on_back: back}
+      - Alert: {if: not safe, title: ui.not_safe, text: ui.adults_decide}
       # A star marks the one the current block suggests as its guide.
       - Chip: {each: people, if: block.guide == item.id, text: "{ui.star} {item.name}", value: item.id, on_tap: hold}
       - Chip: {each: people, if: block.guide != item.id, text: item.name, value: item.id, on_tap: hold}

@@ -1,6 +1,7 @@
 # 0018: documents
 
-Status: accepted, 2026-09-28.
+Status: accepted, 2026-09-28. Amended by [0037](0037-what-the-trip-taught.md): the moment lists its booking's papers and
+the next block's, one tap each; the file keeps the screen on.
 
 ## Context
 

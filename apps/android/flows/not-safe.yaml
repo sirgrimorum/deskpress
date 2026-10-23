@@ -1,0 +1,34 @@
+# Where it is not safe the handoff says so, and the adults decide: the child still gets the phone,
+# and leaving a safe place calls nothing back.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T18:50"
+- tapOn: 'Whose phone is it\?'
+- assertVisible: "Not safe here"
+- tapOn: "Tomas"
+- scrollUntilVisible:
+    element: "Give the phone back"
+- tapOn: "Give the phone back"
+# Back with an adult: the menu and the relay are there again.
+- assertVisible: 'Whose phone is it\?'
+- assertNotVisible: "Give the phone back"
+# At the museum and out of its region alike, the child keeps the kid screen.
+# "at" pins the device's position, as "now" pins the clock.
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T11:30"
+      at: "38.7248,-9.1139"
+- tapOn: 'Whose phone is it\?'
+- tapOn: "★ Tomas"
+- assertVisible: "You could be the guide"
+- launchApp:
+    stopApp: true
+    arguments:
+      now: "2026-04-11T11:30"
+      at: "38.7300,-9.1000"
+- assertVisible: "You could be the guide"
+- assertNotVisible: "Not safe here"

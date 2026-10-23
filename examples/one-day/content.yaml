@@ -11,6 +11,10 @@ documents:
     fields:
       Certificate: EX-0001
       Cover: "Medical, repatriation included"
+  - id: museum_tickets
+    title: Museum tickets
+    file: files/museum-tickets.pdf
+    ticket: sheets.bookings.azulejo
 
 days:
   - date: 2026-04-11

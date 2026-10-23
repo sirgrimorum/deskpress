@@ -1,4 +1,4 @@
-# Inside a block: its answer, what the place says, what comes next, and the block into the calendar,
+# Inside a block: its answer, its ticket, what the place says, what comes next, and the block into the calendar,
 # or a refusal when the calendar is not allowed.
 appId: dev.deskpress.app
 ---
@@ -8,6 +8,10 @@ appId: dev.deskpress.app
       now: "2026-04-11T11:30"
 - assertVisible: "Now · visit"
 - assertVisible: "11:15"
+# The booking's paper opens in one tap, full screen until Back.
+- tapOn: "Museum tickets"
+- assertVisible: "Page 1 of 1"
+- tapOn: "Back"
 - assertVisible: "10:00 to 18:00, closed on Mondays"
 - assertVisible: "NEXT"
 - assertVisible: "13:15"

@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.Image
@@ -39,7 +40,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * A pack file full screen, each page as wide as the screen, at maximum brightness while it shows:
+ * A pack file full screen, each page as wide as the screen, bright and awake while it shows:
  * it is what somebody at a counter reads or scans. `read` gives its bytes; it never needs the
  * network.
  */
@@ -87,14 +88,18 @@ fun Document(state: PackState, title: String, read: () -> ByteArray, close: () -
     }
 }
 
-/** The screen at full brightness until the composable leaves, then as it was. */
+/** The screen at full brightness and kept on until the composable leaves, then as it was. */
 @Composable
 private fun Brightest(activity: Activity) {
     DisposableEffect(activity) {
         val window = activity.window
         val before = window.attributes.screenBrightness
         window.attributes = window.attributes.apply { screenBrightness = 1f }
-        onDispose { window.attributes = window.attributes.apply { screenBrightness = before } }
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            window.attributes = window.attributes.apply { screenBrightness = before }
+        }
     }
 }
 

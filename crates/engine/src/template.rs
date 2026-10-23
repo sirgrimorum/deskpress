@@ -189,7 +189,7 @@ days:
     blocks:
       - ["", "A note"]
       - ["10:00", "Park", {type: parking, place: lot}]
-      - ["11:00", "Museum", {type: visit, place: museum, guide: leo, until: "12:00", leave: 20}]
+      - ["11:00", "Museum", {type: visit, place: museum, guide: leo, until: "12:00", leave: 20, ticket: doc_1}]
       - ["13:00", "Drive", {type: driving, place: lot, duration: 40 min, tolls: none, until: "13:40", road: [{at: "13:10", name: Bridge, what: Toll}]}]
   - date: 2026-04-12
     title: Two
@@ -204,7 +204,7 @@ days:
     decision: {when: 2026-04-12, at: "20:00", question: Coast or hill?}
   - date: 2026-04-14
     title: Four
-    blocks: [["10:00", "Surf", {for: [ana, leo]}]]
+    blocks: [["10:00", "Surf", {for: [ana, leo], suggestion: Look up}]]
 places:
   lot: {name: Lot, parking: {where: North side, price: "[to confirm]"}}
   museum:
@@ -355,41 +355,32 @@ packing: {check: true, items: [Hat, Bottle]}
         assert_eq!(screen("2026-04-20T10:00", ""), "days");
         assert_eq!(screen("2026-04-11T09:00", ""), "morning");
         assert_eq!(screen("2026-04-11T10:30", ""), "moment");
-        assert_eq!(screen("2026-04-11T11:30", "leo"), "suggestion");
+        assert_eq!(screen("2026-04-11T11:30", "leo"), "kid");
         assert_eq!(screen("2026-04-11T12:30", ""), "agenda");
         assert_eq!(screen("2026-04-11T21:30", ""), "night");
         // A block whose `for` lists the holder is theirs too.
         assert_eq!(screen("2026-04-14T10:30", "ana"), "suggestion");
         // A relay stores who holds the phone when the host does not say.
-        assert_eq!(shown("2026-04-11T11:30", "", &[("holder", "leo")]).0, "suggestion");
+        assert_eq!(shown("2026-04-11T11:30", "", &[("holder", "ana")]).0, "moment");
+        assert_eq!(shown("2026-04-11T11:30", "", &[("holder", "leo")]).0, "kid");
     }
 
     #[test]
-    fn a_child_holds_the_phone_only_where_it_is_safe_or_for_the_time_given() {
-        let kid = |now, store: &[(&str, &str)]| shown(now, "leo", store);
-        // Seated in the car: the kid screen, with the places' points for kids and no way out.
-        let (screen, texts) = kid("2026-04-11T13:30", &[]);
-        assert_eq!(
-            (screen.as_str(), texts.last().map(String::as_str)),
-            ("kid", Some("Button Give the phone back"))
-        );
-        // A parking lot, a free hour and no day at all are not safe.
-        assert_eq!(kid("2026-04-11T10:30", &[]).0, "complete");
-        assert_eq!(kid("2026-04-11T12:30", &[]).0, "complete");
-        assert_eq!(kid("2026-04-20T10:00", &[]).0, "complete");
-        // Extra time a parent gave holds until it runs out.
-        let given = [("holder_until", "2026-04-11T10:45")];
-        assert_eq!(kid("2026-04-11T10:30", &given).0, "kid");
-        assert_eq!(kid("2026-04-11T10:45", &given).0, "complete");
-        let (_, hand_back) = kid("2026-04-11T10:30", &[]);
-        assert_eq!(hand_back[3..], ["Button Give the phone back", "Button 15 more minutes"]);
-        // Whose turn it is, and why it stopped: never given time, or the time given ran out.
-        let tree = trip().screen(&world("2026-04-11T10:30", "leo", &[]), &mut Nav::default());
-        assert_eq!(
-            said(&tree.unwrap().tree)[..3],
-            ["Screen Leo ", "Sprite  ", "BigValue  Not safe here"]
-        );
-        assert_eq!(kid("2026-04-11T10:45", &given).1[2], "BigValue Time is up");
+    fn a_child_holds_the_phone_anywhere_and_gives_it_back_through_a_parent() {
+        let kid = |now| shown(now, "leo", &[]);
+        // Seated in the car, at a parking lot, in a free hour: the kid screen, no way out.
+        for now in ["2026-04-11T13:30", "2026-04-11T10:30", "2026-04-11T12:30"] {
+            let (screen, texts) = kid(now);
+            assert_eq!(
+                (screen.as_str(), texts.last().map(String::as_str)),
+                ("kid", Some("Button Give the phone back")),
+                "{now}"
+            );
+        }
+        // A block meant for the child says what it has for them.
+        let (screen, texts) = kid("2026-04-14T10:30");
+        assert_eq!(screen, "kid");
+        assert!(texts.contains(&"Card Look up".to_owned()), "{texts:?}");
     }
 
     #[test]
@@ -406,8 +397,6 @@ packing: {check: true, items: [Hat, Bottle]}
             ("kid", &["Chip  Leo".into(), "Sprite  ".into()][..])
         );
         assert_eq!(sprite(&kid), Some(Some(parse("[\".a\", aa]").unwrap())));
-        let complete = leo(&trip(), "2026-04-11T10:30").unwrap().tree;
-        assert_eq!(said(&complete)[1], "Sprite  ");
     }
 
     #[test]
@@ -419,13 +408,17 @@ packing: {check: true, items: [Hat, Bottle]}
                 e.dispatch(&world(now, "", &[("holder", "ana")]), &mut nav, "relay", Value::Null);
             out.unwrap().view.tree.nodes.len() - 1
         };
-        assert_eq!((offered("2026-04-11T13:30"), offered("2026-04-11T10:30")), (2, 2));
-        // Handed over where it is not safe, the child meets the alarm.
+        // Where it is not safe, one alert says so above the same chips; the adults decide.
+        assert_eq!((offered("2026-04-11T13:30"), offered("2026-04-11T10:30")), (2, 3));
         let mut nav = Nav::default();
         let w = world("2026-04-11T10:30", "", &[("holder", "ana")]);
-        e.dispatch(&w, &mut nav, "relay", Value::Null).unwrap();
+        let relay = e.dispatch(&w, &mut nav, "relay", Value::Null).unwrap().view.tree;
+        assert_eq!(
+            said(&relay)[1],
+            "Alert Not safe here A child can still hold the phone; the adults decide."
+        );
         let out = e.dispatch(&w, &mut nav, "hold", Value::String("leo".into())).unwrap();
-        assert_eq!(out.view.tree.screen, "complete");
+        assert_eq!(out.view.tree.screen, "kid");
         // Handing over keeps who to hand back to.
         let mut nav = Nav::default();
         let w = world("2026-04-11T13:30", "", &[("holder", "ana")]);
@@ -435,15 +428,9 @@ packing: {check: true, items: [Hat, Bottle]}
         // The hand-back asks the host for a parent, and names what to run after.
         let w = world("2026-04-11T10:30", "", &[("holder", "leo"), ("returns_to", "ana")]);
         let mut nav = Nav::default();
-        let out = e.dispatch(&w, &mut nav, "more_time", Value::Null).unwrap();
+        let out = e.dispatch(&w, &mut nav, "give_back", Value::Null).unwrap();
         assert_eq!(out.commands[0].name, "device.unlock");
-        assert_eq!(out.commands[0].args.get("then"), Some(&Value::String("extend".into())));
-        let out = e.dispatch(&w, &mut nav, "extend", Value::Null).unwrap();
-        let until = Value::String("2026-04-11T10:45".into());
-        assert_eq!(
-            (out.store.get("holder_until"), out.view.tree.screen.as_str()),
-            (Some(&until), "kid")
-        );
+        assert_eq!(out.commands[0].args.get("then"), Some(&Value::String("returned".into())));
         let out = e.dispatch(&w, &mut Nav::default(), "returned", Value::Null).unwrap();
         assert_eq!((out.view.tree.screen.as_str(), out.view.tree.kid), ("moment", false));
     }
@@ -456,6 +443,39 @@ packing: {check: true, items: [Hat, Bottle]}
         let doc = carried(&sheet, "Pass");
         let one = e.dispatch(&w, &mut nav, "open", doc).unwrap().view.tree;
         assert_eq!(one.nodes.last().map(|n| text(at(n, "label"))), Some("Open the file".into()));
+    }
+
+    #[test]
+    fn the_papers_of_this_block_and_the_next_open_from_the_moment_in_one_tap() {
+        let e = trip();
+        let paper = |now: &str| {
+            let w = world(now, "ana", &[]);
+            let tree = e.screen(&w, &mut Nav::default()).unwrap().tree;
+            let row = tree.nodes.iter().find(|n| n.kind == "Row" && text(at(n, "text")) == "Pass");
+            let caption = row.map(|n| text(at(n, "caption")));
+            let sent = row.map(|n| {
+                let out =
+                    e.dispatch(&w, &mut Nav::default(), "paper", at(n, "value").cloned().unwrap());
+                let c = out.unwrap().commands.remove(0);
+                (c.name, text(c.args.get("file")))
+            });
+            (caption, sent)
+        };
+        let opens = Some(("document.open".to_owned(), "files/pass.pdf".to_owned()));
+        // During the visit it is this block's; at the lot before it, the next one's.
+        assert_eq!(paper("2026-04-11T11:30"), (Some("The ticket".into()), opens.clone()));
+        assert_eq!(paper("2026-04-11T10:30"), (Some("Next · 11:00".into()), opens.clone()));
+        // Before the day starts, the first block's.
+        assert_eq!(paper("2026-04-11T09:00").1, None);
+        let first =
+            load(&TRIP.replace(r#"["10:00", "Park", {"#, r#"["10:00", "Park", {ticket: doc_1, "#));
+        let w = world("2026-04-11T09:00", "ana", &[]);
+        let morning = first.screen(&w, &mut Nav::default()).unwrap().tree;
+        let lines = said(&morning);
+        assert_eq!(morning.screen, "morning");
+        assert!(lines.contains(&"Row  Pass".to_owned()), "{lines:?}");
+        // Once the block is over, nothing is left to show.
+        assert_eq!(paper("2026-04-11T12:30"), (None, None));
     }
 
     #[test]
@@ -552,15 +572,15 @@ places: {free: {name: Free, parking: {price: 0}}, open: {name: Open, parking: {w
     }
 
     #[test]
-    fn a_child_leaving_a_safe_place_ends_the_turn_while_the_device_knows_where_it_is() {
+    fn a_child_leaving_a_safe_place_keeps_the_phone() {
         let screen = |inside: &[&str], located| {
             let inside = inside.iter().map(|i| (*i).to_owned()).collect();
             let w = World { inside, located, ..world("2026-04-11T11:30", "leo", &[]) };
             trip().screen(&w, &mut Nav::default()).unwrap().tree.screen
         };
-        assert_eq!(screen(&[], false), "suggestion");
-        assert_eq!(screen(&["museum"], true), "suggestion");
-        assert_eq!(screen(&[], true), "complete");
+        assert_eq!(screen(&[], false), "kid");
+        assert_eq!(screen(&["museum"], true), "kid");
+        assert_eq!(screen(&[], true), "kid");
     }
 
     #[test]
@@ -671,7 +691,7 @@ jet_lag: [{date: 2026-04-11, steps: [{time: "12:45", text: Nap, do: bed}, {time:
         };
         assert_eq!(area(&gate.screen(&w, &mut Nav::default()).unwrap().tree), ["Gate"]);
         let leo = world("2026-04-11T11:30", "leo", &[]);
-        let kid = gate.dispatch(&leo, &mut Nav::default(), "go", Value::Null).unwrap().view.tree;
+        let kid = gate.screen(&leo, &mut Nav::default()).unwrap().tree;
         assert_eq!((kid.screen.as_str(), area(&kid)), ("kid", vec!["Gate".to_owned()]));
         let rows: Vec<_> = said(&kid).into_iter().filter(|l| l.starts_with("Row")).collect();
         assert_eq!(rows, ["Row  Hall"]);
@@ -695,7 +715,7 @@ jet_lag: [{date: 2026-04-11, steps: [{time: "12:45", text: Nap, do: bed}, {time:
         let names: Vec<_> = stops.iter().map(|s| text(s.get("name"))).collect();
         assert_eq!(
             (sent[0].name.as_str(), names),
-            ("map.route", ["Lot", "Museum", "Lot"].map(String::from).to_vec())
+            ("map.route", ["Museum", "Lot"].map(String::from).to_vec())
         );
     }
 
@@ -855,14 +875,15 @@ jet_lag: [{date: 2026-04-11, steps: [{time: "12:45", text: Nap, do: bed}, {time:
         let e = trip();
         let w = world("2026-04-11T11:30", "leo", &[]);
         let mut nav = Nav::default();
-        let texts = |out: crate::engine::Outcome| -> Vec<String> {
+        let texts = |tree: &Tree| -> Vec<String> {
             let text = |n: &Node| {
                 let prop = |k: &str| n.props.iter().find(|(p, _)| p == k).map(|(_, v)| v);
                 crate::value::text(prop("text").or_else(|| prop("label")))
             };
-            out.view.tree.nodes.iter().map(|n| format!("{} {}", n.kind, text(n))).collect()
+            tree.nodes.iter().map(|n| format!("{} {}", n.kind, text(n))).collect()
         };
-        let kid = texts(e.dispatch(&w, &mut nav, "go", Value::Null).unwrap());
+        // The guide lands on their own screen, with the script, and no stop on the way.
+        let kid = texts(&e.screen(&w, &mut nav).unwrap().tree);
         for line in [
             "Label You could be the guide",
             "Group ",
@@ -873,7 +894,7 @@ jet_lag: [{date: 2026-04-11, steps: [{time: "12:45", text: Nap, do: bed}, {time:
             assert!(kid.contains(&line.to_owned()), "{kid:?}");
         }
         assert!(!kid.contains(&"Card Very old".to_owned()), "{kid:?}");
-        let answered = texts(e.dispatch(&w, &mut nav, "answer", Value::Null).unwrap());
+        let answered = texts(&e.dispatch(&w, &mut nav, "answer", Value::Null).unwrap().view.tree);
         assert!(answered.contains(&"Card Very old".to_owned()), "{answered:?}");
         assert!(!answered.contains(&"Button Show the answer".to_owned()), "{answered:?}");
         // Seated in the car nobody guides: no script.
@@ -1065,7 +1086,7 @@ tareas:
             ("2026-04-11T01:00", "2026-04-10T18:00", "", "choose"),
             ("2026-04-11T15:30", "2026-04-11T08:30", "", "moment"),
             ("2026-04-11T21:30", "2026-04-11T14:30", "", "night"),
-            ("2026-04-11T16:30", "2026-04-11T09:30", "leo", "complete"),
+            ("2026-04-11T16:30", "2026-04-11T09:30", "leo", "kid"),
         ];
         for (now, bogota, holder, screen) in moments {
             let store: &[_] =

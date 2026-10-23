@@ -1,6 +1,7 @@
 # 0017: kid mode, handoff, and host device commands
 
-Status: accepted, 2026-09-28.
+Status: accepted, 2026-09-28. Amended by [0037](0037-what-the-trip-taught.md): a child holds the phone anywhere, the
+adults decide; `complete` and its extra time are gone.
 
 ## Context
 

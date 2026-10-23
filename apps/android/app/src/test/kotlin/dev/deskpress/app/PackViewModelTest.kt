@@ -16,6 +16,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -152,7 +153,7 @@ class PackViewModelTest {
         assertEquals("relay", model.screen)
         model.act("hold", Value.Text("tomas"))
         runCurrent()
-        assertEquals("suggestion", model.screen)
+        assertEquals("kid", model.screen)
     }
 
     @Test
@@ -166,29 +167,28 @@ class PackViewModelTest {
         runCurrent()
         val again = model({ example }, "2026-04-11T11:30", facts)
         runCurrent()
-        assertEquals("suggestion", again.screen)
+        assertEquals("kid", again.screen)
     }
 
     @Test
     fun unlockedRunsThenAndRefusedDoesNot() = runTest {
-        // At 10:40 tomas holds the phone where it is not safe -> screen is complete.
+        // At 10:40 tomas holds the phone, so the kid screen; giving it back takes a parent.
         val facts = Facts(File(temp.root, "facts"))
         facts.write("one-day", "holder: tomas\nreturns_to: rita\n")
         val model = model({ example }, "2026-04-11T10:40", facts)
         runCurrent()
-        assertEquals("complete", model.screen)
+        assertEquals("kid", model.screen)
 
-        // Refused unlock: act("more_time") requests unlock, unlock fails, screen stays complete.
         model.unlock = { done -> done(false) }
-        model.act("more_time", Value.Null)
-        runCurrent()
-        assertEquals("complete", model.screen)
-
-        // Successful unlock: act("more_time") requests unlock, unlock succeeds, runs "extend" -> screen becomes kid.
-        model.unlock = { done -> done(true) }
-        model.act("more_time", Value.Null)
+        model.act("give_back", Value.Null)
         runCurrent()
         assertEquals("kid", model.screen)
+
+        // Unlocked, it runs "returned": the phone is rita's again.
+        model.unlock = { done -> done(true) }
+        model.act("give_back", Value.Null)
+        runCurrent()
+        assertNotEquals("kid", model.screen)
     }
 
     @Test
@@ -237,27 +237,21 @@ class PackViewModelTest {
     }
 
     @Test
-    fun aChildOutOfTheSafePlaceIsCalledBackOnceTheDeviceKnowsWhereItIs() = runTest {
+    fun aPositionIsFollowedAndLetGo() = runTest {
         val facts = Facts(File(temp.root, "facts"))
-        facts.write("one-day", "holder: tomas\nreturns_to: rita\n")
+        facts.write("one-day", "holder: rita\n")
         val model = model({ example }, "2026-04-11T11:30", facts)
         runCurrent()
-        assertEquals("suggestion", model.screen)
         model.moved(38.0, -9.0)
         runCurrent()
-        assertEquals("complete", model.screen)
         assertEquals(38.0 to -9.0, model.position.value)
-        // A pin let go: nowhere known, so not away either.
+        // A pin let go: nowhere known.
         model.unpinned()
         runCurrent()
-        assertEquals("suggestion", model.screen)
         assertEquals(null, model.position.value)
-        model.moved(38.0, -9.0)
-        runCurrent()
-        assertEquals("complete", model.screen)
         model.moved(38.7248, -9.1139)
         runCurrent()
-        assertEquals("suggestion", model.screen)
+        assertEquals(38.7248 to -9.1139, model.position.value)
         // Moving inside the same regions asks nothing again.
         val before = model.state.value
         model.moved(38.7249, -9.1139)
