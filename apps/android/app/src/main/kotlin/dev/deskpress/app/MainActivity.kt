@@ -57,6 +57,7 @@ import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.content.edit
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -407,6 +408,11 @@ class MainActivity : FragmentActivity() {
             }
 
             val state by model.state.collectAsStateWithLifecycle()
+            // Back in front, the clock may have passed a change while the phone slept (decision 0013).
+            LifecycleResumeEffect(model) {
+                model.redraw()
+                onPauseOrDispose {}
+            }
 
             // A pack with regions, or an open map, asks once for the position and follows it while started.
             val fenced = (state as? PackState.Showing)?.view?.watch?.regions?.isNotEmpty() == true || guide != null

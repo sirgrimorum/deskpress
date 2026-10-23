@@ -529,12 +529,13 @@ impl<'a> Run<'a> {
         self.set("place", place);
         self.set("here", here);
         self.set("away", Value::Bool(away));
-        // The day's chart: the places its blocks name, in visit order, on plain paper.
+        // The day's chart from now on: the places its blocks name, in visit order, on plain paper.
         let blocks = self.scope.get("day").and_then(|d| d.get("blocks"));
         let stops: Vec<chart::Pin> = blocks
             .and_then(Value::as_list)
             .unwrap_or_default()
             .iter()
+            .filter(|b| text(b.get("state")) != "past")
             .filter_map(|b| {
                 let id = text(b.get("place"));
                 let raw = places?.get(&id)?;
@@ -1373,6 +1374,10 @@ day: {blocks: [{place: azulejo}, {place: odd}, {place: half}, {place: cais}, {pl
         // Neither a place without coordinates nor one with half of them is a pin, and the place
         // visited twice is one pin and two stops.
         assert_eq!(out.at("chart.path").matches("\"x\"").count(), 3);
+        // A stop already over is off the chart: it is for what is left of the day.
+        let left = "day: {blocks: [{place: cais, state: past}, {place: azulejo}]}";
+        let out_left = run("places", keymap, content, &world("2026-04-11T10:00", &[]), left);
+        assert_eq!(out_left.each("chart.points", "name"), "Museum");
         // The device is inside cais, so that is `here`, and its own map comes out canonical.
         assert_eq!(
             out.at("here.plan"),

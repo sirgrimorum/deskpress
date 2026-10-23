@@ -2,6 +2,7 @@
 
 Status: accepted, 2026-09-27. Amends the calls in `architecture.md` and the screen tree. Amended
 by [0035](0035-the-day-like-an-agenda.md): `would`, called while a drag is held, stores nothing.
+Amended by [0037](0037-what-the-trip-taught.md): the host also redraws on every resume.
 
 ## Context
 
