@@ -89,7 +89,11 @@ ui:
   ask: Ask about the trip
   ask_anything: Ask in your own words
   ask_it: Ask
-  from_the_phone: The phone's assistant, not the trip's book
+  from_the_phone: The assistant, not the trip's book
+  ask_change: Ask for a change
+  propose: Propose it
+  do_it: Do it
+  no_change: No change here does that
   body_clock: Body clock
   bed_clash: The plan runs past bed time
   tasks: To do
@@ -484,16 +488,30 @@ screens:
 
   # The day as a calendar: drag a block by its handle, or a picked one by its edges; the rest of its
   # track makes room or closes up. `next` opens it on tomorrow, from the night screen.
+  # The assistant may propose one of these actions in words: the host checks it would store
+  # something, and nothing is kept until the person taps "Do it".
   adjust:
-    state: {picked: null}
+    state: {picked: null, typed: "", proposal: null}
     actions:
       back: [back]
       pick: [{set: picked, to: $arg}]
       move: [{do: timeline.move, with: {block: $arg.block, by: $arg.by}}]
       resize: [{do: timeline.resize, with: {block: $arg.block, edge: $arg.edge, by: $arg.by}}]
-      drop: [{do: timeline.drop, with: {block: picked}}, {set: picked, to: "null"}]
-      restore: [{do: timeline.restore, with: {block: picked}}]
+      drop: [{do: timeline.drop, with: {block: "$arg.block or picked"}}, {set: picked, to: "null"}]
+      restore: [{do: timeline.restore, with: {block: "$arg.block or picked"}}]
       add: [{open: add, with: {date: "(params.next and tomorrow.date) or day.date"}}]
+      insert: [{do: timeline.add, with: {date: $arg.date, time: $arg.time, text: $arg.text}}]
+      type: [{set: typed, to: $arg}]
+      propose:
+        - {set: proposal, to: "null"}
+        - do: assistant.change
+          with:
+            request: typed
+            facts: "(params.next and tomorrow) or day"
+            actions: "'move {block, by: minutes, negative is earlier}; resize {block, edge: start or end, by: minutes}; drop {block}; restore {block}; insert {date, time: HH:MM, text}'"
+            then: "'proposed'"
+      proposed: [{set: proposal, to: $arg}]
+      accept: [{do: assistant.apply}, {set: proposal, to: "null"}, {set: typed, to: "''"}]
     layout:
       - Screen: {title: ui.rearrange, back: ui.back, on_back: back}
       - Label: {if: not picked, text: ui.pick_block}
@@ -517,6 +535,11 @@ screens:
             - Button: {label: ui.remove_block, on_tap: drop}
             - Button: {label: ui.restore_block, on_tap: restore}
       - Button: {label: ui.add_block, on_tap: add}
+      - Field: {if: can.assistant, label: ui.ask_change, value: typed, on_change: type}
+      - Button: {if: can.assistant and typed, label: ui.propose, on_tap: propose}
+      - Card: {if: proposal.says, title: ui.from_the_phone, text: proposal.says}
+      - Label: {if: proposal and not proposal.fits, text: ui.no_change}
+      - Button: {if: proposal.fits, label: ui.do_it, on_tap: accept}
 
   # A block of your own on a day. It joins the day in time order and then moves, stretches and drops
   # like any block the pack wrote.
