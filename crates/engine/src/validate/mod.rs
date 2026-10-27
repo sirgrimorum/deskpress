@@ -115,6 +115,7 @@ pub fn validate(manifest: &Value, content: &Value, theme: Option<&Value>) -> Rep
         people: HashSet::new(),
         kids: false,
         types: BTreeSet::new(),
+        block_ids: HashSet::new(),
     };
     c.pack(manifest, content, theme);
     let (_, defined) = crate::define::define(manifest);
@@ -135,6 +136,8 @@ struct Checker<'a> {
     kids: bool,
     /// The block types the days use, for the ones a pack in another language has not named.
     types: BTreeSet<String>,
+    /// The block ids of the day being checked; an option's own stay with that option.
+    block_ids: HashSet<String>,
 }
 
 impl Checker<'_> {
@@ -634,6 +637,7 @@ impl Checker<'_> {
                     self.r.warn(format!("{at}.who"), message);
                 }
             }
+            self.block_ids.clear();
             let (blocks, fixed, options) = (read("blocks"), read("fixed"), read("options"));
             if blocks.is_none() && fixed.is_none() && options.is_none() {
                 self.r.warn(&at, "no blocks and no options, so this day has nothing to show");
@@ -749,10 +753,12 @@ impl Checker<'_> {
             if read("recommended") == Some(&Value::Bool(true)) {
                 recommended += 1;
             }
+            let day = self.block_ids.clone();
             match read("blocks") {
                 Some(blocks) => self.blocks(&format!("{oat}.blocks"), blocks),
                 None => self.r.error(&oat, "an option with no blocks is an idea, not an option"),
             }
+            self.block_ids = day;
         }
         if recommended == 0 {
             self.r.warn(
@@ -1687,6 +1693,34 @@ days:
             "days:\n  - {date: 2026-04-11, title: x, blocks: [['10:00', 'x', {place: azulejo}]]}",
             "this pack has no places, so \"azulejo\" points at nothing",
         );
+    }
+
+    #[test]
+    fn a_block_id_is_an_id_once_a_day_and_once_an_option() {
+        let content = "days:
+  - date: 2026-04-11
+    title: x
+    blocks:
+      - ['09:00', 'x', {id: walk}]
+      - ['10:00', 'x', {id: walk}]
+      - ['11:00', 'x', {id: Big-Walk}]
+  - date: 2026-04-12
+    title: x
+    blocks: [['09:00', 'x', {id: walk}]]
+    options:
+      - {id: coast, name: Coast, recommended: true, blocks: [['10:00', 'a', {id: swim}]]}
+      - {id: hill, name: Hill, blocks: [['10:00', 'b', {id: swim}], ['11:00', 'c', {id: walk}]]}
+";
+        let s = said(&with("", content, None));
+        let twice = "\"walk\" is used twice on this day, so an edit to one lands on both";
+        for needle in [
+            format!("days.2026-04-11.blocks[1].id: {twice}"),
+            "days.2026-04-11.blocks[2].id: \"Big-Walk\" is not an id".into(),
+            format!("options[1].blocks[1].id: {twice}"),
+        ] {
+            assert!(s.contains(&needle), "wanted {needle:?} in:\n{s}");
+        }
+        assert_eq!(s.matches("used twice").count(), 2, "{s}");
     }
 
     #[test]

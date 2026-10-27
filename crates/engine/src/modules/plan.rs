@@ -2,8 +2,8 @@
 //! pack is a document, so none of it is written back: each edit is a stored fact, keyed by the
 //! block's `event` id, and the timeline applies them every time it builds the day.
 
-use super::travel::MOVING;
-use super::{Run, list};
+use super::travel::{MOVING, length};
+use super::{Run, list, shares};
 use crate::clock::{minutes, shift};
 use crate::validate::patterns::{is_real_date, is_time};
 use crate::value::{Map, Value, text, truthy};
@@ -207,9 +207,12 @@ impl Run<'_> {
             page.into_iter().filter(timed).collect::<Vec<Map>>()
         };
         let mut blocks = timed(true);
+        // Only its own track moves: another person's hours are theirs.
+        let me = blocks.iter().find(|b| text(b.get("event")) == event)?.clone();
+        blocks.retain(|b| shares(b, &me));
         blocks.sort_by_cached_key(|b| minutes(&self.begins(date, b)));
         let pack = timed(false);
-        let i = blocks.iter().position(|b| text(b.get("event")) == event)?;
+        let i = blocks.iter().position(|b| text(b.get("event")) == event).unwrap_or_default();
         let zone = text(blocks[i].get("zone"));
         let base = minutes(&self.stamp(date, "00:00", &zone));
         let now = minutes(&self.world.now) - base;
@@ -329,7 +332,8 @@ impl Run<'_> {
         for (r, &k) in order.iter().enumerate() {
             let (b, (s, e)) = (&blocks[k], fin[k]);
             let reads = order.get(r + 1).map_or(s + 60, |&n| (fin[n].0 - leg(k, n)).max(s));
-            let has = !text(b.get("until")).is_empty();
+            let has =
+                !text(b.get("until")).is_empty() || length(&text(b.get("duration"))).is_some();
             let same = (s, e) == (slots[k].at, slots[k].at + slots[k].len);
             if truthy(b.get("locked")) || other(b) || (same && (has || e == reads)) {
                 continue;
@@ -638,6 +642,29 @@ plan.d.blocks.6: {at: never, until: "25:00", grow: 60}
         assert_eq!(late(0, "timeline.move", 30), "0 21:30-23:30, 1 23:30-00:00");
         assert_eq!(late(0, "timeline.move", 60), "");
         assert_eq!(late(1, "timeline.resize", 30), "");
+    }
+
+    #[test]
+    fn a_move_on_one_persons_track_leaves_the_others_hours_alone() {
+        let split = r#"days:
+  - date: 2026-04-11
+    blocks:
+      - ["09:00", Breakfast, {until: "10:00"}]
+      - ["10:00", Talk, {for: rita, until: "12:00"}]
+      - ["10:00", Swim, {for: [tomas], duration: "1 h", id: swim}]
+      - ["11:00", Ride, {for: tomas, until: "12:00"}]
+      - ["12:00", Lunch, {until: "13:00"}]
+"#;
+        let mv = |block: &str, by: i64| {
+            let args = format!("block: 2026-04-11.{block}\nby: {by}");
+            reshape("2026-04-11T08:00", split, "timeline.move", &args)
+        };
+        // The swim's hour is its own, so the ride is pushed and the talk is not.
+        assert_eq!(
+            mv("swim", 30),
+            "plan.2026-04-11.swim 10:30-11:30, 3 11:30-12:30, 4 12:30-13:30"
+        );
+        assert_eq!(mv("blocks.1", 30), "1 10:30-12:30, 4 12:30-13:30");
     }
 
     #[test]

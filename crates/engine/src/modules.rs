@@ -50,14 +50,22 @@ fn id(v: &Value) -> String {
 /// Whether a block is for the person holding the phone: its `for` names them, one id or a list,
 /// or it has no `for`, or nobody holds the phone.
 fn holds(block: &Map, holder: &str) -> bool {
-    let Some(whom) = block.get("for") else {
-        return true;
-    };
-    holder.is_empty()
-        || match whom {
-            Value::List(ids) => ids.iter().any(|p| text(Some(p)) == holder),
-            one => text(Some(one)) == holder,
-        }
+    holder.is_empty() || block.get("for").is_none() || whom(block).iter().any(|p| p == holder)
+}
+
+/// The people a block's `for` names, one id or a list; none for a block that is everyone's.
+pub(crate) fn whom(block: &Map) -> Vec<String> {
+    match block.get("for") {
+        Some(Value::List(ids)) => ids.iter().map(|p| text(Some(p))).collect(),
+        Some(one) => vec![text(Some(one))],
+        None => Vec::new(),
+    }
+}
+
+/// Whether two blocks are on one track of the day: either is everyone's, or a person is in both.
+pub(crate) fn shares(a: &Map, b: &Map) -> bool {
+    let (a, b) = (whom(a), whom(b));
+    a.is_empty() || b.is_empty() || a.iter().any(|p| b.contains(p))
 }
 
 /// The circle of a place's `at`, when it has both coordinates. The radius defaults to 100 metres.
@@ -281,7 +289,8 @@ impl<'a> Run<'a> {
         let date = self.date_of(day);
         let blocks = self.in_force(day, chosen, true);
         let mut m = self.canon(day, "day");
-        let page = self.page(&date, day, &blocks);
+        let mut page = self.page(&date, day, &blocks);
+        self.tracks(&mut m, &mut page);
         let timed = |b: &&Map| !text(b.get("time")).is_empty() && !truthy(b.get("leg"));
         let blocks: Vec<Map> = page.iter().filter(timed).cloned().collect();
         m.set("blocks", Value::List(page.into_iter().map(Value::Map).collect()));
@@ -290,6 +299,43 @@ impl<'a> Run<'a> {
         }
         m.set("choice", chosen.map_or(Value::Null, |c| Value::String(id(c))));
         (m, blocks)
+    }
+
+    /// When a day splits, `tracks` names who each one is for, and each entry with a `for` gets
+    /// `track`, its place there. A block no edit moves is `fixed`: locked, or ending on another clock.
+    fn tracks(&self, day: &mut Map, page: &mut [Map]) {
+        let set = |b: &Map| {
+            let mut w = whom(b);
+            w.sort();
+            w
+        };
+        let mut sets: Vec<Vec<String>> = Vec::new();
+        for b in page.iter_mut().filter(|b| !text(b.get("time")).is_empty()) {
+            let w = set(b);
+            if !w.is_empty() && !sets.contains(&w) {
+                sets.push(w);
+            }
+            if truthy(b.get("locked")) || b.get("until_zone").is_some() {
+                b.set("fixed", Value::Bool(true));
+            }
+        }
+        if sets.len() < 2 {
+            return;
+        }
+        for b in page.iter_mut() {
+            if let Some(t) = sets.iter().position(|s| *s == set(b)) {
+                b.set("track", Value::Number(t as f64));
+            }
+        }
+        let people = list(self.keymap.root(self.content, "people"));
+        let name = |who: &String| {
+            let p = people.iter().find(|p| id(p) == *who);
+            p.and_then(|p| self.read(p, "person", "name"))
+                .map_or_else(|| who.clone(), |n| text(Some(n)))
+        };
+        let names =
+            sets.iter().map(|s| Value::String(s.iter().map(name).collect::<Vec<_>>().join(", ")));
+        day.set("tracks", Value::List(names.collect()));
     }
 
     /// A day's blocks in force, with the chosen option's and, when `edited`, what the person did
@@ -303,7 +349,10 @@ impl<'a> Run<'a> {
             for (n, b) in list(from).iter().enumerate() {
                 let mut b = self.block(b);
                 if !text(b.get("time")).is_empty() {
-                    b.set("event", Value::String(format!("{date}.{name}.{n}")));
+                    // The pack's own `id` survives a newer pack; a place in a list does not.
+                    let own = Some(text(b.get("id"))).filter(|i| !i.is_empty());
+                    let key = own.unwrap_or_else(|| format!("{name}.{n}"));
+                    b.set("event", Value::String(format!("{date}.{key}")));
                 }
                 if let Some(zone) = zone.filter(|_| b.get("zone").is_none()) {
                     b.set("zone", zone.clone());
@@ -1055,6 +1104,36 @@ places: {old: {at: {lat: 40.0, lon: 0.0}, legs: {new_wing: 25}}, new_wing: {at: 
         let anyone = run("timeline", "", content, &w, "");
         assert_eq!(anyone.each("day.blocks", "text"), "Talk Swim Walk Lunch");
         assert_eq!(anyone.at("block.text"), "\"Swim\"");
+    }
+
+    #[test]
+    fn a_day_split_between_people_names_its_tracks_and_a_block_keeps_its_own_id() {
+        let content = r#"people: [{id: rita, name: Rita}, {id: tomas}]
+days:
+  - date: 2026-04-11
+    blocks:
+      - ["08:00", "Breakfast", {id: breakfast}]
+      - ["09:00", "Talk", {for: rita, until: "12:00", locked: true}]
+      - ["09:00", "Swim", {for: [tomas], duration: 1 h 15}]
+      - ["11:00", "Ride", {for: tomas, until: "12:00", until_zone: Europe/Paris}]
+      - ["13:00", "Lunch"]
+"#;
+        let mut w = world("2026-04-11T07:00", &[]);
+        w.holder = String::new();
+        let out = run("timeline", "", content, &w, "");
+        assert_eq!(out.at("day.tracks"), r#"["Rita", "tomas"]"#);
+        let day = out.scope.get("day").and_then(|d| d.get("blocks")).and_then(Value::as_list);
+        let read = |key: &str| {
+            let each = day.unwrap_or_default().iter().map(|b| show(b.get(key)));
+            each.collect::<Vec<_>>().join(" ")
+        };
+        assert_eq!(read("track"), "nothing 0 1 1 nothing");
+        assert_eq!(read("fixed"), "nothing true nothing true nothing");
+        assert_eq!(read("lasts"), "60 180 75 60 60");
+        assert_eq!(out.at("next.event"), "\"2026-04-11.breakfast\"");
+        // Held by one of them, the day is theirs alone and does not split.
+        let rita = run("timeline", "", content, &world("2026-04-11T07:00", &[]), "");
+        assert_eq!(rita.at("day.tracks"), "nothing");
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Blocks, block types and the free keys every entry may carry.
 
 use super::Checker;
-use super::patterns::{dated_key, is_time, to_confirm};
+use super::patterns::{dated_key, is_id, is_time, to_confirm};
 use crate::value::{Map, Value, quote, show, text, truthy};
 
 pub const TYPES: [&str; 13] = [
@@ -112,6 +112,20 @@ impl Checker<'_> {
                 format!("{bat}.place"),
                 format!("{} is not a place in this pack", quote(&place)),
             );
+        }
+        if let Some(own) = read("id") {
+            let own = text(Some(own));
+            if !is_id(&own) {
+                let message =
+                    format!("{} is not an id: lowercase letters, digits and _", quote(&own));
+                self.r.error(format!("{bat}.id"), message);
+            } else if !self.block_ids.insert(own.clone()) {
+                let message = format!(
+                    "{} is used twice on this day, so an edit to one lands on both",
+                    quote(&own)
+                );
+                self.r.error(format!("{bat}.id"), message);
+            }
         }
         self.whom(&format!("{bat}.for"), read("for"));
         self.person(&format!("{bat}.guide"), &text(read("guide")));

@@ -1,9 +1,9 @@
 //! The travel between two blocks (decision 0032): a block the day gets between two places, from
 //! the pack's own time for that leg, else estimated from where the two places are. Never moved.
 
-use super::{Run, chart, plan, region};
+use super::{Run, chart, plan, region, shares};
 use crate::clock::{minutes, shift};
-use crate::value::{Map, Value, text};
+use crate::value::{Map, Value, text, truthy};
 
 /// How a day gets from one place to the next, when it says.
 pub(crate) const TRAVEL: [&str; 3] = ["walking", "driving", "transit"];
@@ -41,22 +41,60 @@ fn said(m: i64) -> String {
     }
 }
 
+/// Minutes a `duration` reads as, like `40 min`, `1 h` or `1 h 15`; `None` for any other text.
+pub(crate) fn length(said: &str) -> Option<i64> {
+    let (mut total, mut n, mut hours) = (0, None, false);
+    let mut words: Vec<String> = Vec::new();
+    // Words, and a number glued to its unit split from it: `1h15` is `1`, `h`, `15`.
+    for piece in said.split_whitespace() {
+        let mut next = true;
+        for c in piece.chars() {
+            match words.last_mut() {
+                Some(w) if !next && w.chars().all(|d| d.is_ascii_digit()) == c.is_ascii_digit() => {
+                    w.push(c)
+                }
+                _ => words.push(c.to_string()),
+            }
+            next = false;
+        }
+    }
+    for w in words {
+        let unit = match w.to_lowercase().as_str() {
+            "h" | "hr" | "hrs" | "hour" | "hours" | "hora" | "horas" => 60,
+            "m" | "min" | "mins" | "minute" | "minutes" | "minuto" | "minutos" => 1,
+            digits => {
+                n = Some(digits.parse::<i64>().ok().filter(|_| n.is_none())?);
+                continue;
+            }
+        };
+        hours |= unit == 60;
+        total += n.take()? * unit;
+    }
+    // A number left after the hours is their minutes.
+    match n {
+        Some(m) if hours => total += m,
+        Some(_) => return None,
+        None => {}
+    }
+    (total > 0).then_some(total)
+}
+
 impl<'a> Run<'a> {
     /// The day as its page draws it: a leg before each block a different place comes before, and
-    /// every timed entry with `lasts`, its minutes: to its `until`, else the next, else an hour.
+    /// every timed entry with `lasts`, its minutes: to its `until`, else its `duration`, else the
+    /// next on its track, else an hour.
     pub(super) fn page(&self, date: &str, day: &Value, blocks: &[Map]) -> Vec<Map> {
         let travel = self.keymap.value("travel", self.read(day, "day", "travel"));
         let mut page: Vec<Map> = Vec::with_capacity(blocks.len() * 2);
-        let mut last: Option<usize> = None;
+        let block = |b: &Map| !text(b.get("time")).is_empty() && !truthy(b.get("leg"));
         for b in blocks {
-            if text(b.get("time")).is_empty() {
-                page.push(b.clone());
-                continue;
-            }
-            if let Some(leg) = last.and_then(|i| self.leg(&page[i], b, &travel)) {
+            // From the last block on its track: a day split between people has a way for each.
+            let last = page.iter().rposition(|p| block(p) && shares(p, b));
+            if let Some(leg) =
+                last.filter(|_| block(b)).and_then(|i| self.leg(&page[i], b, &travel))
+            {
                 page.push(leg);
             }
-            last = Some(page.len());
             page.push(b.clone());
         }
         let starts: Vec<Option<String>> = (page.iter())
@@ -67,11 +105,15 @@ impl<'a> Run<'a> {
                 continue;
             };
             let until = text(page[i].get("until"));
-            let end = if until.is_empty() {
-                let next = starts[i + 1..].iter().flatten().next();
-                next.cloned().unwrap_or_else(|| shift(begin, 60))
-            } else {
+            let given = length(&text(page[i].get("duration")));
+            let end = if !until.is_empty() {
                 self.ending(date, &page[i])
+            } else if let Some(m) = given {
+                shift(begin, m)
+            } else {
+                let next = (i + 1..page.len()).filter(|&j| shares(&page[i], &page[j]));
+                let next = next.filter_map(|j| starts[j].clone()).next();
+                next.unwrap_or_else(|| shift(begin, 60))
             };
             let lasts = (minutes(&end) - minutes(begin)).max(0);
             page[i].set("lasts", Value::Number(lasts as f64));
@@ -127,6 +169,9 @@ impl<'a> Run<'a> {
         leg.set("late", Value::Bool(late));
         leg.set("from", Value::String(from));
         leg.set("to", Value::String(to));
+        if let Some(whom) = b.get("for") {
+            leg.set("for", whom.clone());
+        }
         if let Some(zone) = b.get("zone") {
             leg.set("zone", zone.clone());
         }
@@ -160,6 +205,41 @@ mod tests {
         assert_eq!(said(20), "20 min");
         assert_eq!(said(60), "1 h");
         assert_eq!(said(75), "1 h 15 min");
+    }
+
+    #[test]
+    fn a_duration_reads_as_minutes_only_when_it_says_hours_or_minutes() {
+        let read = ["40 min", "1 h", "1 h 15", "1h15min", "2 horas", "90 minutes"];
+        assert_eq!(read.map(length), [40, 60, 75, 75, 120, 90].map(Some));
+        for not in ["", "≈ 20 min", "15", "1 15 min", "half an hour", "0 min", "1 h, 15", "h 15"]
+        {
+            assert_eq!(length(not), None, "{not}");
+        }
+    }
+
+    #[test]
+    fn a_day_split_between_people_has_its_ways_and_its_lengths_on_each_track() {
+        let lines = page(
+            "{}",
+            r#"
+- {time: "09:00", text: Old, place: old}
+- {time: "09:30", text: Talk, place: market, for: rita, duration: 1 h}
+- {time: "10:30", text: New, place: new, for: [tomas]}
+- {time: "11:00", text: Back, place: old, for: rita}
+"#,
+        );
+        assert_eq!(
+            lines,
+            [
+                r#"09:00 Old {"lasts": 5}"#,
+                r#"09:05 → The market {"until": "09:30", "duration": "25 min", "lasts": 25, "leg": true, "late": false, "for": "rita"}"#,
+                r#"09:30 Talk {"for": "rita", "duration": "1 h", "lasts": 60}"#,
+                r#"10:10 → new {"until": "10:30", "duration": "≈ 20 min", "lasts": 20, "leg": true, "late": false, "for": ["tomas"]}"#,
+                r#"10:30 New {"for": ["tomas"], "lasts": 60}"#,
+                r#"10:35 → The old museum {"until": "11:00", "duration": "25 min", "lasts": 25, "leg": true, "late": false, "for": "rita"}"#,
+                r#"11:00 Back {"for": "rita", "lasts": 60}"#,
+            ]
+        );
     }
 
     /// Two museums a kilometre apart, a cafe and a market with no position, the market with a
