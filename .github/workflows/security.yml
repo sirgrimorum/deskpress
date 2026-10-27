@@ -12,6 +12,10 @@ jobs:
   audit:
     name: Cargo Audit
     runs-on: ubuntu-latest
+    # A warning is reported as a check run, which the default token may not create.
+    permissions:
+      contents: read
+      checks: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
