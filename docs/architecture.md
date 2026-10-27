@@ -193,7 +193,7 @@ and hands the file to whatever app sends it ([decision 0034](decisions/0034-the-
 Some choices belong to the host and not to any pack: how big the text is drawn, which scales every
 type step over the theme; which of the phone's map apps `map.open` and `map.route` are sent to;
 which maps are kept offline; and, for trying a moment out, a clock set by hand and a pretend place,
-flagged on every screen while on ([decision 0030](decisions/0030-trying-a-moment-and-the-day-as-a-route.md)). They live in
+flagged on every screen while on, with a way back to now ([decision 0030](decisions/0030-trying-a-moment-and-the-day-as-a-route.md)); a tap on a block sets both ([decision 0038](decisions/0038-a-moment-tried-out-by-tapping-it.md)). They live in
 the shell preferences, so they hold whatever pack is open.
 
 ## The assistant

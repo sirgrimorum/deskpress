@@ -1,6 +1,6 @@
 # 0030: trying a moment out, answers that open, and the day as a route
 
-Status: accepted, 2026-09-30.
+Status: accepted, 2026-09-30. Amended by 0038.
 
 ## Context
 

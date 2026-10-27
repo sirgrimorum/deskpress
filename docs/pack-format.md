@@ -269,7 +269,7 @@ takes `{block, by}`, an `event` id and whole minutes, and moves the block; `time
 as its hours, or nothing when it does not fit. `timeline.drop` and `timeline.restore` take
 `{block}`; `timeline.add` takes `{date, time, text}`. Arguments that make no sense write nothing.
 
-The commands the Android host runs: `device.unlock` (asks for the fingerprint or the device
+The commands the Android host runs: `clock.try` (sets the pretend clock to `date` and `time` and the pretend place to `place`'s region, decision 0038), `device.unlock` (asks for the fingerprint or the device
 credential, then runs the action named in `then`), `phone.call` (opens the dialer with `number`),
 `document.open` (shows the pack's `file` full screen under `title`), `location.get` (runs the
 action named in `then` with the device's position as `$arg`, `{lat, lon}`), `map.open` (a map
@@ -314,7 +314,7 @@ set here, a `Sprite`'s pixels aside.
 | `Auto` | expands a mapping by the unknown key rule, one node per key; a list is a `Card` per item, and any other value one `Card`. `skip: [keys]` leaves keys out |
 | `Group` | a titled box around the components in its own `layout`; left out when nothing inside is drawn |
 | `Dialog` | `title` small and `text` large, over the screen, with `close` as the button's label; closing it sends `on_close`, which it needs. Give it an `if`, or it never goes |
-| `Screen` | the frame: `title` in the top bar, `on_back` as a round button, every other `on_<event>` as a pill labelled by the prop of that name; `foot_label`, `foot_time` and `foot` in the bottom bar; `alarm: true` signals an audible/haptic alert to the host |
+| `Screen` | the frame: `title` in the top bar, `on_back` as a round button, every other `on_<event>` as a pill labelled by the prop of that name; `foot_label`, `foot_time` and `foot` in the bottom bar, and a tap on it runs `on_foot`; `alarm: true` signals an audible/haptic alert to the host |
 
 A component is a one-key mapping, `Kind: {props}`. A prop is an expression; a text with `{` in it
 is a text template, like `"Next, {next.time}"`. `on_<event>: action` names an action of the same screen.
