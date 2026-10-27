@@ -2,6 +2,7 @@
 
 Status: accepted, 2026-09-30. Amends 0025. Amended by [0035](0035-the-day-like-an-agenda.md):
 `timeline.move` and `.resize` replace `.reorder`, and the page is a time axis.
+Amended by [0039](0039-the-day-as-a-calendar.md): the Day is a calendar, and `duration` is a length.
 
 ## Context
 

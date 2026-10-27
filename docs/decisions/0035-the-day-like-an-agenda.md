@@ -1,6 +1,7 @@
 # 0035: the day like an agenda
 
-Status: accepted, 2026-10-01. Amends 0013, 0025 and 0032.
+Status: accepted, 2026-10-01. Amends 0013, 0025 and 0032. Amended by
+[0039](0039-the-day-as-a-calendar.md): one scale for the whole day, and a move stays on its track.
 
 ## Context
 
