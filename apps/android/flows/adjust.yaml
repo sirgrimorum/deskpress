@@ -1,6 +1,6 @@
-# The day like an agenda: an edge dragged shortens an hour and the rest follow, a drag past the
-# locked ferry changes nothing, a handle moves an hour, an added block joins in time order.
-# Swipes are pixels on the 1080x2400 AVD, the screen at its top.
+# The day as a calendar: an edge dragged shortens a block and the rest follow, a drag past the
+# locked ferry changes nothing, a handle moves a block, an added block joins in time order.
+# Swipes are pixels on the 1080x2400 AVD, the screen at its top: with a block picked 11:00 is at 444, and a minute is 4.2 px.
 appId: dev.deskpress.app
 ---
 - launchApp:
@@ -11,13 +11,13 @@ appId: dev.deskpress.app
 - scrollUntilVisible:
     element: "Move the day about"
 - tapOn: "Move the day about"
-- assertVisible: "Drag an hour by its handle.*"
+- assertVisible: "Drag a block by its handle.*"
 - assertNotVisible: "15 minutes later"
 - tapOn: "Lunch in the museum cloister.*"
 # Lunch's bottom edge up half an hour: the way and the market come earlier with it.
 - swipe:
-    start: 540, 1183
-    end: 540, 1096
+    start: 597, 1473
+    end: 597, 1328
     duration: 1000
 - assertVisible: "14:35"
 - assertVisible: "15:00"
@@ -30,12 +30,12 @@ appId: dev.deskpress.app
 - assertVisible: "15:00"
 # By its handle, half an hour later.
 - swipe:
-    start: 954, 1026
-    end: 954, 1136
+    start: 975, 1074
+    end: 975, 1219
     duration: 1000
 - assertVisible: "13:45"
 - assertNotVisible: "13:15"
-# Scrolled from the hours' column: the picked hour's grip sits mid-screen, where a scroll starts.
+# Scrolled from the ruler: the picked block's grip sits mid-screen, where a scroll starts.
 - swipe:
     start: 100, 1800
     end: 100, 600

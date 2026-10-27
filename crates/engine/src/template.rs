@@ -249,17 +249,20 @@ packing: {check: true, items: [Hat, Bottle]}
         at(node.unwrap(), "value").cloned().unwrap()
     }
 
+    /// The Day node of a screen.
+    fn day(tree: &Tree) -> &Node {
+        tree.nodes.iter().find(|n| n.kind == "Day").expect("a Day node")
+    }
+
     /// The hours the Day node draws, as `time text`.
     fn hours(tree: &Tree) -> Vec<String> {
-        let day = tree.nodes.iter().find(|n| n.kind == "Day").expect("a Day node");
-        let blocks = at(day, "blocks").and_then(Value::as_list).unwrap_or_default();
+        let blocks = at(day(tree), "blocks").and_then(Value::as_list).unwrap_or_default();
         blocks.iter().map(|b| format!("{} {}", text(b.get("time")), text(b.get("text")))).collect()
     }
 
     /// The `event` of the hour of the Day node that says `says`.
     fn hour(tree: &Tree, says: &str) -> Value {
-        let day = tree.nodes.iter().find(|n| n.kind == "Day").expect("a Day node");
-        let blocks = at(day, "blocks").and_then(Value::as_list).unwrap_or_default();
+        let blocks = at(day(tree), "blocks").and_then(Value::as_list).unwrap_or_default();
         let b = blocks.iter().find(|b| text(b.get("text")) == says);
         assert!(b.is_some(), "no hour says {says:?}");
         b.unwrap().get("event").cloned().unwrap()
@@ -303,6 +306,8 @@ packing: {check: true, items: [Hat, Bottle]}
         let (e, mut nav) = (trip(), Nav::default());
         let night = world("2026-04-11T21:30", "", &[]);
         let out = e.dispatch(&night, &mut nav, "adjust", Value::Null).unwrap();
+        // Tomorrow has no now line; today has one at the clock.
+        assert_eq!(show(at(day(&out.view.tree), "now")), "false");
         let dinner = hour(&out.view.tree, "Dinner");
         e.dispatch(&night, &mut nav, "pick", dinner.clone()).unwrap();
         let arg = Map(vec![("block".into(), dinner.clone()), ("by".into(), Value::Number(15.0))]);
@@ -320,6 +325,7 @@ packing: {check: true, items: [Hat, Bottle]}
         let early = world("2026-04-11T08:00", "", &[]);
         e.dispatch(&early, &mut nav, "agenda", Value::Null).unwrap();
         let out = e.dispatch(&early, &mut nav, "adjust", Value::Null).unwrap();
+        assert_eq!(show(at(day(&out.view.tree), "now")), r#""08:00""#);
         let park = hour(&out.view.tree, "Park");
         let arg = |edge: &str, by: f64| {
             let edge = Value::String(edge.into());

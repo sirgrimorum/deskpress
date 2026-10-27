@@ -6,34 +6,53 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class DayTest {
-    // 09:00 to 10:00 in 100 px, then 10:15 to 11:00 in 60 px: a quarter hour of free time between.
-    private val spans = listOf(Span(0f, 100f, 540, 60), Span(100f, 60f, 615, 45))
+    /** Where each hour is drawn, as `row left+width` in hundredths of the Day's width. */
+    private fun drawn(hours: List<Hour>, tracks: Int) =
+        spots(hours, tracks).map { "${it.hour.row} ${(it.left * 100).toInt()}+${(it.width * 100).toInt()}" }
 
     @Test
     fun anHourReadsAsMinutesFromMidnight() {
         assertEquals(615, clock("10:15"))
-        for (bad in listOf("", "10", "ten:15", "10:15:00")) assertNull(bad, clock(bad))
+        for (bad in listOf("", "10", "ten:15", "10:15:00", "false")) assertNull(bad, clock(bad))
     }
 
     @Test
-    fun aPointReadsAsTheMinuteOfTheRowUnderIt() {
-        assertEquals(570f, minuteAt(spans, 50f), 0.01f)
-        assertEquals(615f, minuteAt(spans, 100f), 0.01f)
-        assertEquals(645f, minuteAt(spans, 140f), 0.01f)
-        // Past either end, the end row's pace.
-        assertEquals(510f, minuteAt(spans, -50f), 0.01f)
-        assertEquals(705f, minuteAt(spans, 220f), 0.01f)
+    fun theRulerRunsFromTheFirstHourToTheHourAfterTheLastEnds() {
+        val day = listOf(Hour(0, 555, 60, null, false), Hour(1, 700, 5, null, false), Hour(2, 650, 20, null, true))
+        assertEquals(540..720, axis(day))
+        // A block is never drawn shorter than a quarter of an hour; a way is as long as it is.
+        assertEquals(715, day[1].end)
+        assertEquals(670, day[2].end)
+        assertEquals(540..600, axis(listOf(Hour(0, 540, 60, null, false))))
     }
 
     @Test
-    fun aMinuteIsDrawnWhereItReadsAndOneBetweenRowsAtTheNextTop() {
-        assertEquals(50f, yAt(spans, 570f), 0.01f)
-        assertEquals(100f, yAt(spans, 605f), 0.01f)
-        assertEquals(140f, yAt(spans, 645f), 0.01f)
-        assertEquals(-50f, yAt(spans, 510f), 0.01f)
-        assertEquals(220f, yAt(spans, 705f), 0.01f)
-        // A row of no minutes reads as one, never a division by zero.
-        assertEquals(10f, yAt(listOf(Span(0f, 10f, 540, 0)), 541f), 0.01f)
+    fun eachTrackIsAColumnAndEveryonesHoursCrossThemAll() {
+        val day =
+            listOf(
+                Hour(0, 540, 60, null, false),
+                Hour(1, 600, 120, 0, false),
+                Hour(2, 600, 75, 1, false),
+                Hour(3, 590, 10, 1, true),
+                Hour(4, 720, 60, null, false),
+            )
+        assertEquals(listOf("0 0+100", "1 0+50", "2 50+50", "3 50+50", "4 0+100"), drawn(day, 2))
+        // One track, or none: no columns.
+        assertEquals(listOf("0 0+100", "1 0+100"), drawn(day.take(2), 1))
+    }
+
+    @Test
+    fun hoursThatOverlapShareTheirColumnInLanes() {
+        val day =
+            listOf(
+                Hour(0, 600, 60, null, false),
+                Hour(1, 630, 60, null, false),
+                Hour(2, 660, 60, null, false),
+                Hour(3, 720, 30, null, false),
+            )
+        // The first and the third take turns in one lane; the fourth starts a run of its own.
+        assertEquals(listOf("0 0+50", "1 50+50", "2 0+50", "3 0+100"), drawn(day, 0))
+        assertEquals(listOf("0 0+25", "1 25+25"), drawn(day.take(2).map { it.copy(track = 0) }, 2))
     }
 
     @Test
@@ -45,25 +64,11 @@ class DayTest {
     }
 
     @Test
-    fun aDragReadsFromTheEdgeItHolds() {
-        // The first row's foot is 10:00, though the next row's top reads 10:15.
-        assertEquals(0, draggedBy(spans, spans[0], "end", 95f))
-        assertEquals(-15, draggedBy(spans, spans[0], "end", 75f))
-        assertEquals(15, draggedBy(spans, spans[0], "end", 100f))
-        assertEquals(-15, draggedBy(spans, spans[1], null, 95f))
-        assertEquals(30, draggedBy(spans, spans[1], "start", 140f))
-    }
-
-    @Test
     fun aDragLandsTheWholeBlockOrMovesOneEdge() {
-        val second = spans[1]
-        // Fifteen minutes earlier: into the free quarter hour, at the first row's foot, same height.
-        assertEquals(100f to 160f, landing(spans, second, null, -15))
-        assertEquals(50f to 160f, landing(spans, second, "start", -45))
-        assertEquals(100f to 140f, landing(spans, second, "end", -15))
-        // Past either end of the Day, at the end row's pace.
-        assertEquals(-50f to 100f, landing(spans, spans[0], "start", -30))
-        assertEquals(100f to 220f, landing(spans, second, "end", 45))
+        val h = Hour(0, 615, 45, null, false)
+        assertEquals(600 to 645, landing(h, null, -15))
+        assertEquals(570 to 660, landing(h, "start", -45))
+        assertEquals(615 to 645, landing(h, "end", -15))
     }
 
     @Test
