@@ -32,7 +32,7 @@ history.
 | [0024](0024-public-repo-ci-and-security.md) | the public repo: remote, CI for gate and Android, security audit, community files | accepted |
 | [0025](0025-the-day-in-hand.md) | the day in hand: edits as facts keyed by `event`, checkable sheets, the set-off notice, two shell settings | accepted, amended by 0030, 0032, 0035 and 0039 |
 | [0026](0026-maps.md) | maps with nothing fetched: the day's chart, a place's plan, `road`, and the `Map` component | accepted, amended by 0031 and 0037 |
-| [0027](0027-the-assistant.md) | the assistant in three tiers: the pack's menu of questions, the phone's own model, and shortcuts outside the app | accepted, amended by 0030 |
+| [0027](0027-the-assistant.md) | the assistant in three tiers: the pack's menu of questions, the phone's own model, and shortcuts outside the app | accepted, amended by 0030 and 0041 |
 | [0028](0028-performance-at-scale.md) | performance at scale: one calendar batch, one query per directory, a key per node; the stored facts measured and left where they are | accepted |
 | [0029](0029-the-authoring-plugin.md) | the authoring plugin: the repo as plugin and marketplace, the binary from git, `reference` and `preview` in the CLI, no MCP server yet | accepted |
 | [0030](0030-trying-a-moment-and-the-day-as-a-route.md) | a pretend clock and place in Settings, answers in a `Dialog`, the day's stops as a route, only the installed map apps | accepted, amended by 0038 |
@@ -46,3 +46,4 @@ history.
 | [0038](0038-a-moment-tried-out-by-tapping-it.md) | a moment tried out by tapping it: `clock.try` from a block, `on_foot`, a strip that says when and has "Back to now" | accepted |
 | [0039](0039-the-day-as-a-calendar.md) | the day as a calendar: one scale, a ruler and a now line, a column per person, `fixed`, `duration` as a length, a block's own `id` | accepted |
 | [0040](0040-a-treasure-hunt-one-clue-at-a-time.md) | a treasure hunt, one clue at a time: `clue` on a point, `hunt`, found at the spot or on an adult's word, the fix's accuracy as margin | accepted |
+| [0041](0041-an-assistant-online.md) | an assistant online: Claude or OpenAI with the person's key where the phone has no model, a change proposed, checked with `would` and kept on a yes | accepted |

@@ -282,7 +282,11 @@ pack, after showing what it would add, change and remove; decision 0021). `assis
 `question` and `facts` and runs the action named in `then` with the model's words as `$arg`: empty
 on a phone with no model of its own, and empty when it fails, so the pack shows nothing. The orders
 are the host's and the pack's facts go under them as data, never as part of them
-([decision 0027](decisions/0027-the-assistant.md)).
+([decision 0027](decisions/0027-the-assistant.md)). `assistant.change` takes `request`, `facts` and
+`actions`, a text naming the actions offered and their arguments, and runs `then` with
+`{says, fits}`: the model's sentence, and whether the engine would store its action. Nothing is
+kept until `assistant.apply` runs that action. With no model on the phone, the one picked in
+Settings answers both, with the person's key ([decision 0041](decisions/0041-an-assistant-online.md)).
 
 Any mapping effect takes `if: expr` and is skipped when it is false. `$arg` is the value the
 component sent: any component with an `on_tap` sends its `value` prop. After the effects run, the rules decide again
