@@ -2,6 +2,8 @@ package dev.deskpress.app
 
 import dev.deskpress.engine.Region
 import java.math.BigDecimal
+import java.time.LocalDateTime
+import java.time.temporal.ChronoUnit
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.pow
@@ -35,11 +37,16 @@ fun inside(regions: List<Region>, lat: Double, lon: Double): List<String> =
 fun String.pinned(): Pair<Double, Double>? =
     split(",").mapNotNull(String::toDoubleOrNull).takeIf { it.size == 2 }?.let { it[0] to it[1] }
 
-/** What the strip over the pack says while the clock or the position is pretend; empty when neither is. */
-fun pretend(shell: Shell, regions: List<Region>): String {
+/** What the strip over the pack says while the clock (showing `at`) or the position is pretend; empty when neither is. */
+fun pretend(shell: Shell, regions: List<Region>, at: LocalDateTime): String {
     val where = shell.at.pinned()?.let { (lat, lon) -> regions.firstOrNull { it.lat == lat && it.lon == lon }?.id ?: "$lat,$lon" }
-    val parts = listOfNotNull("the clock is set by hand".takeIf { shell.shift != 0L }, where?.let { "at $it" })
-    return if (parts.isEmpty()) "" else "Pretending: ${parts.joinToString(", ")}."
+    val time = at.truncatedTo(ChronoUnit.MINUTES).toString().replace('T', ' ')
+    val parts = listOfNotNull(time.takeIf { shell.shift != 0L }, where?.let { "at $it" })
+    return when {
+        parts.isEmpty() -> ""
+        shell.shift != 0L -> "Not now: ${parts.joinToString(", ")}."
+        else -> "Pretending: ${parts.joinToString(", ")}."
+    }
 }
 
 /** A coordinate as a link carries it: `0.00050`, never `5.0E-4`. */

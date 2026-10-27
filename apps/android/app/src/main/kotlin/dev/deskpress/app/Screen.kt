@@ -102,6 +102,8 @@ class Menu(
     val settings: () -> Unit,
     val send: () -> Unit,
     val take: () -> Unit,
+    // The real clock and position again, from the strip.
+    val now: () -> Unit,
 )
 
 /** The bytes of a file inside the pack, for the pictures a pack carries. */
@@ -150,10 +152,10 @@ fun PackScreen(state: PackState, act: (String, Value) -> Unit, menu: Menu, prete
             topBar = {
                 Column {
                     Bar(frame, act, menu)
-                    if (pretend.isNotEmpty()) Pretend(pretend, menu.settings.takeUnless { tokens.kid })
+                    if (pretend.isNotEmpty()) Pretend(pretend, menu.settings.takeUnless { tokens.kid }, menu.now.takeUnless { tokens.kid })
                 }
             },
-            bottomBar = { if (frame != null) Foot(frame) },
+            bottomBar = { if (frame != null) Foot(frame, act) },
             containerColor = tokens.color("paper"),
         ) { padding ->
             val inside = Modifier.fillMaxSize().padding(padding)
@@ -181,18 +183,34 @@ fun PackScreen(state: PackState, act: (String, Value) -> Unit, menu: Menu, prete
     }
 }
 
-/** A strip that says the moment or the place is pretend, so it is not left on by mistake. */
+/** A strip that says the moment or the place is pretend, so it is not left on by mistake, with the way back. */
 @Composable
-private fun Pretend(text: String, tap: (() -> Unit)?) {
+private fun Pretend(text: String, tap: (() -> Unit)?, back: (() -> Unit)?) {
     val tokens = LocalTokens.current
-    Text(
-        if (tap != null) "$text Tap to change." else text,
-        Modifier.fillMaxWidth()
-            .background(tokens.color("alert"))
-            .then(if (tap != null) Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button, onClick = tap) else Modifier)
-            .padding(horizontal = tokens.size("spacing.margin"), vertical = tokens.size("spacing.gap-xs")),
-        style = style("label", "paper"),
-    )
+    Row(
+        Modifier.fillMaxWidth().background(tokens.color("alert")).padding(horizontal = tokens.size("spacing.margin")),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(tokens.size("spacing.gap-s")),
+    ) {
+        Text(
+            if (tap != null) "$text Tap to change." else text,
+            Modifier.weight(1f)
+                .then(if (tap != null) Modifier.minimumInteractiveComponentSize().clickable(role = Role.Button, onClick = tap) else Modifier)
+                .padding(vertical = tokens.size("spacing.gap-xs")),
+            style = style("label", "paper"),
+        )
+        if (back != null) {
+            Text(
+                "Back to now",
+                Modifier.minimumInteractiveComponentSize()
+                    .clip(RoundedCornerShape(tokens.size("radius.pill")))
+                    .background(tokens.color("paper"))
+                    .clickable(role = Role.Button, onClick = back)
+                    .padding(horizontal = tokens.size("spacing.gap"), vertical = tokens.size("spacing.gap-xs")),
+                style = style("label", "alert"),
+            )
+        }
+    }
 }
 
 /** What "Check the pack" shows: whether it loads, and every finding the validator made. */
@@ -262,7 +280,7 @@ private fun Bar(frame: Node?, act: (String, Value) -> Unit, menu: Menu) {
             Modifier.weight(1f).padding(vertical = tokens.size("spacing.pad-y")),
             style = style("moment", "bar-ink"),
         )
-        frame.on.filterKeys { it != "back" }.forEach { (event, action) ->
+        frame.on.filterKeys { it != "back" && it != "foot" }.forEach { (event, action) ->
             Pill(prop(event)) { act(action, Value.Null) }
         }
         if (!tokens.kid) More(menu, "bar-ink")
@@ -339,14 +357,16 @@ private fun More(menu: Menu, color: String) {
     }
 }
 
-/** The bottom bar: what comes next, from the Screen's `foot_label`, `foot_time` and `foot`. */
+/** The bottom bar: what comes next, from the Screen's `foot_label`, `foot_time` and `foot`; a tap runs `on_foot`. */
 @Composable
-private fun Foot(frame: Node) {
+private fun Foot(frame: Node, act: (String, Value) -> Unit) {
     val tokens = LocalTokens.current
     val prop = { key: String -> frame.props[key].text() }
     if (prop("foot_label").isEmpty() && prop("foot").isEmpty()) return
+    val tap = frame.on["foot"]?.let { action -> { act(action, Value.Null) } }
     Column(
         Modifier.fillMaxWidth()
+            .then(if (tap != null) Modifier.clickable(role = Role.Button, onClick = tap) else Modifier)
             .background(tokens.color("bar-bg"))
             .navigationBarsPadding()
             .padding(horizontal = tokens.size("spacing.margin"), vertical = tokens.size("spacing.pad-y")),

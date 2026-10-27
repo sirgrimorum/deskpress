@@ -312,6 +312,28 @@ class PackViewModelTest {
     }
 
     @Test
+    fun aBlockTriedOutGoesToTheHostWithItsMomentAndPlace() = runTest {
+        val model = PackViewModel({ example }, { LocalDateTime.parse("2026-04-11T10:40") }, backgroundScope, StandardTestDispatcher(testScheduler))
+        val tried = mutableListOf<String>()
+        model.pretend = { at, place -> tried += "$at $place" }
+        runCurrent()
+        // The next block, from the bar at the bottom.
+        model.act("try", Value.Null)
+        runCurrent()
+        model.act("agenda", Value.Null)
+        runCurrent()
+        val rows = (model.state.value as PackState.Showing).view.tree.nodes.filter { it.kind == "Row" && it.on["tap"] == "try" }
+        // A note with no time has no moment to try; a walk has no place. Each tap leaves the agenda.
+        for (row in listOf(rows[0], rows[1], rows.last())) {
+            model.act("agenda", Value.Null)
+            model.act("try", row.props["value"] ?: Value.Null)
+            runCurrent()
+        }
+        assertEquals("moment", model.screen)
+        assertEquals(listOf("2026-04-11T11:15 azulejo", "2026-04-11T10:30 ", "2026-04-11T18:40 cais_do_sodre"), tried)
+    }
+
+    @Test
     fun whatIsStillToRingGoesToTheHostOnLoadAndWhenAFactIsKept() = runTest {
         val model = model({ example }, "2026-04-11T08:00")
         val handed = mutableListOf<List<String>>()

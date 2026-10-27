@@ -1,5 +1,6 @@
 # Trying a moment out on the phone: the clock set by hand runs on from there, a place is pretended
-# instead of the real position, and a strip says so on every screen until both go back.
+# instead of the real position, and a strip says so on every screen until both go back. A tap on
+# what comes next, or on a block of the day, tries that block out, and the strip brings back now.
 appId: dev.deskpress.app
 ---
 - launchApp:
@@ -18,9 +19,9 @@ appId: dev.deskpress.app
     element: "azulejo"
 - tapOn: "azulejo"
 - tapOn: "Back"
-- assertVisible: "Pretending: the clock is set by hand, at azulejo. Tap to change."
+- assertVisible: "Not now: 2026-04-12 11:30, at azulejo. Tap to change."
 - assertVisible: 'Sintra or the beach tomorrow\?'
-- tapOn: "Pretending.*"
+- tapOn: "Not now.*"
 - scrollUntilVisible:
     element: "Back to now"
 - tapOn: "Back to now"
@@ -28,5 +29,19 @@ appId: dev.deskpress.app
     element: "Where I really am"
 - tapOn: "Where I really am"
 - tapOn: "Back"
-- assertNotVisible: "Pretending.*"
+- assertNotVisible: "Not now.*"
+- assertVisible: "Now · visit"
+# The next block, from the bar at the bottom.
+- tapOn: "Lunch in the museum cloister.*"
+- assertVisible: "Now · meal"
+- assertVisible: "Not now: 2026-04-11 13:15, at azulejo. Tap to change."
+# A block of the day, from the agenda.
+- tapOn: "Today"
+- scrollUntilVisible:
+    element: "Ferry from Cais do Sodre.*"
+- tapOn: "Ferry from Cais do Sodre.*"
+- assertVisible: "Now · transfer"
+- assertVisible: "Not now: 2026-04-11 18:40, at cais_do_sodre. Tap to change."
+- tapOn: "Back to now"
+- assertNotVisible: "Not now.*"
 - assertVisible: "Now · visit"

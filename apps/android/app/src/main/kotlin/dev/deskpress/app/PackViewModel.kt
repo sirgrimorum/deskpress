@@ -100,6 +100,8 @@ class PackViewModel(
 
     // A map at a point, the day's stops as directions, and what to do asked with no position.
     var map: (lat: Double, lon: Double, label: String) -> Unit = { _, _, _ -> }
+    // A block tried out: the clock set to its moment and the position to its place, by the activity.
+    var pretend: (at: LocalDateTime, place: String) -> Unit = { _, _ -> }
     var route: (stops: List<Stop>) -> Unit = {}
     var unlocated: () -> Unit = {}
 
@@ -225,6 +227,10 @@ class PackViewModel(
                         else if (then.isNotEmpty()) act(then, point(at.first, at.second))
                     }
                     "calendar.sync" -> sync(cmd.args["scope"].text())
+                    "clock.try" -> {
+                        val at = runCatching { LocalDateTime.parse("${cmd.args["date"].text()}T${cmd.args["time"].text()}") }.getOrNull()
+                        if (at != null) pretend(at, cmd.args["place"].text())
+                    }
                     // The orders are the host's; the pack's words go in as data (decision 0027).
                     "assistant.ask" -> {
                         val ask = assistant

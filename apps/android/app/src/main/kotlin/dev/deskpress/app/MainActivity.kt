@@ -70,6 +70,7 @@ import dev.deskpress.engine.Taken
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.time.Duration
 import java.time.LocalDateTime
 import java.time.ZoneId
 import kotlinx.coroutines.CompletableDeferred
@@ -202,6 +203,24 @@ class MainActivity : FragmentActivity() {
                     val overlay = Overlay(File(filesDir, "packs/$PACK"))
                     PackViewModel({ overlay.over(assets.pack(PACK)) }, now, facts = facts, write = overlay::write)
                 }.also { it.shift = shell.shift }
+            }
+
+            // The shell's settings kept; a clock moved redraws, a position let go is tracked again.
+            val reshell = { new: Shell ->
+                val moved = new.shift != shell.shift
+                val unpinned = shell.at.pinned() != null && new.at.pinned() == null
+                shell = new
+                prefs.edit {
+                    putFloat(SCALE, new.scale)
+                    putString(NAVIGATOR, new.navigator)
+                    putLong(SHIFT, new.shift)
+                    putString(AT, new.at)
+                }
+                if (moved) {
+                    model.shift = new.shift
+                    model.redraw()
+                }
+                if (unpinned) model.unpinned()
             }
 
             val scope = rememberCoroutineScope()
@@ -378,6 +397,11 @@ class MainActivity : FragmentActivity() {
                 model.call = this@MainActivity::dial
                 model.show = { file, title -> doc = file to title }
                 model.map = this@MainActivity::map
+                model.pretend = { at, place ->
+                    val regions = (model.state.value as? PackState.Showing)?.view?.watch?.regions.orEmpty()
+                    val pin = regions.firstOrNull { it.id == place }?.let { "${it.lat},${it.lon}" }.orEmpty()
+                    reshell(shell.copy(shift = Duration.between(now(model.timezone), at).seconds, at = pin))
+                }
                 model.route = { navigate(Uri.parse(directions(it))) }
                 model.sync = { at ->
                     if (canCalendar()) begin(at)
@@ -473,7 +497,7 @@ class MainActivity : FragmentActivity() {
                     val open = doc
                     val menu =
                         remember(picker, model) {
-                            Menu({ picker.launch(null) }, { page = "check" }, { page = "design" }, { page = "settings" }, send, { taker.launch(arrayOf("*/*")) })
+                            Menu({ picker.launch(null) }, { page = "check" }, { page = "design" }, { page = "settings" }, send, { taker.launch(arrayOf("*/*")) }, { reshell(shell.copy(shift = 0, at = "")) })
                         }
                     when (val s = syncing) {
                         is Syncing.Pick -> PickCalendar(s.calendars, { id ->
@@ -535,24 +559,9 @@ class MainActivity : FragmentActivity() {
                                 } else {
                                     listOfNotNull(("Keep the trip's maps" to keepAll).takeIf { wanted.isNotEmpty() }, ((if (sure) "Really delete" else "Delete") to forgetAll).takeIf { kept.isNotEmpty() })
                                 }
-                            Settings(shell, { now(model.timezone) }, remember { navigators() }, regions, offline(kept, keptBytes, wanted, keeping), offers, { new ->
-                                val moved = new.shift != shell.shift
-                                val unpinned = shell.at.pinned() != null && new.at.pinned() == null
-                                shell = new
-                                prefs.edit {
-                                    putFloat(SCALE, new.scale)
-                                    putString(NAVIGATOR, new.navigator)
-                                    putLong(SHIFT, new.shift)
-                                    putString(AT, new.at)
-                                }
-                                if (moved) {
-                                    model.shift = new.shift
-                                    model.redraw()
-                                }
-                                if (unpinned) model.unpinned()
-                            }, close)
+                            Settings(shell, { now(model.timezone) }, remember { navigators() }, regions, offline(kept, keptBytes, wanted, keeping), offers, reshell, close)
                         }
-                        else -> PackScreen(state, model::act, menu, pretend(shell, shown?.view?.watch?.regions.orEmpty()))
+                        else -> PackScreen(state, model::act, menu, pretend(shell, shown?.view?.watch?.regions.orEmpty(), now(model.timezone).plusSeconds(shell.shift)))
                     }
                 }
             }

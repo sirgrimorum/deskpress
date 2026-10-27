@@ -63,7 +63,7 @@ pub(crate) fn base(name: &str) -> Option<Value> {
 mod tests {
     use super::*;
     use crate::define::define;
-    use crate::engine::{Engine, Nav, World};
+    use crate::engine::{Engine, Nav, Outcome, World};
     use crate::pack::Pack;
     use crate::tree::{Node, Tree};
     use crate::value::{Map, text};
@@ -476,6 +476,29 @@ packing: {check: true, items: [Hat, Bottle]}
         assert!(lines.contains(&"Row  Pass".to_owned()), "{lines:?}");
         // Once the block is over, nothing is left to show.
         assert_eq!(paper("2026-04-11T12:30"), (None, None));
+    }
+
+    #[test]
+    fn a_block_tapped_in_the_day_or_as_next_is_tried_out_by_the_host() {
+        let e = trip();
+        let w = world("2026-04-11T10:30", "ana", &[]);
+        let sent = |out: Outcome| {
+            let c = &out.commands[0];
+            let arg = |k: &str| text(c.args.get(k));
+            format!("{} {} {} {}", c.name, arg("date"), arg("time"), arg("place"))
+        };
+        // The bar's next block, from the moment.
+        let next = e.dispatch(&w, &mut Nav::default(), "try", Value::Null).unwrap();
+        assert_eq!(sent(next), "clock.try 2026-04-11 11:00 museum");
+        // A block of the day, which leaves the agenda for what the rules pick.
+        let mut nav = Nav::default();
+        let agenda = e.dispatch(&w, &mut nav, "agenda", Value::Null).unwrap().view.tree;
+        let mut rows =
+            agenda.nodes.iter().filter(|n| n.kind == "Row" && n.on.iter().any(|(e, _)| e == "tap"));
+        let drive = rows.find(|n| text(at(n, "time")) == "13:00").unwrap();
+        let out = e.dispatch(&w, &mut nav, "try", at(drive, "value").cloned().unwrap()).unwrap();
+        assert_eq!(out.view.tree.screen, "moment");
+        assert_eq!(sent(out), "clock.try 2026-04-11 13:00 lot");
     }
 
     #[test]

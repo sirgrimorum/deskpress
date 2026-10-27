@@ -1,6 +1,7 @@
 package dev.deskpress.app
 
 import dev.deskpress.engine.Region
+import java.time.LocalDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -53,15 +54,14 @@ class LocationTest {
     @Test
     fun theStripSaysWhatIsPretendAndNamesThePlace() {
         val museum = Region("museum", 38.7, -9.1, 100.0)
-        assertEquals("", pretend(Shell(), listOf(museum)))
+        val at = LocalDateTime.parse("2026-04-11T13:00:42")
+        assertEquals("", pretend(Shell(), listOf(museum), at))
         assertEquals(null, "38.7".pinned())
         assertEquals(null, "1,2,3".pinned())
         assertEquals(null, "".pinned())
         assertEquals(38.7 to -9.1, "38.7,-9.1".pinned())
-        assertEquals("Pretending: at museum.", pretend(Shell(at = "38.7,-9.1"), listOf(museum)))
-        assertEquals(
-            "Pretending: the clock is set by hand, at 1.0,2.0.",
-            pretend(Shell(shift = 3600, at = "1.0,2.0"), listOf(museum)),
-        )
+        assertEquals("Pretending: at museum.", pretend(Shell(at = "38.7,-9.1"), listOf(museum), at))
+        assertEquals("Not now: 2026-04-11 13:00.", pretend(Shell(shift = 3600), listOf(museum), at))
+        assertEquals("Not now: 2026-04-11 13:00, at 1.0,2.0.", pretend(Shell(shift = 3600, at = "1.0,2.0"), listOf(museum), at))
     }
 }

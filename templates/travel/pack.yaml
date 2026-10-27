@@ -193,8 +193,10 @@ screens:
       parked: [{store: car, value: $arg}, {store: log.parked, value: now.stamp}, {store: log.spot, value: "null"}]
       calendar: [{do: calendar.sync, with: {scope: block.event}}]
       paper: [{do: document.open, with: {file: $arg.file, title: $arg.title}}]
+      # The next block tried out: the clock and the place move to it, until "Back to now".
+      try: [{do: clock.try, with: {date: day.date, time: next.time, place: next.place}}]
     layout:
-      - Screen: {title: day.title, today: ui.today, on_today: agenda, foot_label: next and ui.next, foot_time: next.time, foot: next.text or ui.nothing_more}
+      - Screen: {title: day.title, today: ui.today, on_today: agenda, foot_label: next and ui.next, foot_time: next.time, foot: next.text or ui.nothing_more, on_foot: try}
       - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
       - Alert: {if: next.leaving, title: ui.set_off_now, text: next.text}
       - Label: {if: next.leave_at and not next.leaving, text: "{ui.set_off_at} {next.leave_at}"}
@@ -286,13 +288,15 @@ screens:
       ask: [{open: ask}]
       tasks: [{open: tasks}]
       log: [{open: log}]
+      # A block tried out: the clock and the place move to it, until "Back to now".
+      try: [{do: clock.try, with: {date: day.date, time: $arg.time, place: $arg.place}}, home]
     layout:
       - Screen: {title: day.title, back: ui.back, on_back: back}
       - Alert: {each: alerts, if: "item.severity == 'critical'", severity: item.severity, title: item.title, text: item.action or item.detail}
       - Chip: {if: "not empty(people)", text: holder.name or ui.whose_phone, on_tap: relay}
       - Label: {if: weather.high, text: "{weather.summary}, {weather.low} {ui.to} {weather.high}"}
       - Label: {if: weather.failed, text: "{ui.weather_failed} {weather.failed}"}
-      - Row: {each: day.blocks, text: item.text, time: item.time, caption: item.duration, state: item.state}
+      - Row: {each: day.blocks, text: item.text, time: item.time, caption: item.duration, state: item.state, value: item, on_tap: try}
       - Row: {each: alerts, if: "item.severity == 'medium'", text: item.title, caption: item.action, state: "'note'"}
       - Alert: {each: jet_lag.steps, if: "item.clash and item.state != 'past'", title: ui.bed_clash, text: "{item.time} · {item.clash}"}
       - Group:
