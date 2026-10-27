@@ -404,11 +404,50 @@ class PackViewModelTest {
         runCurrent()
         assertEquals("is it far?||", label())
         var asked = "" to ""
-        model.assistant = { question, facts -> asked = question to facts.json(); "about ten minutes" }
+        model.assistant = Model { orders, said, _ -> asked = orders to said; "about ten minutes" }
         model.act("say", Value.Null)
         runCurrent()
         assertEquals("is it far?|about ten minutes|true", label())
-        assertEquals("is it far?" to """[{"id":"now","ask":"What now?","answer":"a walk","shortcut":true}]""", asked)
+        val facts = """[{"id":"now","ask":"What now?","answer":"a walk","shortcut":true}]"""
+        assertEquals(ORDERS to "The facts:\n$facts\n\nThe question: is it far?", asked)
+    }
+
+    @Test
+    fun aChangeInWordsIsKeptOnlyWhenItFitsAndThePersonSaysYes() = runTest {
+        val facts = Facts(File(temp.root, "facts"))
+        val model = model({ example }, "2026-04-11T11:30", facts)
+        runCurrent()
+        for (action in listOf("agenda", "adjust")) model.act(action, Value.Null)
+        runCurrent()
+        val labels = { (model.state.value as PackState.Showing).view.tree.nodes.map { (it.props["label"] ?: it.props["text"]).text() } }
+        val kept = facts.read("one-day")
+        var by = 15
+        var sent = ""
+        model.assistant = Model { orders, said, schema ->
+            sent = said
+            assertEquals(CHANGE to SCHEMA, orders to schema)
+            """{"action": "move", "arg": "{\"block\": \"2026-04-11.blocks.3\", \"by\": $by}", "says": "Lunch later"}"""
+        }
+        model.act("type", Value.Text("lunch later"))
+        model.act("propose", Value.Null)
+        runCurrent()
+        assertTrue(sent, sent.startsWith("The actions:\nmove {block") && sent.endsWith("The request: lunch later"))
+        assertTrue(labels().containsAll(listOf("Lunch later", "Do it")))
+        assertEquals(kept, facts.read("one-day"))
+        model.act("accept", Value.Null)
+        runCurrent()
+        assertTrue(facts.read("one-day").orEmpty().contains("2026-04-11.blocks.3"))
+        // Past midnight it does not fit: the words show, with no way to keep them.
+        by = 600
+        model.act("type", Value.Text("much later"))
+        model.act("propose", Value.Null)
+        runCurrent()
+        assertTrue(labels().containsAll(listOf("Lunch later", "No change here does that")))
+        assertTrue("Do it" !in labels())
+        val after = facts.read("one-day")
+        model.act("accept", Value.Null)
+        runCurrent()
+        assertEquals(after, facts.read("one-day"))
     }
 
     @Test

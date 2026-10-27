@@ -37,15 +37,27 @@ private const val LIMIT = 1 shl 20
  * A GET of `url`. It blocks, so it runs off the main thread. A redirect is not followed: it
  * would reach a host nobody approved. A failure never repeats the address, which may hold a key.
  */
-fun get(url: String): Reply =
+fun get(url: String): Reply = open(url, 15_000) {}
+
+/** A POST of `body` to `url` with `headers`, as [get] in all else; a model may think a minute. */
+fun post(url: String, headers: Map<String, String>, body: String): Reply =
+    open(url, 60_000) { c ->
+        c.requestMethod = "POST"
+        c.doOutput = true
+        for ((k, v) in headers) c.setRequestProperty(k, v)
+        c.outputStream.use { it.write(body.encodeToByteArray()) }
+    }
+
+private fun open(url: String, wait: Int, send: (HttpURLConnection) -> Unit): Reply =
     try {
         val uri = URI(url)
         if (uri.scheme != "https") throw URISyntaxException(url, "not https")
         val c = uri.toURL().openConnection() as HttpURLConnection
         c.instanceFollowRedirects = false
         c.connectTimeout = 15_000
-        c.readTimeout = 15_000
+        c.readTimeout = wait
         try {
+            send(c)
             reply(c)
         } finally {
             c.disconnect()

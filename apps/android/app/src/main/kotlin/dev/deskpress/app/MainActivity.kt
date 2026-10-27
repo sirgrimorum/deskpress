@@ -90,6 +90,7 @@ private const val SCALE = "scale"
 private const val NAVIGATOR = "navigator"
 private const val SHIFT = "shift"
 private const val AT = "at"
+private const val ONLINE = "online"
 private const val KEPT = "kept"
 private const val KEPT_BYTES = "kept_bytes"
 
@@ -172,7 +173,7 @@ class MainActivity : FragmentActivity() {
             var page by rememberSaveable { mutableStateOf<String?>(null) }
             var shell by remember {
                 mutableStateOf(
-                    Shell(prefs.getFloat(SCALE, 1f), prefs.getString(NAVIGATOR, "").orEmpty(), prefs.getLong(SHIFT, 0), prefs.getString(AT, "").orEmpty()),
+                    Shell(prefs.getFloat(SCALE, 1f), prefs.getString(NAVIGATOR, "").orEmpty(), prefs.getLong(SHIFT, 0), prefs.getString(AT, "").orEmpty(), prefs.getString(ONLINE, "").orEmpty()),
                 )
             }
             val picker = rememberLauncherForActivityResult(OpenDocumentTree()) { uri ->
@@ -206,16 +207,21 @@ class MainActivity : FragmentActivity() {
                 }.also { it.shift = shell.shift }
             }
 
-            // The shell's settings kept; a clock moved redraws, a position let go is tracked again.
+            // The keys to a model online, sealed like a pack's secrets, one per company (decision 0041).
+            val keys = remember { Secrets(File(filesDir, "keys")) }
+            // The shell's settings kept; a clock moved redraws, a position let go is tracked again,
+            // and a model online let go takes its key with it.
             val reshell = { new: Shell ->
                 val moved = new.shift != shell.shift
                 val unpinned = shell.at.pinned() != null && new.at.pinned() == null
+                Provider.entries.firstOrNull { it.name == shell.online && it.name != new.online }?.let { keys.forget(it.host) }
                 shell = new
                 prefs.edit {
                     putFloat(SCALE, new.scale)
                     putString(NAVIGATOR, new.navigator)
                     putLong(SHIFT, new.shift)
                     putString(AT, new.at)
+                    putString(ONLINE, new.online)
                 }
                 if (moved) {
                     model.shift = new.shift
@@ -417,18 +423,33 @@ class MainActivity : FragmentActivity() {
                 }
             }
 
-            // The phone's own model where there is one (decision 0027), else no assistant at all.
-            DisposableEffect(model) {
-                var own: Assistant? = null
+            // The phone's own model where there is one (decision 0027), else the one picked in
+            // Settings with the person's key, which goes only to that company (decision 0041).
+            var own by remember { mutableStateOf<Boolean?>(null) }
+            DisposableEffect(model, shell.online) {
+                var found: Assistant? = null
                 val setup = scope.launch {
-                    val found = Assistant.on() ?: return@launch
-                    own = found
-                    model.assistant = found::ask
+                    found = Assistant.on()
+                    own = found != null
+                    model.assistant = found ?: Provider.entries.firstOrNull { it.name == shell.online }?.let { p ->
+                        val key = withContext(Dispatchers.IO) { keys.read(p.host) } ?: run {
+                            val answer = CompletableDeferred<String?>()
+                            asking = Asking.Secret(p.label, p.host, answer)
+                            answer.await()?.also { withContext(Dispatchers.IO) { keys.write(p.host, it) } }
+                        }
+                        if (key == null) reshell(shell.copy(online = ""))
+                        key?.let {
+                            Online(p, it, refused = {
+                                say("${p.label} turned the key down. Pick it again in Settings to give another.")
+                                reshell(shell.copy(online = ""))
+                            })
+                        }
+                    }
                 }
                 onDispose {
                     setup.cancel()
                     model.assistant = null
-                    own?.close()
+                    found?.close()
                 }
             }
 
@@ -560,7 +581,7 @@ class MainActivity : FragmentActivity() {
                                 } else {
                                     listOfNotNull(("Keep the trip's maps" to keepAll).takeIf { wanted.isNotEmpty() }, ((if (sure) "Really delete" else "Delete") to forgetAll).takeIf { kept.isNotEmpty() })
                                 }
-                            Settings(shell, { now(model.timezone) }, remember { navigators() }, regions, offline(kept, keptBytes, wanted, keeping), offers, reshell, close)
+                            Settings(shell, { now(model.timezone) }, remember { navigators() }, regions, offline(kept, keptBytes, wanted, keeping), offers, own == false, reshell, close)
                         }
                         else -> PackScreen(state, model::act, menu, pretend(shell, shown?.view?.watch?.regions.orEmpty(), now(model.timezone).plusSeconds(shell.shift)))
                     }

@@ -19,6 +19,8 @@ class SyncTest {
     fun aHostThatDoesNotAnswerIsNoAnswer() {
         // Port 1 on this machine refuses at once, with no network involved.
         assertEquals(Reply(0, "no answer"), get("https://127.0.0.1:1/f"))
+        assertEquals(Reply(0, "no answer"), post("https://127.0.0.1:1/f", mapOf("a" to "b"), "{}"))
+        assertEquals(Reply(0, "not an address"), post("http://a.org/f", emptyMap(), "{}"))
     }
 
     @Test

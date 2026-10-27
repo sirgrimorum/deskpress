@@ -110,10 +110,12 @@ class PackViewModel(
     // A calendar sync of a scope: the whole trip when empty, a date, or one event id.
     var sync: (scope: String) -> Unit = {}
 
-    // The phone's own model, where it has one: a question and the only facts it may answer from,
-    // and what it said. Null on a phone without one, and then `can.assistant` is false and the
-    // pack shows no box to type in.
-    var assistant: (suspend (question: String, facts: Value) -> String)? = null
+    // The phone's own model, else one online with the person's key (decision 0041). Null with
+    // neither, and then `can.assistant` is false and the pack shows no box to type in.
+    var assistant: Model? = null
+
+    // A change the model proposed and the engine would store, waiting for the person to say yes.
+    private var pending: Proposal? = null
 
     // Whether the pack may fetch from these hosts, a secret by its name for the host it goes to
     // (null when there is none), and forgetting one the server turned down: the activity asks the
@@ -238,9 +240,25 @@ class PackViewModel(
                         val ask = assistant
                         val then = cmd.args["then"].text()
                         if (ask != null && then.isNotEmpty()) {
-                            val said = ask(cmd.args["question"].text(), cmd.args["facts"] ?: Value.Null)
+                            val said = ask.reply(ORDERS, question(cmd.args["question"].text(), cmd.args["facts"]), null)
                             act(then, Value.Text(said))
                         }
+                    }
+                    // Only proposed: it fits when the engine would store it, and waits for a yes (decision 0041).
+                    "assistant.change" -> {
+                        val ask = assistant
+                        val then = cmd.args["then"].text()
+                        if (ask != null && then.isNotEmpty()) {
+                            val asked = request(cmd.args["request"].text(), cmd.args["facts"], cmd.args["actions"].text())
+                            val got = proposal(ask.reply(CHANGE, asked, SCHEMA))
+                            pending = got?.takeIf { it.action.isNotEmpty() && would(it.action, it.arg) }
+                            val says = Field("says", Value.Text(got?.says.orEmpty()))
+                            act(then, Value.Fields(listOf(says, Field("fits", Value.Bool(pending != null)))))
+                        }
+                    }
+                    "assistant.apply" -> pending?.let {
+                        pending = null
+                        act(it.action, it.arg)
                     }
                     "map.open" -> {
                         val lat = (cmd.args["lat"] as? Value.Number)?.value
