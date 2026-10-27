@@ -21,7 +21,7 @@ pub const MODULES: [(&str, &str, &[&str]); 11] = [
     ("timeline", "days", &["day", "block", "next", "days", "tomorrow"]),
     ("choices", "days", &["decision"]),
     ("people", "people", &["holder", "people"]),
-    ("places", "places", &["place", "here", "away", "chart", "area"]),
+    ("places", "places", &["place", "here", "away", "chart", "area", "hunt"]),
     ("alerts", "alerts", &["alerts"]),
     ("jet_lag", "jet_lag", &["jet_lag"]),
     ("tasks", "tasks", &["tasks"]),

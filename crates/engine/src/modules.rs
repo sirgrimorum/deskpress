@@ -70,21 +70,52 @@ pub(crate) fn shares(a: &Map, b: &Map) -> bool {
 
 /// The circle of a place's `at`, when it has both coordinates. The radius defaults to 100 metres.
 pub(crate) fn region(id: &str, at: &Value) -> Option<Region> {
+    circle(id, at, 100.0)
+}
+
+/// The circle of an `at`, `radius_m` wide or else `around`.
+fn circle(id: &str, at: &Value, around: f64) -> Option<Region> {
     let number = |k: &str| match at.get(k) {
         Some(Value::Number(n)) => Some(*n),
         _ => None,
     };
     let (lat, lon) = (number("lat")?, number("lon")?);
-    Some(Region { id: id.to_owned(), lat, lon, radius_m: number("radius_m").unwrap_or(100.0) })
+    Some(Region { id: id.to_owned(), lat, lon, radius_m: number("radius_m").unwrap_or(around) })
+}
+
+/// The points of a place, its own or the ones of its `during`.
+fn points(place: &Value) -> &[Value] {
+    let points = place.get("points").filter(|p| **p != Value::Null);
+    points
+        .or_else(|| place.get("during")?.get("points"))
+        .and_then(Value::as_list)
+        .unwrap_or_default()
+}
+
+/// A treasure hunt at a place: its points with a `clue`, in order, one at a time, `found` of them
+/// found. The next one's spot, 30 metres when it says no radius, is the region to watch for it.
+fn hunt(place: &Value, found: usize, inside: &[String]) -> (Value, Option<Region>) {
+    let steps: Vec<&Value> = points(place).iter().filter(|p| truthy(p.get("clue"))).collect();
+    if steps.is_empty() {
+        return (Value::Null, None);
+    }
+    let found = found.min(steps.len());
+    let id = format!("{}#{}", text(place.get("id")), found + 1);
+    let next = steps.get(found);
+    let spot = next.and_then(|p| circle(&id, p.get("at")?, 30.0));
+    let mut m = Map::default();
+    m.set("step", Value::Number((found + 1).min(steps.len()) as f64));
+    m.set("of", Value::Number(steps.len() as f64));
+    m.set("clue", next.and_then(|p| p.get("clue")).cloned().unwrap_or(Value::Null));
+    m.set("there", Value::Bool(spot.is_some() && inside.contains(&id)));
+    m.set("done", Value::Bool(next.is_none()));
+    m.set("found", Value::List(steps[..found].iter().map(|p| (*p).clone()).collect()));
+    (Value::Map(m), spot)
 }
 
 /// The place up close: its points that have an `at`, joined only when it is `in_order`.
 fn area(place: &Value) -> Value {
-    let points = place.get("points").filter(|p| **p != Value::Null);
-    let points = points.or_else(|| place.get("during")?.get("points"));
-    let pins: Vec<chart::Pin> = points
-        .and_then(Value::as_list)
-        .unwrap_or_default()
+    let pins: Vec<chart::Pin> = points(place)
         .iter()
         .enumerate()
         .filter_map(|(i, p)| {
@@ -574,6 +605,10 @@ impl<'a> Run<'a> {
         let away = self.world.located && fenced && !inside.contains(&at);
         let place = find(&at).unwrap_or(Value::Null);
         self.regions.extend(regions);
+        let found = text(self.world.store.get(&format!("hunt.{at}"))).parse().unwrap_or(0);
+        let (hunt, spot) = hunt(&place, found, inside);
+        self.regions.extend(spot);
+        self.set("hunt", hunt);
         self.set("area", area(&place));
         self.set("place", place);
         self.set("here", here);
@@ -1495,6 +1530,52 @@ day: {blocks: [{place: azulejo}, {place: odd}, {place: half}, {place: cais}, {pl
         assert_eq!(out.each("area.route", "name"), "B A");
         assert_eq!(out.at("area.path").matches("\"x\"").count(), 2);
         assert_eq!(pair(area("bare").at("area"), area("indoors").at("area")), strs("null", "null"));
+    }
+
+    #[test]
+    fn a_hunt_shows_one_clue_and_watches_only_its_spot() {
+        let content = "places:
+  walls:
+    during:
+      points:
+        - {name: Bridge, clue: Cross the water, at: {lat: 1, lon: 2}}
+        - {name: Shop}
+        - {name: Gate, clue: Find the lady, at: {lat: 1, lon: 3, radius_m: 10}}
+        - {name: Well, clue: Look down}
+  plain: {points: [{name: Shop}]}
+";
+        let hunt = |found: &str, inside: &[&str], block: &str| {
+            let inside = inside.iter().map(|i| (*i).to_owned()).collect();
+            let w =
+                World { inside, ..world("2026-04-11T10:00", &[(&format!("hunt.{block}"), found)]) };
+            run("places", "", content, &w, &format!("block: {{place: {block}}}"))
+        };
+        let out = hunt("", &[], "walls");
+        assert_eq!(out.at("hunt.step") + " " + &out.at("hunt.of"), "1 3");
+        assert_eq!(
+            pair(out.at("hunt.clue"), out.at("hunt.there")),
+            strs("\"Cross the water\"", "false")
+        );
+        assert_eq!(pair(out.at("hunt.found"), out.at("hunt.done")), strs("[]", "false"));
+        assert_eq!((out.regions[0].id.as_str(), out.regions[0].radius_m), ("walls#1", 30.0));
+        // One found: the next clue, its own radius, and the device at its spot.
+        let out = hunt("1", &["walls#2"], "walls");
+        assert_eq!(
+            pair(out.at("hunt.clue"), out.at("hunt.there")),
+            strs("\"Find the lady\"", "true")
+        );
+        assert_eq!(out.each("hunt.found", "name"), "Bridge");
+        assert_eq!((out.regions[0].id.as_str(), out.regions[0].radius_m), ("walls#2", 10.0));
+        // A spot with no position is never reached; the last found ends the hunt.
+        assert_eq!(hunt("2", &["walls#3"], "walls").at("hunt.there"), "false");
+        let out = hunt("9", &[], "walls");
+        assert_eq!(pair(out.at("hunt.step"), out.at("hunt.done")), strs("3", "true"));
+        assert_eq!(
+            pair(out.at("hunt.clue"), out.each("hunt.found", "name")),
+            strs("null", "Bridge Gate Well")
+        );
+        assert!(out.regions.is_empty());
+        assert_eq!(hunt("", &[], "plain").at("hunt"), "null");
     }
 
     #[test]

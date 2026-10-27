@@ -566,7 +566,8 @@ impl Checker<'_> {
             }
             if let Some(spot) = keymap.field(pt, "point", "at") {
                 pinned = true;
-                self.point_at(&pat, spot, around);
+                let clue = truthy(keymap.field(pt, "point", "clue"));
+                self.point_at(&pat, spot, around, clue);
             }
             if self.kids && !truthy(keymap.field(pt, "point", "for_kids")) {
                 self.r.warn(
@@ -581,8 +582,9 @@ impl Checker<'_> {
         }
     }
 
-    /// A point's own position, and whether the map kept offline around its place reaches it.
-    fn point_at(&mut self, at: &str, spot: &Value, around: Option<&Region>) {
+    /// A point's own position, and whether the map kept offline around its place reaches it. Only
+    /// a hunt's clue has a radius: how near counts as found.
+    fn point_at(&mut self, at: &str, spot: &Value, around: Option<&Region>, clue: bool) {
         let Some(coords) = spot.as_map() else {
             self.r.error(format!("{at}.at"), "has to be a mapping with lat and lon");
             return;
@@ -590,7 +592,7 @@ impl Checker<'_> {
         if !self.coordinates(at, coords) {
             return;
         }
-        if coords.get("radius_m").is_some() {
+        if coords.get("radius_m").is_some() && !clue {
             self.r.warn(format!("{at}.at.radius_m"), "a point has no radius, only where it is");
         }
         let (Some(c), Some(p)) = (around, region("", spot)) else { return };
@@ -1480,7 +1482,7 @@ places:
   town:
     name: Town
     at: {lat: 38.7, lon: -9.1, radius_m: 5000}
-    points: [{id: square, name: Square, at: {lat: 38.718, lon: -9.1}}]
+    points: [{id: square, name: Square, at: {lat: 38.718, lon: -9.1}}, {id: cross, name: Cross, clue: Up, at: {lat: 38.7, lon: -9.1, radius_m: 20}}]
   loose:
     name: Loose
     in_order: true
