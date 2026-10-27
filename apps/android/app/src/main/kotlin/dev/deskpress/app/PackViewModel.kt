@@ -85,6 +85,8 @@ class PackViewModel(
     val position: StateFlow<Pair<Double, Double>?> = _position.asStateFlow()
     // The regions of the pack around the device.
     private var inside = emptyList<String>()
+    // The last fix that moved the regions, and its margin: a new screen's regions are checked against it.
+    private var fix: Triple<Double, Double, Double>? = null
     /** The clock set by hand, in seconds on top of `now`. */
     var shift = 0L
     // The modules being fetched, and whether the person said no to fetching this session.
@@ -278,16 +280,18 @@ class PackViewModel(
     }
 
     /**
-     * The device is at `lat`, `lon`. The engine is asked again only when that changes the regions
-     * it is inside, or on the first position, which makes `away` mean something.
+     * The device is at `lat`, `lon`, give or take `accuracy` metres. The engine is asked again only
+     * when that changes the regions it is inside, or on the first position, which makes `away` mean
+     * something. A rough fix after that changes none.
      */
-    fun moved(lat: Double, lon: Double) {
+    fun moved(lat: Double, lon: Double, accuracy: Double = 0.0) {
         val regions = (_state.value as? PackState.Showing)?.view?.watch?.regions.orEmpty()
-        val now = inside(regions, lat, lon)
+        val now = inside(regions, lat, lon, accuracy.coerceAtMost(ROUGH_M))
         val first = _position.value == null
         _position.value = lat to lon
-        if (!first && now == inside) return
+        if (!first && (now == inside || accuracy > ROUGH_M)) return
         inside = now
+        fix = Triple(lat, lon, accuracy.coerceAtMost(ROUGH_M))
         redraw()
     }
 
@@ -295,6 +299,7 @@ class PackViewModel(
     fun unpinned() {
         _position.value = null
         inside = emptyList()
+        fix = null
         redraw()
     }
 
@@ -449,6 +454,14 @@ class PackViewModel(
     /** One timer, until the moment the engine said its answer changes, and any sync now due. */
     private fun watch() {
         refresh("")
+        // A region the screen watches only now, a hunt's next spot, may already be where the device is.
+        fix?.let { (lat, lon, margin) ->
+            val now = inside((_state.value as? PackState.Showing)?.view?.watch?.regions.orEmpty(), lat, lon, margin)
+            if (!inside.containsAll(now)) {
+                inside = now
+                redraw()
+            }
+        }
         timer?.cancel()
         val until = (_state.value as? PackState.Showing)?.view?.watch?.until
         if (until.isNullOrEmpty()) return

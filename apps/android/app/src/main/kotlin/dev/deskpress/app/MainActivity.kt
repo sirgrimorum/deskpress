@@ -13,6 +13,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
 import android.content.pm.PackageManager.PERMISSION_GRANTED
+import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.media.RingtoneManager
@@ -632,10 +633,11 @@ class MainActivity : FragmentActivity() {
     @SuppressLint("MissingPermission")
     private fun track(model: PackViewModel, fenced: Boolean): () -> Unit {
         val manager = getSystemService(LocationManager::class.java)
-        val listener = LocationListener { model.moved(it.latitude, it.longitude) }
+        val fix = { at: Location -> model.moved(at.latitude, at.longitude, if (at.hasAccuracy()) at.accuracy.toDouble() else 0.0) }
+        val listener = LocationListener { fix(it) }
         return try {
             val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).filter(manager::isProviderEnabled)
-            providers.mapNotNull(manager::getLastKnownLocation).maxByOrNull { it.time }?.let { model.moved(it.latitude, it.longitude) }
+            providers.mapNotNull(manager::getLastKnownLocation).maxByOrNull { it.time }?.let(fix)
             val (every, meters) = if (fenced) 5_000L to 10f else 60_000L to 50f
             providers.forEach { manager.requestLocationUpdates(it, every, meters, listener, Looper.getMainLooper()) }
             ({ manager.removeUpdates(listener) })

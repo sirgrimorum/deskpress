@@ -63,6 +63,12 @@ ui:
   question: A question
   show_answer: Show the answer
   challenge: Challenge
+  clue: Clue
+  you_are_there: You are there. Look around!
+  found_it: Found it
+  adult_found: An adult says we found it
+  hunt_done: Treasure found!
+  found_so_far: Found
   star: "★"
   set_off_now: Set off now
   set_off_at: Set off at
@@ -544,13 +550,16 @@ screens:
   # A child holding the phone: where they are, what to look for there, and what comes next.
   # Nothing private: no tickets, alerts, days or handoff. Giving it back takes a parent. When
   # the block names them its guide, the place's guide script: facts to tell, a question with its
-  # answer behind a tap, and a challenge.
+  # answer behind a tap, and a challenge. At a hunt, one clue at a time and no map or list to
+  # spoil it: the next once the phone is at the spot, or an adult unlocks to say so.
   kid:
     state: {answer: false}
     actions:
       give_back: [{do: device.unlock, with: {then: "'returned'"}}]
       returned: [{store: holder, value: store.returns_to}, home]
       answer: [{set: answer, to: "true"}]
+      found: [{store: "hunt.{place.id}", value: hunt.step}]
+      vouch: [{do: device.unlock, with: {then: "'found'"}}]
       ask: [{open: ask}]
     layout:
       - Screen: {title: place.name or day.title, foot_label: next and ui.next, foot_time: next.time, foot: next.text or ui.nothing_more}
@@ -568,8 +577,17 @@ screens:
       - Button: {if: guiding and place.guide.answer and not answer, label: ui.show_answer, on_tap: answer}
       - Card: {if: guiding and answer, text: place.guide.answer}
       - Card: {if: guiding and place.guide.challenge, title: ui.challenge, text: place.guide.challenge}
-      - Map: {if: area, points: area.points, path: area.path, span: area.span_m, open: ui.lead, pick: ui.pick_next, follow: ui.follow_me, unplaced: ui.no_position}
-      - Row: {each: points, if: item.for_kids, text: item.name, caption: item.for_kids}
+      - Card: {if: hunt and not hunt.done, title: "{ui.clue} {hunt.step}/{hunt.of}", text: hunt.clue}
+      - Card: {if: hunt.there, text: ui.you_are_there}
+      - Button: {if: hunt.there, label: ui.found_it, on_tap: found}
+      - Button: {if: hunt and not hunt.done and not hunt.there, label: ui.adult_found, on_tap: vouch}
+      - BigValue: {if: hunt.done, text: ui.hunt_done}
+      - Group:
+          title: ui.found_so_far
+          layout:
+            - Row: {each: hunt.found, text: item.name, caption: item.for_kids}
+      - Map: {if: area and not hunt, points: area.points, path: area.path, span: area.span_m, open: ui.lead, pick: ui.pick_next, follow: ui.follow_me, unplaced: ui.no_position}
+      - Row: {each: points, if: item.for_kids and not item.clue, text: item.name, caption: item.for_kids}
       - Button: {if: questions, label: ui.ask, on_tap: ask}
       - Button: {label: ui.give_back, on_tap: give_back}
 

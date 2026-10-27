@@ -204,8 +204,12 @@ days:
     decision: {when: 2026-04-12, at: "20:00", question: Coast or hill?}
   - date: 2026-04-14
     title: Four
-    blocks: [["10:00", "Surf", {for: [ana, leo], suggestion: Look up}]]
+    blocks: [["10:00", "Surf", {for: [ana, leo], suggestion: Look up, place: walls}]]
 places:
+  walls:
+    name: Walls
+    at: {lat: 1, lon: 2, radius_m: 300}
+    points: [{name: Bridge, clue: Cross the water, for_kids: Wave, at: {lat: 1, lon: 2}}, {name: Gate, clue: Find the lady}]
   lot: {name: Lot, parking: {where: North side, price: "[to confirm]"}}
   museum:
     name: Museum
@@ -929,6 +933,37 @@ jet_lag: [{date: 2026-04-11, steps: [{time: "12:45", text: Nap, do: bed}, {time:
         // Seated in the car nobody guides: no script.
         let (_, car) = shown("2026-04-11T13:30", "leo", &[]);
         assert!(!car.contains(&"Label You could be the guide".to_owned()), "{car:?}");
+    }
+
+    #[test]
+    fn a_hunt_gives_one_clue_and_the_next_once_this_one_is_found() {
+        let (e, mut nav) = (trip(), Nav::default());
+        let at = |inside: &[&str], found: &str| World {
+            inside: inside.iter().map(|i| (*i).to_owned()).collect(),
+            located: true,
+            ..world("2026-04-14T10:30", "leo", &[("hunt.walls", found)])
+        };
+        let lines = |w: &World| said(&e.screen(w, &mut Nav::default()).unwrap().tree);
+        let first = lines(&at(&[], ""));
+        assert!(first.contains(&"Card Clue 1/2 Cross the water".to_owned()), "{first:?}");
+        // No map and no list of the place's points: they would give the answers away.
+        assert!(!first.iter().any(|l| l.starts_with("Map") || l.contains("Bridge")), "{first:?}");
+        let out = e.dispatch(&at(&[], ""), &mut nav, "vouch", Value::Null).unwrap();
+        assert_eq!(text(out.commands[0].args.get("then")), "found");
+        // At the spot the child says so; the step is stored for the place, across its blocks.
+        let there = lines(&at(&["walls#1"], ""));
+        assert!(there.contains(&"Card  You are there. Look around!".to_owned()), "{there:?}");
+        let out = e.dispatch(&at(&["walls#1"], ""), &mut nav, "found", Value::Null).unwrap();
+        assert_eq!(out.store, Map(vec![("hunt.walls".to_owned(), Value::Number(1.0))]));
+        let second = lines(&at(&[], "1"));
+        assert!(second.contains(&"Card Clue 2/2 Find the lady".to_owned()), "{second:?}");
+        assert!(!first.iter().any(|l| l.starts_with("Group")), "{first:?}");
+        // What was found shows, with what it holds for a child.
+        let found = format!("{:?}", e.screen(&at(&[], "1"), &mut nav).unwrap().tree);
+        assert!(found.contains("Bridge") && found.contains("Wave"), "{found}");
+        let done = lines(&at(&[], "2"));
+        assert!(done.contains(&"BigValue  Treasure found!".to_owned()), "{done:?}");
+        assert!(!done.iter().any(|l| l.starts_with("Card Clue")), "{done:?}");
     }
 
     #[test]

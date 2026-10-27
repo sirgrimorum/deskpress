@@ -9,11 +9,11 @@ appId: dev.deskpress.app
 - assertVisible: "Rita"
 # The block names Tomas its guide, so he carries the star.
 - tapOn: "★ Tomas"
-# The place's script first, since they guide it, then the points for kids.
+# The place's script first, since they guide it, then the points for kids that are no clue.
 - assertVisible: "You could be the guide"
 - tapOn: "Show the answer"
 - assertVisible: "They keep the walls cool.*"
 - scrollUntilVisible:
-    element: "Count the lions.*"
+    element: "Find the boat with three masts.*"
 - scrollUntilVisible:
     element: "Give the phone back"

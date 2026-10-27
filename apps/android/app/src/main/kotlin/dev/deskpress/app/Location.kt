@@ -26,12 +26,15 @@ fun distance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
 fun metres(m: Double): String =
     if (m < 995.0) "${(m / 10.0).roundToInt() * 10} m" else "${(m / 100.0).roundToInt() / 10.0} km"
 
+/** A fix vaguer than this, in metres, moves the dot on a map but never from one place to another. */
+const val ROUGH_M = 100.0
+
 /**
  * The ids of the regions around `lat`, `lon`, the smallest first: a place inside a larger one
- * comes before it.
+ * comes before it. A fix `accuracy` metres vague reaches each region that much sooner.
  */
-fun inside(regions: List<Region>, lat: Double, lon: Double): List<String> =
-    regions.filter { distance(lat, lon, it.lat, it.lon) <= it.radiusM }.sortedBy { it.radiusM }.map { it.id }
+fun inside(regions: List<Region>, lat: Double, lon: Double, accuracy: Double = 0.0): List<String> =
+    regions.filter { distance(lat, lon, it.lat, it.lon) <= it.radiusM + accuracy }.sortedBy { it.radiusM }.map { it.id }
 
 /** A pinned "lat,lon" as the two numbers it holds, or null when the position is the real one. */
 fun String.pinned(): Pair<Double, Double>? =

@@ -1,0 +1,38 @@
+# A treasure hunt: one clue at a time and nothing that gives it away. At the spot the child says
+# it is found; elsewhere an adult's unlock does. "at" pins the device's position.
+appId: dev.deskpress.app
+---
+- launchApp:
+    clearState: true
+    arguments:
+      now: "2026-04-11T11:30"
+      at: "38.7300,-9.1000"
+- tapOn: 'Whose phone is it\?'
+- tapOn: "★ Tomas"
+- scrollUntilVisible:
+    element: "Clue 1/2"
+- assertVisible: "Where the nuns walked.*"
+- assertNotVisible: "The small cloister"
+- assertNotVisible: "Lead the way"
+# A point that is not a clue is still there to read.
+- scrollUntilVisible:
+    element: "The great Lisbon panorama"
+- launchApp:
+    stopApp: true
+    arguments:
+      now: "2026-04-11T11:30"
+      at: "38.7245,-9.1141"
+- scrollUntilVisible:
+    element: "Found it"
+- assertVisible: "You are there. Look around!"
+- tapOn: "Found it"
+- scrollUntilVisible:
+    element: "Clue 2/2"
+- assertVisible: "Find the room where almost everything shines."
+- scrollUntilVisible:
+    element: "The small cloister"
+- scrollUntilVisible:
+    element: "An adult says we found it"
+- tapOn: "An adult says we found it"
+- scrollUntilVisible:
+    element: "Treasure found!"

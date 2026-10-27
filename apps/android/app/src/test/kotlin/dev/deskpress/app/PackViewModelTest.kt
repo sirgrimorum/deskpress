@@ -257,6 +257,27 @@ class PackViewModelTest {
         model.moved(38.7249, -9.1139)
         runCurrent()
         assertSame(before, model.state.value)
+        // A rough fix far away moves the dot, not the regions.
+        model.moved(38.0, -9.0, 500.0)
+        runCurrent()
+        assertEquals(38.0 to -9.0, model.position.value)
+        assertSame(before, model.state.value)
+    }
+
+    @Test
+    fun aHuntsNextSpotIsCheckedWithNoNewFix() = runTest {
+        val facts = Facts(File(temp.root, "facts"))
+        facts.write("one-day", "holder: tomas\n")
+        val model = model({ example }, "2026-04-11T11:30", facts)
+        runCurrent()
+        val there = { (model.state.value as PackState.Showing).view.tree.nodes.any { it.on["tap"] == "found" } }
+        // At the church, the second spot: the first clue is not there.
+        model.moved(38.7247, -9.1137)
+        runCurrent()
+        assertEquals(false, there())
+        model.act("found", Value.Null)
+        runCurrent()
+        assertEquals(true, there())
     }
 
     @Test

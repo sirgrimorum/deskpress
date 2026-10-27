@@ -34,6 +34,9 @@ class LocationTest {
         // A point exactly on the edge is inside.
         val edge = Region("edge", 0.0, 0.0, distance(0.0, 0.0, 0.0, 0.001))
         assertEquals(listOf("edge"), inside(listOf(edge), 0.0, 0.001))
+        // A vague fix reaches a region by as much as it is vague.
+        assertEquals(emptyList<String>(), inside(listOf(square), 0.0, 0.003))
+        assertEquals(listOf("square"), inside(listOf(square), 0.0, 0.003, 125.0))
     }
 
     @Test
