@@ -72,7 +72,7 @@ and `add` to change a day, `tasks`, and the car's `log` with a `note`.
 | `documents` | a group per person with their documents, then the ones that are nobody's. None for a child | `back`, `open` (opens `document` with the row's document) |
 | `document` | whose it is, a button per number to call, its fields, and the button to the file | `back`, `call` (`phone.call`), `file` (`document.open`) |
 | `suggestion` | the block and its place's points, with what each has for children | `go` (opens `moment`) |
-| `kid` | child holding the phone: their name and their `sprite` when they have one, the place's map when its points have `at`, points for kids, what the block proposes for them (`suggestion`), what comes next, no menu, give back button; when the block names them its guide, "You could be the guide" and the place's `guide` script | `give_back` (unlocks via host, then `returned`), `returned` (the phone to `returns_to`), `answer` (shows the script's answer), `ask` (opens `ask`, while the pack has questions) |
+| `kid` | child holding the phone: their name and their `sprite` when they have one, the place's map when its points have `at`, points for kids, at a hunt one clue at a time with no map and the clue points shown only once found, what the block proposes for them (`suggestion`), what comes next, no menu, give back button; when the block names them its guide, "You could be the guide" and the place's `guide` script | `give_back` (unlocks via host, then `returned`), `returned` (the phone to `returns_to`), `answer` (shows the script's answer), `found` (stores the next step of the hunt), `vouch` (an adult unlocks, then `found`), `ask` (opens `ask`, while the pack has questions) |
 | `ask` | the questions the pack can answer, each opening its answer in a `Dialog`; on a phone with a model of its own, a field to type in and the model's words in a card | `back`, `show` (opens the tapped question's answer), `close`, `type`, `say` (`assistant.ask` with the typed question and the day as facts), `answered` |
 | `relay` | one chip per person, a star on the block's guide; where it is not safe, an alert that the adults decide | `hold` stores `holder` and `returns_to`; `back` |
 
@@ -87,7 +87,7 @@ block's time. A block missing the key its type reads shows its time too, and the
 
 **What the pack gives it.** A block's `type`, `place`, `guide`, `for`, `until`, `zone`,
 `until_zone`, `ticket` and `road`; a place's `during`, `parking` (its `where` a card of its own),
-`points` (each with an optional `at`), `in_order`, `guide`, `plan` and `legs` (points and ticket may
+`points` (each with an optional `at` and `clue`), `in_order`, `guide`, `plan` and `legs` (points and ticket may
 also sit inside `during`); a day's `travel` and `zone`, and its `who`, never drawn; an option's
 `why`, `cost` and `consequence`, each a card; people with `adult`; `jet_lag`, `tasks`, and an
 alert's `status`, `repeat`, `alarm`, `for`, `until` and `zone`. Every other key of a block, a

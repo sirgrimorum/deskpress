@@ -1,6 +1,7 @@
 # 0031: maps to guide by
 
 Status: accepted, 2026-09-30. Amends 0026 and 0020.
+Amended by [0040](0040-a-treasure-hunt-one-clue-at-a-time.md): at a hunt the kid screen has no map of the place.
 
 ## Context
 

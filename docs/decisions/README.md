@@ -45,3 +45,4 @@ history.
 | [0037](0037-what-the-trip-taught.md) | what the trip taught: a redraw on resume, the chart from now, a ticket in one tap, a child anywhere with the adults deciding | accepted |
 | [0038](0038-a-moment-tried-out-by-tapping-it.md) | a moment tried out by tapping it: `clock.try` from a block, `on_foot`, a strip that says when and has "Back to now" | accepted |
 | [0039](0039-the-day-as-a-calendar.md) | the day as a calendar: one scale, a ruler and a now line, a column per person, `fixed`, `duration` as a length, a block's own `id` | accepted |
+| [0040](0040-a-treasure-hunt-one-clue-at-a-time.md) | a treasure hunt, one clue at a time: `clue` on a point, `hunt`, found at the spot or on an adult's word, the fix's accuracy as margin | accepted |

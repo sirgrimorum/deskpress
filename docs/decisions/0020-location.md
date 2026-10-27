@@ -3,6 +3,7 @@
 Status: accepted, 2026-09-28. Amended by [0031](0031-maps-to-guide-by.md): opening a Map card full
 screen asks for the position too, and follows it closely while open.
 Amended by [0037](0037-what-the-trip-taught.md): out of the region a child keeps the phone; nothing calls them back.
+Amended by [0040](0040-a-treasure-hunt-one-clue-at-a-time.md): the fix's accuracy is the margin; a fix vaguer than 100 m changes no region.
 
 ## Context
 

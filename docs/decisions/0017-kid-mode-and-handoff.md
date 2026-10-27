@@ -2,6 +2,7 @@
 
 Status: accepted, 2026-09-28. Amended by [0037](0037-what-the-trip-taught.md): a child holds the phone anywhere, the
 adults decide; `complete` and its extra time are gone.
+Amended by [0040](0040-a-treasure-hunt-one-clue-at-a-time.md): at a hunt the kid screen shows one clue at a time.
 
 ## Context
 
