@@ -45,8 +45,7 @@ import kotlinx.coroutines.withContext
  * network.
  */
 @Composable
-fun Document(state: PackState, title: String, read: () -> ByteArray, close: () -> Unit) {
-    val tokens = holder(state).second
+fun Document(tokens: Tokens, title: String, read: () -> ByteArray, close: () -> Unit) {
     val context = LocalContext.current
     LocalActivity.current?.let { Brightest(it) }
     BackHandler(onBack = close)

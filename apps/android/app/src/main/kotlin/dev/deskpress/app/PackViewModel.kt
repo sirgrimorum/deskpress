@@ -11,6 +11,7 @@ import dev.deskpress.engine.LoadException
 import dev.deskpress.engine.LoadedPack
 import dev.deskpress.engine.Plan
 import dev.deskpress.engine.Taken
+import dev.deskpress.engine.Ticket
 import dev.deskpress.engine.Value
 import dev.deskpress.engine.View
 import dev.deskpress.engine.World
@@ -126,6 +127,13 @@ class PackViewModel(
 
     // The phone's alarm service, handed every alarm still to ring each time the pack or its facts change.
     var alarms: (List<Alarm>) -> Unit = {}
+        set(value) {
+            field = value
+            ring()
+        }
+
+    // And every ticket still to show outside the app (decision 0042), at the same times.
+    var tickets: (List<Ticket>) -> Unit = {}
         set(value) {
             field = value
             ring()
@@ -459,13 +467,14 @@ class PackViewModel(
         // Only the latest ask is handed on, so an older list never lands last.
         ringing?.cancel()
         ringing = viewModelScope.launch {
-            val all =
+            val (all, shown) =
                 try {
-                    withContext(io) { pack.alarms(here(now(timezone))) }
+                    withContext(io) { here(now(timezone)).let { pack.alarms(it) to pack.tickets(it) } }
                 } catch (_: CallException.Refused) {
                     return@launch
                 }
             alarms(all)
+            tickets(shown)
         }
     }
 

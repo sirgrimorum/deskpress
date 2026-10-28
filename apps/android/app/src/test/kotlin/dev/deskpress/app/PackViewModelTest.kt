@@ -381,6 +381,15 @@ class PackViewModelTest {
     }
 
     @Test
+    fun theTicketsStillToShowGoToTheHostWithTheAlarms() = runTest {
+        val model = model({ example }, "2026-04-11T08:00")
+        val handed = mutableListOf<List<String>>()
+        model.tickets = { all -> handed += all.map { "${it.key} ${it.from} ${it.until} ${it.papers.size}" } }
+        runCurrent()
+        assertEquals(listOf(listOf("2026-04-11.blocks.2 2026-04-11T10:30 2026-04-11T13:00 1")), handed)
+    }
+
+    @Test
     fun aQuestionIsOfferedOutsideTheAppAndOpensTheScreenAtIt() = runTest {
         val model = model({ asking }, "2026-04-11T11:30")
         runCurrent()

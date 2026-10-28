@@ -50,6 +50,22 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/shared" />
         </provider>
+        <!-- A due ticket's papers, over the lock screen and from no other app (decision 0042). -->
+        <activity
+            android:name=".TicketActivity"
+            android:exported="false"
+            android:showWhenLocked="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="" />
+        <receiver
+            android:name=".TicketReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <receiver
             android:name=".AlarmReceiver"
             android:exported="false">

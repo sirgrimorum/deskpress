@@ -175,6 +175,10 @@ fun Context.bytes(folder: Uri, path: String): ByteArray {
     return stream.use { it.readBytes() }
 }
 
+/** The bytes of `path` in the pack: the picked folder's, or the bundled pack's. */
+fun Context.packFile(folder: String?, path: String): ByteArray =
+    folder?.let { bytes(Uri.parse(it), path) } ?: assets.open("$PACK/$path").use { it.readBytes() }
+
 /** Writes `text` over the file at `path` inside the folder the person picked, made with its folders when new. */
 fun Context.write(folder: Uri, path: String, text: String) {
     var dir = DocumentFile.fromTreeUri(this, folder) ?: throw IOException("the folder is gone")

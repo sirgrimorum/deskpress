@@ -82,7 +82,7 @@ import kotlinx.coroutines.withContext
 import org.maplibre.android.MapLibre
 
 /** The pack a fresh install opens: a folder of the repo's examples, shipped as assets. */
-private const val PACK = "one-day"
+internal const val PACK = "one-day"
 
 /** The folder the person picked, kept across runs with its read and write permission. */
 private const val FOLDER = "folder"
@@ -137,8 +137,10 @@ class MainActivity : FragmentActivity() {
      * pack answers is drawn in the app and never handed over (decision 0027).
      */
     private fun offer(questions: List<Shortcut>) {
-        val room = ShortcutManagerCompat.getMaxShortcutCountPerActivity(this)
-        val shortcuts = questions.take(room).map { q ->
+        // The ticket showing now keeps its place (decision 0042).
+        val ticket = ShortcutManagerCompat.getDynamicShortcuts(this).filter { it.id == TICKET }
+        val room = ShortcutManagerCompat.getMaxShortcutCountPerActivity(this) - ticket.size
+        val shortcuts = ticket + questions.take(room).map { q ->
             val open = Intent(this, MainActivity::class.java)
                 .setAction(Intent.ACTION_VIEW)
                 .putExtra(QUESTION, q.id)
@@ -367,20 +369,31 @@ class MainActivity : FragmentActivity() {
             // notify once a session, and never under a frozen clock.
             var notifyAsked by rememberSaveable { mutableStateOf(false) }
             val askNotify = rememberLauncherForActivityResult(RequestPermission()) { granted ->
-                if (!granted) say("Without notifications, the alarms stay silent.")
+                if (!granted) say("Without notifications, the alarms stay silent and no ticket shows on the lock screen.")
             }
 
             LaunchedEffect(model) {
                 if (frozen == null) {
                     val app = applicationContext
+                    val wanted = { any: Boolean ->
+                        if (any && !app.canNotify() && !notifyAsked) {
+                            notifyAsked = true
+                            askNotify.launch(POST_NOTIFICATIONS)
+                        }
+                    }
                     val ringer = Ringer(app)
                     model.alarms = { all ->
                         val rings = rings(all, model.timezone, System.currentTimeMillis())
                         ringer.set(rings)
-                        if (rings.isNotEmpty() && !app.canNotify() && !notifyAsked) {
-                            notifyAsked = true
-                            askNotify.launch(POST_NOTIFICATIONS)
-                        }
+                        wanted(rings.isNotEmpty())
+                    }
+                    // The tickets' papers are read from the folder open now, the bundled pack's when none.
+                    val ticketer = Ticketer(app)
+                    val shelf = folder
+                    model.tickets = { all ->
+                        val passes = passes(all, model.timezone, System.currentTimeMillis())
+                        ticketer.set(passes, shelf)
+                        wanted(passes.isNotEmpty())
                     }
                 }
                 model.allow = { hosts ->
@@ -509,7 +522,7 @@ class MainActivity : FragmentActivity() {
             val dark = isSystemInDarkTheme()
             // A picture a pack carries, for the maps it draws. Unreadable is no picture.
             val packFile = remember(folder) {
-                { path: String -> runCatching { file(folder, path) }.getOrNull() }
+                { path: String -> runCatching { packFile(folder, path) }.getOrNull() }
             }
             val would = remember(model) { model::would }
             CompositionLocalProvider(LocalShell provides shell, LocalPackFile provides packFile, LocalGuide provides walk, LocalWould provides would) {
@@ -544,7 +557,7 @@ class MainActivity : FragmentActivity() {
                     when {
                         // On paper while a keep runs: the network is on, and the kept style would pan onto it.
                         walking != null -> Guide(walking, kept.isNotEmpty() && keeping == null, model.position) { guide = null }
-                        open != null -> Document(state, open.second, { file(folder, open.first) }) { doc = null }
+                        open != null -> Document(holder(state).second, open.second, { packFile(folder, open.first) }) { doc = null }
                         page == "check" -> Check(state, close)
                         page == "design" -> Design(state, model::edit, { copy -> unwritten = copy; copier.launch(copy.file.substringAfterLast('/')) }, close)
                         page == "settings" -> {
@@ -666,10 +679,6 @@ class MainActivity : FragmentActivity() {
             {}
         }
     }
-
-    /** The bytes of `path` in the pack: the picked folder's, or the bundled pack's. */
-    private fun file(folder: String?, path: String): ByteArray =
-        folder?.let { bytes(Uri.parse(it), path) } ?: assets.open("$PACK/$path").use { it.readBytes() }
 
     /**
      * Asks for the phone's own lock: a fingerprint, a face, or the PIN or pattern. A phone with no
