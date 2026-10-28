@@ -8,6 +8,7 @@ pub(crate) mod jet_lag;
 mod log;
 pub(crate) mod plan;
 pub(crate) mod tasks;
+mod tickets;
 pub(crate) mod travel;
 
 use std::cmp::Reverse;

@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::Path;
 
 use deskpress_engine::clock::real;
-use deskpress_engine::engine::{Alarm, Engine, Nav, Region, View, World};
+use deskpress_engine::engine::{Alarm, Engine, Nav, Region, Ticket, View, World};
 use deskpress_engine::tree::{Node, Tree};
 use deskpress_engine::value::{Map, Value, show, text};
 use deskpress_engine::{pack, validate, yaml};
@@ -24,6 +24,7 @@ commands:
   act <pack> --at <time> [world] <action>...      run actions in turn and print where they leave the screen
   preview <pack> --at <time> [world] [action]...  print the screen after any actions, as text a person reads
   alarms <pack> --at <time> [world]               list the alarms the phone would set, one a line
+  tickets <pack> --at <time> [world]              list the tickets the lock screen would show, one a line
   reference                                       print the pack format and the templates, to write a pack by
   version, --version                              print the version and the screen tree version
 
@@ -45,7 +46,7 @@ pub fn run(args: &[String], out: &mut impl Write, err: &mut impl Write) -> u8 {
         [command] if command == "reference" => (0, REFERENCE.to_owned(), String::new()),
         [command, target] if command == "validate" => validate(target),
         [command, target, rest @ ..]
-            if ["screen", "act", "preview", "alarms"].contains(&command.as_str()) =>
+            if ["screen", "act", "preview", "alarms", "tickets"].contains(&command.as_str()) =>
         {
             screen(target, rest, command)
         }
@@ -118,8 +119,8 @@ fn validate(target: &str) -> (u8, String, String) {
     (1, out, String::new())
 }
 
-/// `deskpress screen`, `act`, `preview` and `alarms`: exit 0 with the screen (the alarms, for
-/// `alarms`), 1 when the pack does not load or an action is not on the screen, 2 on bad arguments.
+/// `deskpress screen`, `act`, `preview`, `alarms` and `tickets`: exit 0 with the screen (the list,
+/// for the last two), 1 when the pack does not load or an action is not on the screen, 2 on bad arguments.
 fn screen(target: &str, args: &[String], command: &str) -> (u8, String, String) {
     let act = command == "act";
     let usage = |message: String| (2, String::new(), format!("{message}\n\n{USAGE}\n"));
@@ -171,6 +172,13 @@ fn shown(
             Err(e) => (1, String::new(), format!("{e}\n")),
         };
     }
+    if command == "tickets" {
+        return match engine.tickets(&world) {
+            Ok(all) if all.is_empty() => (0, "no ticket to show\n".to_owned(), String::new()),
+            Ok(all) => (0, all.iter().map(ticket).collect(), String::new()),
+            Err(e) => (1, String::new(), format!("{e}\n")),
+        };
+    }
     let mut nav = Nav::default();
     let mut view = match engine.screen(&world, &mut nav) {
         Ok(view) => view,
@@ -213,8 +221,22 @@ fn shown(
 
 /// An alarm as a line: when, on which clock, what it says and the key it is set by.
 fn alarm(a: &Alarm) -> String {
-    let zone = if a.zone.is_empty() { "pack time" } else { &a.zone };
+    let zone = clock(&a.zone);
     format!("{} {zone}  {}  [{}]\n", a.at, joined([a.title.clone(), a.text.clone()]), a.key)
+}
+
+/// A zone as printed, the pack's when none is given.
+fn clock(zone: &str) -> &str {
+    if zone.is_empty() { "pack time" } else { zone }
+}
+
+/// A ticket as a line: from when until when, on which clocks, its title and papers, and its key.
+fn ticket(t: &Ticket) -> String {
+    let papers: Vec<String> =
+        t.papers.iter().map(|p| format!("{} ({})", p.title, p.file)).collect();
+    let (from, until) = (clock(&t.from_zone), clock(&t.until_zone));
+    let shows = format!("{} {from} to {} {until}", t.from, t.until);
+    format!("{shows}  {}: {}  [{}]\n", t.title, papers.join(", "), t.key)
 }
 
 /// The world the flags describe, and the arguments left over.
@@ -723,7 +745,7 @@ rules:
     fn screen_act_and_preview_refuse_arguments_that_say_no_world() {
         let dir = machine("args");
         let zone = "--zone takes zone=YYYY-MM-DDTHH:MM, not";
-        let cases: [(&str, &[&str], &str); 12] = [
+        let cases: [(&str, &[&str], &str); 13] = [
             ("screen", &[], "--at <time> is needed: the moment to show, YYYY-MM-DDTHH:MM"),
             ("screen", &["--at"], "--at needs a value"),
             ("screen", &["--at", "x", "--store", "k"], "--store takes key=value, not k"),
@@ -737,6 +759,7 @@ rules:
             ),
             ("screen", &["--at", "x", "go"], "screen takes no actions: use act"),
             ("alarms", &["--at", "x", "go"], "alarms takes no actions"),
+            ("tickets", &["--at", "x", "go"], "tickets takes no actions"),
             ("act", &["--at", "x"], "act needs an action"),
             ("act", &["go"], "--at <time> is needed: the moment to show, YYYY-MM-DDTHH:MM"),
             ("preview", &["go"], "--at <time> is needed: the moment to show, YYYY-MM-DDTHH:MM"),
@@ -821,6 +844,27 @@ alerts: [{{id: tide, title: Tide, severity: low, at: '2026-04-11T12:00', alarm: 
             at(&dir, "alarms", &["--at", "x"]),
             (1, String::new(), hint.to_owned() + &message)
         );
+    }
+
+    #[test]
+    fn tickets_lists_what_the_lock_screen_would_show_or_says_there_is_none() {
+        let content = format!(
+            "{DAY}places: {{museum: {{name: Museum, during: {{ticket: b.museum}}}}}}
+documents: [{{id: m, title: Entry, file: files/m.pdf, ticket: b.museum}}]
+"
+        );
+        let content = content
+            .replace("blocks: [", "blocks: [['10:00', Museum, {place: museum, until: '12:00'}], ")
+            .replace("title: A day,", "title: A day, zone: UTC,");
+        let modules = "modules:\n  timeline:\n  places:\n  documents:\nscreens:\n  a:\n    layout: []\nrules:\n  - {screen: a}\n";
+        let pack = manifest(&format!("  name: A\n{modules}"));
+        let dir = folder("tickets", &[("pack.yaml", &pack), ("content.yaml", &content)]);
+        let (code, out, _) = at(&dir, "tickets", &["--at", "2026-04-11T08:00"]);
+        let expected = "2026-04-11T00:00 UTC to 2026-04-11T12:00 UTC  Museum: Entry (files/m.pdf)  [2026-04-11.blocks.0]\n";
+        assert_eq!((code, out.as_str()), (0, expected));
+        let (_, out, _) = at(&dir, "tickets", &["--at", "2026-04-11T12:00"]);
+        assert_eq!(out, "no ticket to show\n");
+        assert_eq!(at(&dir, "tickets", &["--at", "x"]).0, 1);
     }
 
     #[test]

@@ -10,6 +10,7 @@ The `deskpress` binary: the engine on a desk, for people and for LLMs writing pa
 | `act <pack> --at <time> [world] <action>...` | runs actions in turn; prints the screen they leave, what they stored and the commands they asked for |
 | `preview <pack> --at <time> [world] [action]...` | the screen for a moment, after any actions, as text a person reads: one line per component |
 | `alarms <pack> --at <time> [world]` | what the phone would ring from then on, one line each, soonest first |
+| `tickets <pack> --at <time> [world]` | the bookings whose papers the lock screen would show, one line each: from when to when, the papers, the key |
 | `reference` | prints `docs/pack-format.md` and `docs/templates.md`, compiled in, so the reference is the one this binary enforces |
 
 `<time>` is local to the pack, `YYYY-MM-DDTHH:MM`. `[world]` is any of `--holder <person id>`,

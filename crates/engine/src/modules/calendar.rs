@@ -33,6 +33,19 @@ impl Run<'_> {
         timed.into_iter().filter(written).collect()
     }
 
+    /// When the `n`th of a day's timed blocks ends, and on which zone: its `until`, else when the
+    /// next one begins, else an hour on.
+    pub(super) fn end(&self, date: &str, timed: &[Map], n: usize) -> (String, String) {
+        let b = &timed[n];
+        let time = text(b.get("time"));
+        let after = timed[n + 1..].iter().find(|b| text(b.get("time")) > time);
+        match (!text(b.get("until")).is_empty(), after) {
+            (true, _) => self.ends(date, b),
+            (false, Some(a)) => (format!("{date}T{}", text(a.get("time"))), text(a.get("zone"))),
+            (false, None) => (later(&format!("{date}T{time}"), 60), text(b.get("zone"))),
+        }
+    }
+
     /// One event per timed block of the holder's, or of everyone's when nobody holds the phone.
     /// A day's option counts only once it is chosen, so until then only the rest is written.
     pub fn events(
@@ -49,18 +62,9 @@ impl Run<'_> {
             let date = self.date_of(day);
             let timed = self.planned(days, day);
             for (n, b) in timed.iter().enumerate() {
-                let time = text(b.get("time"));
-                let begin = format!("{date}T{time}");
-                let until = text(b.get("until"));
+                let begin = format!("{date}T{}", text(b.get("time")));
                 let zone = text(b.get("zone"));
-                let after = timed[n + 1..].iter().find(|b| text(b.get("time")) > time);
-                let (end, end_zone) = match (!until.is_empty(), after) {
-                    (true, _) => self.ends(&date, b),
-                    (false, Some(a)) => {
-                        (format!("{date}T{}", text(a.get("time"))), text(a.get("zone")))
-                    }
-                    (false, None) => (later(&begin, 60), zone.clone()),
-                };
+                let (end, end_zone) = self.end(&date, &timed, n);
                 let words = text(b.get("text"));
                 let place = places.and_then(|p| p.get(&text(b.get("place"))));
                 let location: Vec<String> = ["name", "address"]

@@ -34,7 +34,7 @@ flowchart LR
   file, a sensor or the network; the host passes everything in. The main calls: `load(files)`,
   `screen(world)`, `dispatch(world, action, arg)` and `would` (the same, keeping nothing), plus
   `calendar`, `hosts`, `requests` and `received` for the calendar and data syncs, `zones` for the
-  clocks the host passes, `alarms` for what rings with the app closed, and the free functions
+  clocks the host passes, `alarms` for what rings with the app closed, `tickets` for the papers the lock screen shows, and the free functions
   `share` and `take` for the trip sent phone to phone, `edit_theme`, `encode_facts` and
   `decode_facts`. On the phone it is a native library reached through UniFFI (`crates/ffi`, phase
   2), which generates typed Kotlin, later Swift, bindings. On the desk and in the LLM plugin it is
@@ -107,7 +107,7 @@ SDK in the Makefile, Gradle in its wrapper, the app's libraries in
 | --- | --- |
 | `.github/` | CI workflows (gate, Android host), security audit, Dependabot, issue and PR templates |
 | `crates/engine` | yaml, expressions, loader, validator, definition, modules, the engine: the screen for a world and its watch, screen machines, the nav stack. Std only |
-| `crates/cli` | the `deskpress` binary: `validate`, `screen`, `act`, `preview`, `alarms`, `reference` |
+| `crates/cli` | the `deskpress` binary: `validate`, `screen`, `act`, `preview`, `alarms`, `tickets`, `reference` |
 | `crates/ffi` | the UniFFI bindings and their bindgen, the only crate that depends on UniFFI |
 | `apps/android` | the host: a ViewModel and the Compose renderer. See its README |
 | `Makefile` | every development task; `make check` is the one that must pass |

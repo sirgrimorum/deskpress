@@ -149,5 +149,6 @@ not. A place with nothing for a kid is not a gap to fill with a made up game.
   they would ask it, and see whether the answer is the thing they wanted.
   `deskpress preview <pack> --at 2026-10-03T08:40` prints that screen as text; add actions after
   it, like `agenda`, to open another. Show the person what it says. `deskpress alarms <pack> --at
-  <time>` lists what the phone would ring from then on. A day on another clock needs that clock's
+  <time>` lists what the phone would ring from then on, and `deskpress tickets` the papers its lock
+  screen would show. A day on another clock needs that clock's
   time too, like `--zone America/Bogota=2026-10-02T21:40`; the binary says when one is missing.

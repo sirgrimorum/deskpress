@@ -139,6 +139,27 @@ pub struct Alarm {
     pub text: String,
 }
 
+/// A booking's papers to show outside the app (decision 0042), from `from` until `until`, each
+/// local to its zone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ticket {
+    /// The block's `event`.
+    pub key: String,
+    pub from: String,
+    pub from_zone: String,
+    pub until: String,
+    pub until_zone: String,
+    pub title: String,
+    pub papers: Vec<Paper>,
+}
+
+/// A document of a ticket: its title and its file in the pack folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Paper {
+    pub title: String,
+    pub file: String,
+}
+
 /// What a calendar sync would do to the events the host wrote before.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Plan {
@@ -369,6 +390,13 @@ impl Engine {
         let set_off = text(manifest.get("ui").and_then(|u| u.get("set_off_now")));
         let roots = ["timeline", "jet_lag", "alerts"].map(|m| self.from(m));
         Ok(run.alarms(roots, &set_off))
+    }
+
+    /// The tickets still to show for `world`'s holder, outside the app (decision 0042).
+    pub fn tickets(&self, world: &World) -> Result<Vec<Ticket>, String> {
+        check(&world.now)?;
+        let run = Run::new(Keymap::of(&self.pack.manifest), self.content(), world, Map::default());
+        Ok(run.tickets(["timeline", "places", "documents"].map(|m| self.from(m))))
     }
 
     /// Decides, and starts the stack over when the rules picked another screen.
@@ -698,6 +726,25 @@ tasks: [{id: t, title: T, zone: Asia/Tokyo}]
         assert_eq!((rings[0].at.as_str(), rings[0].text.as_str()), ("2026-04-11T10:10", "Go"));
         assert!(e.alarms(&at("2026-04-11T10:10")).unwrap().is_empty());
         assert!(e.alarms(&at("x")).is_err());
+    }
+
+    #[test]
+    fn tickets_are_the_bookings_with_papers_not_over_yet() {
+        let content =
+            "days: [{date: 2026-04-11, title: A, blocks: [[\"10:30\", Ferry, {ticket: b.ferry}]]}]
+documents: [{id: f, title: Seat, file: f.pdf, ticket: b.ferry}]
+";
+        let definition = "modules: {timeline: , places: , documents: }\nscreens: {a: {}}\nrules: [{screen: a}]\n";
+        let pack = Pack {
+            manifest: parse(&format!("{HEAD}{definition}")).unwrap(),
+            content: parse(content).unwrap(),
+            theme: None,
+        };
+        let e = Engine::load(pack).unwrap().0;
+        let shown = e.tickets(&at("2026-04-11T08:00")).unwrap();
+        assert_eq!((shown[0].title.as_str(), shown[0].papers[0].file.as_str()), ("Ferry", "f.pdf"));
+        assert!(e.tickets(&at("2026-04-11T11:30")).unwrap().is_empty());
+        assert!(e.tickets(&at("x")).is_err());
     }
 
     #[test]

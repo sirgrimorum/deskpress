@@ -246,6 +246,34 @@ impl From<engine::Alarm> for Alarm {
     }
 }
 
+/// A booking's papers for the lock screen and the launcher (decision 0042): shown from `from`
+/// until `until`, each local to its zone, empty for the pack's timezone.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Ticket {
+    pub key: String,
+    pub from: String,
+    pub from_zone: String,
+    pub until: String,
+    pub until_zone: String,
+    pub title: String,
+    pub papers: Vec<Paper>,
+}
+
+/// A paper of a ticket: its title and its file in the pack folder.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Paper {
+    pub title: String,
+    pub file: String,
+}
+
+impl From<engine::Ticket> for Ticket {
+    fn from(t: engine::Ticket) -> Self {
+        let engine::Ticket { key, from, from_zone, until, until_zone, title, papers } = t;
+        let papers = papers.into_iter().map(|p| Paper { title: p.title, file: p.file }).collect();
+        Ticket { key, from, from_zone, until, until_zone, title, papers }
+    }
+}
+
 /// What a calendar sync would do: the events to add and to change, and the ids to remove.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Plan {
@@ -442,6 +470,12 @@ impl LoadedPack {
     pub fn alarms(&self, world: World) -> Result<Vec<Alarm>, CallError> {
         let alarms = self.engine.alarms(&world.into()).map_err(refused)?;
         Ok(alarms.into_iter().map(Alarm::from).collect())
+    }
+
+    /// Every booking whose papers are still to show outside the app, in the plan's order.
+    pub fn tickets(&self, world: World) -> Result<Vec<Ticket>, CallError> {
+        let tickets = self.engine.tickets(&world.into()).map_err(refused)?;
+        Ok(tickets.into_iter().map(Ticket::from).collect())
     }
 
     /// Every host the pack fetches from, sorted, for the person to approve before the first sync.
@@ -865,6 +899,28 @@ alerts: [{id: tide, title: Tide, severity: low, at: 2026-04-11T12:00, alarm: tru
         };
         assert_eq!(all[0], ferry);
         assert_eq!([&all[1].key, &all[1].at], ["alert.tide.2026-04-11T12:00", "2026-04-11T12:00"]);
+    }
+
+    #[test]
+    fn tickets_hand_over_the_papers_still_to_show() {
+        let definition =
+            "modules: {timeline: , documents: }\nscreens: {a: {}}\nrules: [{screen: a}]\n";
+        let content = "days: [{date: 2026-04-11, title: A, blocks: [[\"10:00\", \"Ferry. Gate 2\", {ticket: b.f}]]}]
+documents: [{id: f, title: Seat, file: f.pdf, ticket: b.f}]
+";
+        let pack = load("pack.yaml".into(), files(definition, content)).unwrap();
+        assert!(pack.tickets(world("today")).is_err());
+        let all = pack.tickets(world("2026-04-11T08:00")).unwrap();
+        let ferry = Ticket {
+            key: "2026-04-11.blocks.0".into(),
+            from: "2026-04-11T00:00".into(),
+            from_zone: String::new(),
+            until: "2026-04-11T11:00".into(),
+            until_zone: String::new(),
+            title: "Ferry".into(),
+            papers: vec![Paper { title: "Seat".into(), file: "f.pdf".into() }],
+        };
+        assert_eq!(all, [ferry]);
     }
 
     #[test]
