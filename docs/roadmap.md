@@ -33,4 +33,4 @@ phase that is not.
 | 25 ✓ | the day as a calendar (decision 0039): a fixed scale with an hour ruler and a now line, one column per person when the day splits, blocks that cannot move shown as such, a stable id per block so an edit survives a newer pack | a block is moved on a phone and the hours read true |
 | 26 ✓ | a real treasure hunt (decision 0040): one clue at a time, the next only once this one is found, GPS with its accuracy as margin | a child plays a hunt with no spoilers |
 | 27 ✓ | an assistant online (decision 0041): where the phone has no model, Claude or OpenAI with the person's key; a change proposed in words, checked with `would` and kept as facts once a person confirms | a change is made from the phone with no access to the code |
-| 28 | the ticket outside the app: the next booking's paper as a notification on the lock screen and a shortcut on the launcher | a ticket shows with the phone locked |
+| 28 ✓ | the ticket outside the app (decision 0042): the next booking's paper as a notification on the lock screen and a shortcut on the launcher | a ticket shows with the phone locked |

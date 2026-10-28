@@ -186,7 +186,8 @@ Map card full screen. For a calendar sync the engine says what the events are
 and what changed against what the host wrote before; the host writes only its own rows. See
 [decision 0021](decisions/0021-calendar.md). For alarms the engine lists what is still to ring and
 the host sets it with the phone's alarm service, so it rings with the app closed
-([decision 0033](decisions/0033-the-trip-around-the-days.md)). For the trip sent to another phone
+([decision 0033](decisions/0033-the-trip-around-the-days.md)); the tickets the same way, shown on
+the lock screen while due ([decision 0042](decisions/0042-the-ticket-outside-the-app.md)). For the trip sent to another phone
 the engine writes the file and says what of one sent is newer; the host stamps each fact it keeps
 and hands the file to whatever app sends it ([decision 0034](decisions/0034-the-trip-phone-to-phone.md)).
 

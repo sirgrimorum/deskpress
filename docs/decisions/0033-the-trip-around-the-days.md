@@ -37,7 +37,7 @@ block with a `leave`, its words the pack's `ui.set_off_now`. The host sets them 
 service on the real clock, never the one set by hand, after each load and each kept fact, and
 sets them again after a restart. At most 100 are armed at once, soonest first; each one that
 rings arms the next, so none is lost with the app closed. A notification with the alarm sound,
-exact where the phone allows it. Only the open pack's ring. The CLI's `alarms` prints the same list.
+exact where the phone allows it. Only the open pack's ring. The CLI's `alarms` prints the same list. The tickets follow the same path ([0042](0042-the-ticket-outside-the-app.md)).
 
 **`Check` gets a `caption`.** A second line under its text, drawn muted when it is not empty.
 

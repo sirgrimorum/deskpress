@@ -649,7 +649,7 @@ documents:
     title: Travel insurance
     for: rita                        # person id: whose it is
     file: files/insurance-rita.pdf   # inside the pack folder
-    ticket: bookings.azulejo         # optional. Listed on the ticket of a block with this ticket
+    ticket: bookings.azulejo         # optional. Listed on the ticket of a block with this ticket, and on the lock screen while it is due
     call:                            # label: number. Buttons that come before the file
       Assistance: "+1 555 0100"
       Emergency: "112"

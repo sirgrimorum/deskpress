@@ -38,7 +38,7 @@ history.
 | [0030](0030-trying-a-moment-and-the-day-as-a-route.md) | a pretend clock and place in Settings, answers in a `Dialog`, the day's stops as a route, only the installed map apps | accepted, amended by 0038 |
 | [0031](0031-maps-to-guide-by.md) | maps to guide by: points with `at`, an order only when the pack gives one, the trip's tiles kept on a press, the Map card full screen on MapLibre | accepted |
 | [0032](0032-the-day-on-one-page.md) | the day on one page: legs between places from the pack or estimated, `lasts`, the `Day` component | accepted, amended by 0035 and 0039 |
-| [0033](0033-the-trip-around-the-days.md) | the trip around the days: `jet_lag` steps, `tasks` to tick, alerts that end, repeat and ring, alarms with the app closed | accepted, amended by 0036 |
+| [0033](0033-the-trip-around-the-days.md) | the trip around the days: `jet_lag` steps, `tasks` to tick, alerts that end, repeat and ring, alarms with the app closed | accepted, amended by 0036 and 0042 |
 | [0034](0034-the-trip-phone-to-phone.md) | the trip phone to phone: one text file through any app, the later fact wins, a newer pack with it, the `log` of the car and notes | accepted |
 | [0035](0035-the-day-like-an-agenda.md) | the day like an agenda: drag a block or its edges in 15-minute steps, free time then push then shrink, a green or red placeholder, `would` | accepted, amended by 0039 |
 | [0036](0036-a-pack-in-its-own-words-and-on-its-own-clocks.md) | a pack in its own words and on its own clocks: `world.zones` from the host, one warning for what is left in English, a last block that ends | accepted |
@@ -47,3 +47,4 @@ history.
 | [0039](0039-the-day-as-a-calendar.md) | the day as a calendar: one scale, a ruler and a now line, a column per person, `fixed`, `duration` as a length, a block's own `id` | accepted |
 | [0040](0040-a-treasure-hunt-one-clue-at-a-time.md) | a treasure hunt, one clue at a time: `clue` on a point, `hunt`, found at the spot or on an adult's word, the fix's accuracy as margin | accepted |
 | [0041](0041-an-assistant-online.md) | an assistant online: Claude or OpenAI with the person's key where the phone has no model, a change proposed, checked with `would` and kept on a yes | accepted |
+| [0042](0042-the-ticket-outside-the-app.md) | the ticket outside the app: a due booking's papers as a quiet notification on the lock screen and a launcher shortcut | accepted |
