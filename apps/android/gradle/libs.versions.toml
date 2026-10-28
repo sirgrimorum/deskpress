@@ -13,7 +13,7 @@ fragment = "1.9.1"
 junit = "4.13.2"
 kover = "0.9.10"
 genai = "1.0.0-beta4"
-maplibre = "13.6.1"
+maplibre = "13.7.1"
 
 [libraries]
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
