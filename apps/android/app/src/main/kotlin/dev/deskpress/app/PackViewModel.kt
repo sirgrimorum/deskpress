@@ -108,6 +108,11 @@ class PackViewModel(
     var route: (stops: List<Stop>) -> Unit = {}
     var unlocated: () -> Unit = {}
 
+    // The neighbourhood and city around a position, asked only for a question that may search the
+    // web (decision 0043); and a web page in the browser.
+    var area: suspend (lat: Double, lon: Double) -> String = { _, _ -> "" }
+    var link: (url: String) -> Unit = {}
+
     // A calendar sync of a scope: the whole trip when empty, a date, or one event id.
     var sync: (scope: String) -> Unit = {}
 
@@ -248,10 +253,16 @@ class PackViewModel(
                         val ask = assistant
                         val then = cmd.args["then"].text()
                         if (ask != null && then.isNotEmpty()) {
-                            val said = ask.reply(ORDERS, question(cmd.args["question"].text(), cmd.args["facts"]), null)
-                            act(then, Value.Text(said))
+                            // The device's area when it has a position, else the one the pack names.
+                            val area: suspend () -> String = {
+                                _position.value?.let { area(it.first, it.second) }.orEmpty().ifEmpty { cmd.args["near"].text() }
+                            }
+                            val got = ask.search(cmd.args["question"].text(), cmd.args["facts"], area)
+                            val sources = got.sources.map { Value.Fields(listOf(Field("title", Value.Text(it.title)), Field("url", Value.Text(it.url)))) }
+                            act(then, Value.Fields(listOf(Field("says", Value.Text(got.says)), Field("sources", Value.Items(sources)))))
                         }
                     }
+                    "link.open" -> cmd.args["url"].text().takeIf { it.startsWith("https://") }?.let(link)
                     // Only proposed: it fits when the engine would store it, and waits for a yes (decision 0041).
                     "assistant.change" -> {
                         val ask = assistant

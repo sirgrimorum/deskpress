@@ -81,7 +81,7 @@ fun Settings(
             if (online) {
                 Text("ASSISTANT ONLINE", style = style("label", "ink-muted"))
                 Text(
-                    "This phone has no model of its own. With one of these and your key, what you ask and the day it is about go to that company, only when you ask.",
+                    "This phone has no model of its own. With one of these and your key, what you ask, the day it is about and, for a question, your neighbourhood and city go to that company, only when you ask. It may search the web for the answer.",
                     style = style("body"),
                 )
                 val models = listOf("Off" to "") + Provider.entries.map { it.label to it.name }

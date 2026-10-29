@@ -86,10 +86,12 @@ class PackViewModelTest {
                     state: {typed: "", reply: ""}
                     actions:
                       show: [{set: typed, to: ${'$'}arg}]
-                      say: [{do: assistant.ask, with: {question: typed, facts: questions, then: "'said'"}}]
+                      say: [{do: assistant.ask, with: {question: typed, facts: questions, near: "'the old town'", then: "'said'"}}]
                       said: [{set: reply, to: ${'$'}arg}]
+                      page: [{do: link.open, with: {url: ${'$'}arg}}]
                     layout:
-                      - Label: {text: "{typed}|{reply}|{can.assistant}"}
+                      - Label: {text: "{typed}|{reply.says}|{can.assistant}"}
+                      - Row: {each: reply.sources, text: item.title, value: item.url, on_tap: page}
                 rules:
                   - {screen: home}
                 """.trimIndent() + "\n",
@@ -419,6 +421,43 @@ class PackViewModelTest {
         assertEquals("is it far?|about ten minutes|true", label())
         val facts = """[{"id":"now","ask":"What now?","answer":"a walk","shortcut":true}]"""
         assertEquals(ORDERS to "The facts:\n$facts\n\nThe question: is it far?", asked)
+    }
+
+    @Test
+    fun aSearchOnlineGetsTheAreaAndItsPagesOpenInTheBrowser() = runTest {
+        val model = model({ asking }, "2026-04-11T11:30")
+        runCurrent()
+        val texts = { (model.state.value as PackState.Showing).view.tree.nodes.map { it.props["text"].text() } }
+        var looked = 0
+        model.area = { _, _ -> looked++; "Gràcia" }
+        val opened = mutableListOf<String>()
+        model.link = { opened += it }
+        model.moved(41.4, 2.15)
+        model.act("ask", Value.Null)
+        model.act("show", Value.Text("a bar?"))
+        // The phone's model has no web, so where the phone is is never looked up.
+        model.assistant = Model { _, _, _ -> "no idea" }
+        model.act("say", Value.Null)
+        runCurrent()
+        assertEquals(0, looked)
+        model.assistant = object : Model {
+            override suspend fun reply(orders: String, said: String, schema: Value?) = ""
+            override suspend fun search(question: String, facts: Value?, area: suspend () -> String) =
+                Answer("try ${area()}", listOf(Source("A bar", "https://a.example")))
+        }
+        model.act("say", Value.Null)
+        runCurrent()
+        assertEquals(listOf("a bar?|try Gràcia|true", "A bar"), texts())
+        assertEquals(1, looked)
+        model.act("page", Value.Text("https://a.example"))
+        model.act("page", Value.Text("javascript:alert(1)"))
+        runCurrent()
+        assertEquals(listOf("https://a.example"), opened)
+        // With no position, the area is the one the pack names.
+        model.unpinned()
+        model.act("say", Value.Null)
+        runCurrent()
+        assertEquals("a bar?|try the old town|true", texts()[0])
     }
 
     @Test

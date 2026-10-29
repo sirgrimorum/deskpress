@@ -90,6 +90,8 @@ ui:
   ask_anything: Ask in your own words
   ask_it: Ask
   from_the_phone: The assistant, not the trip's book
+  thinking: Thinking…
+  no_answer: No answer came. Try again.
   ask_change: Ask for a change
   propose: Propose it
   do_it: Do it
@@ -346,21 +348,29 @@ screens:
   # has a model of its own the person may ask in their words: it is given the day and nothing
   # else, and what it says is shown as its own, never beside a fact from the book.
   ask:
-    state: {open: "", typed: "", reply: ""}
+    state: {open: "", typed: "", reply: null, waiting: false}
     actions:
       back: [back]
       show: [{set: open, to: $arg}]
       close: [{set: open, to: "''"}]
       type: [{set: typed, to: $arg}]
-      say: [{set: reply, to: "''"}, {do: assistant.ask, with: {question: typed, facts: day, then: "'answered'"}}]
-      answered: [{set: reply, to: $arg}]
+      say:
+        - {set: reply, to: "null"}
+        - {set: waiting, to: "true"}
+        - {do: assistant.ask, with: {question: typed, facts: day, near: place.name or here.name, then: "'answered'"}}
+      answered: [{set: reply, to: $arg}, {set: waiting, to: "false"}]
+      page: [{do: link.open, with: {url: $arg}}]
     layout:
       - Screen: {title: ui.ask, back: ui.back, on_back: back}
-      - Row: {each: questions, text: item.ask, value: item.id, on_tap: show}
-      - Dialog: {each: questions, if: item.id == open, title: item.ask, text: item.answer, close: ui.close, on_close: close}
+      # The question in words first, above the keyboard; the pack's own menu under it.
       - Field: {if: can.assistant, label: ui.ask_anything, value: typed, on_change: type}
       - Button: {if: can.assistant and typed, label: ui.ask_it, on_tap: say}
-      - Card: {if: reply, title: ui.from_the_phone, text: reply}
+      - Label: {if: waiting, text: ui.thinking}
+      - Card: {if: reply.says, title: ui.from_the_phone, text: reply.says}
+      - Label: {if: reply and not reply.says, text: ui.no_answer}
+      - Row: {each: reply.sources, text: item.title or item.url, value: item.url, on_tap: page}
+      - Row: {each: questions, text: item.ask, value: item.id, on_tap: show}
+      - Dialog: {each: questions, if: item.id == open, title: item.ask, text: item.answer, close: ui.close, on_close: close}
 
   # What somebody at a counter asks for: a group per person with their documents, then the ones
   # that are nobody's in particular. Adults only: the documents module hands a child none.
@@ -491,7 +501,7 @@ screens:
   # The assistant may propose one of these actions in words: the host checks it would store
   # something, and nothing is kept until the person taps "Do it".
   adjust:
-    state: {picked: null, typed: "", proposal: null}
+    state: {picked: null, typed: "", proposal: null, waiting: false}
     actions:
       back: [back]
       pick: [{set: picked, to: $arg}]
@@ -504,13 +514,14 @@ screens:
       type: [{set: typed, to: $arg}]
       propose:
         - {set: proposal, to: "null"}
+        - {set: waiting, to: "true"}
         - do: assistant.change
           with:
             request: typed
             facts: "(params.next and tomorrow) or day"
             actions: "'move {block, by: minutes, negative is earlier}; resize {block, edge: start or end, by: minutes}; drop {block}; restore {block}; insert {date, time: HH:MM, text}'"
             then: "'proposed'"
-      proposed: [{set: proposal, to: $arg}]
+      proposed: [{set: proposal, to: $arg}, {set: waiting, to: "false"}]
       accept: [{do: assistant.apply}, {set: proposal, to: "null"}, {set: typed, to: "''"}]
     layout:
       - Screen: {title: ui.rearrange, back: ui.back, on_back: back}
@@ -535,11 +546,14 @@ screens:
             - Button: {label: ui.remove_block, on_tap: drop}
             - Button: {label: ui.restore_block, on_tap: restore}
       - Button: {label: ui.add_block, on_tap: add}
+      # The answer above the field, which the keyboard keeps in view.
+      - Label: {if: waiting, text: ui.thinking}
+      - Card: {if: proposal.says, title: ui.from_the_phone, text: proposal.says}
+      - Label: {if: proposal and not proposal.says, text: ui.no_answer}
+      - Label: {if: proposal.says and not proposal.fits, text: ui.no_change}
+      - Button: {if: proposal.fits, label: ui.do_it, on_tap: accept}
       - Field: {if: can.assistant, label: ui.ask_change, value: typed, on_change: type}
       - Button: {if: can.assistant and typed, label: ui.propose, on_tap: propose}
-      - Card: {if: proposal.says, title: ui.from_the_phone, text: proposal.says}
-      - Label: {if: proposal and not proposal.fits, text: ui.no_change}
-      - Button: {if: proposal.fits, label: ui.do_it, on_tap: accept}
 
   # A block of your own on a day. It joins the day in time order and then moves, stretches and drops
   # like any block the pack wrote.

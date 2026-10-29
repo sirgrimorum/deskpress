@@ -13,6 +13,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
 import android.content.pm.PackageManager.PERMISSION_GRANTED
+import android.location.Geocoder
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -423,6 +424,8 @@ class MainActivity : FragmentActivity() {
                     reshell(shell.copy(shift = Duration.between(now(model.timezone), at).seconds, at = pin))
                 }
                 model.route = { navigate(Uri.parse(directions(it))) }
+                model.area = { lat, lon -> withContext(Dispatchers.IO) { area(lat, lon) } }
+                model.link = { open(Intent(Intent.ACTION_VIEW, Uri.parse(it))) }
                 model.sync = { at ->
                     if (canCalendar()) begin(at)
                     else {
@@ -616,6 +619,12 @@ class MainActivity : FragmentActivity() {
     private fun dial(number: String) {
         open(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", number, null)))
     }
+
+    /** The neighbourhood, city and country at `lat`, `lon`, by the phone's geocoder; empty with none. */
+    @Suppress("DEPRECATION") // The listener form needs API 33.
+    private fun area(lat: Double, lon: Double): String =
+        runCatching { Geocoder(this).getFromLocation(lat, lon, 1)?.firstOrNull() }.getOrNull()
+            ?.let { listOfNotNull(it.subLocality, it.locality, it.countryName).distinct().joinToString(", ") }.orEmpty()
 
     /** A map app at `lat`, `lon` with a pin named `label`. */
     private fun map(lat: Double, lon: Double, label: String) {

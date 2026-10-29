@@ -62,11 +62,38 @@ class AssistantTest {
     @Test
     fun theAnswerIsTheTextAndADeclineIsNone() {
         val claude = """{"id":"m","content":[{"type":"thinking","thinking":"","signature":"x"},{"type":"text","text":"Ten ñ minutes"}],"stop_reason":"end_turn"}"""
-        assertEquals("Ten ñ minutes", answer(Provider.CLAUDE, claude))
-        assertEquals("", answer(Provider.CLAUDE, """{"content":[],"stop_reason":"refusal"}"""))
+        assertEquals(Answer("Ten ñ minutes", emptyList()), answer(Provider.CLAUDE, claude))
+        assertEquals("", answer(Provider.CLAUDE, """{"content":[],"stop_reason":"refusal"}""").says)
         val openai = """{"output":[{"type":"reasoning","summary":[]},{"type":"message","content":[{"type":"output_text","text":"Ten"},{"type":"refusal","refusal":"no"}]}]}"""
-        assertEquals("Ten", answer(Provider.OPENAI, openai))
-        assertEquals("", answer(Provider.OPENAI, "not json"))
+        assertEquals("Ten", answer(Provider.OPENAI, openai).says)
+        assertEquals(Answer("", emptyList()), answer(Provider.OPENAI, "not json"))
+    }
+
+    @Test
+    fun aSearchMayLookOnTheWebAndItsPagesComeOnceEachWithNoLinksInTheWords() {
+        val claude = call(Provider.CLAUDE, "k", SEARCH, "S", null, web = true).third
+        assertTrue(claude, claude.contains(""""tools":[{"type":"web_search_20260209","name":"web_search","max_uses":3}],"output_config""""))
+        val openai = call(Provider.OPENAI, "k", SEARCH, "S", null, web = true).third
+        assertTrue(openai, openai.endsWith(""""tools":[{"type":"web_search"}]}"""))
+        assertTrue(!call(Provider.OPENAI, "k", "O", "S", null).third.contains("tools"))
+        val cite = """{"type":"web_search_result_location","url":"https://a.example","title":"A"}"""
+        val fromClaude = """{"content":[{"type":"server_tool_use","name":"web_search"},{"type":"text","text":"Try A","citations":[$cite,$cite]},{"type":"text","text":", or B.","citations":[{"url":"http://b.example","title":"B"}]}]}"""
+        assertEquals(Answer("Try A, or B.", listOf(Source("A", "https://a.example"))), answer(Provider.CLAUDE, fromClaude))
+        val fromOpenai = """{"output":[{"type":"web_search_call"},{"type":"message","content":[{"type":"output_text","text":"Try [A](https://a.example) ([a.example](https://a.example?utm=x)).","annotations":[{"type":"url_citation","url":"https://a.example","title":"A"}]}]}]}"""
+        assertEquals(Answer("Try A.", listOf(Source("A", "https://a.example"))), answer(Provider.OPENAI, fromOpenai))
+    }
+
+    @Test
+    fun theAreaGoesOnlyWithASearchOnlineAndOnlyWhenThereIsOne() = runTest {
+        var body = ""
+        val online = Online(Provider.OPENAI, "k", {}) { _, _, b -> body = b; Reply(200, "{}") }
+        online.search("Where?", facts, { "Gràcia, Barcelona" })
+        assertTrue(body, body.contains("The question: Where?\\n\\nThe area: Gràcia, Barcelona") && body.contains("web_search"))
+        online.search("Where?", facts, { "" })
+        assertTrue(body, body.contains("The question: Where?\"}"))
+        // A model with no web answers from the facts and never asks where the phone is.
+        val phone = Model { orders, said, _ -> "$orders|$said" }
+        assertEquals(Answer("$ORDERS|${question("Where?", facts)}", emptyList()), phone.search("Where?", facts, { error("looked up") }))
     }
 
     @Test
