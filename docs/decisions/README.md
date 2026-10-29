@@ -46,5 +46,6 @@ history.
 | [0038](0038-a-moment-tried-out-by-tapping-it.md) | a moment tried out by tapping it: `clock.try` from a block, `on_foot`, a strip that says when and has "Back to now" | accepted |
 | [0039](0039-the-day-as-a-calendar.md) | the day as a calendar: one scale, a ruler and a now line, a column per person, `fixed`, `duration` as a length, a block's own `id` | accepted |
 | [0040](0040-a-treasure-hunt-one-clue-at-a-time.md) | a treasure hunt, one clue at a time: `clue` on a point, `hunt`, found at the spot or on an adult's word, the fix's accuracy as margin | accepted |
-| [0041](0041-an-assistant-online.md) | an assistant online: Claude or OpenAI with the person's key where the phone has no model, a change proposed, checked with `would` and kept on a yes | accepted |
+| [0041](0041-an-assistant-online.md) | an assistant online: Claude or OpenAI with the person's key where the phone has no model, a change proposed, checked with `would` and kept on a yes | accepted, amended by 0043 |
 | [0042](0042-the-ticket-outside-the-app.md) | the ticket outside the app: a due booking's papers as a quiet notification on the lock screen and a launcher shortcut | accepted |
+| [0043](0043-a-question-searched-on-the-web.md) | a question searched on the web: online only, near the neighbourhood and city, its pages opened with `link.open` | accepted |

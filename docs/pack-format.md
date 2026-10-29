@@ -272,15 +272,16 @@ as its hours, or nothing when it does not fit. `timeline.drop` and `timeline.res
 The commands the Android host runs: `clock.try` (sets the pretend clock to `date` and `time` and the pretend place to `place`'s region, decision 0038), `device.unlock` (asks for the fingerprint or the device
 credential, then runs the action named in `then`), `phone.call` (opens the dialer with `number`),
 `document.open` (shows the pack's `file` full screen under `title`), `location.get` (runs the
-action named in `then` with the device's position as `$arg`, `{lat, lon}`), `map.open` (a map
+action named in `then` with the device's position as `$arg`, `{lat, lon}`), `link.open` (an https `url` in the browser), `map.open` (a map
 app at `lat`, `lon`, pinned with `label`), `map.route` (the `stops`, a list of `{lat, lon, name}`,
 in order as directions; the navigator named in Settings when it takes the link, else whatever the
 phone offers), `climate.sync` (fetches the module's `sync` now,
 decision 0022) and `calendar.sync` (writes the events within `scope`,
 an event id, a date, or the whole trip when left out, into a calendar the person picks once per
 pack, after showing what it would add, change and remove; decision 0021). `assistant.ask` takes
-`question` and `facts` and runs the action named in `then` with the model's words as `$arg`: empty
-on a phone with no model of its own, and empty when it fails, so the pack shows nothing. The orders
+`question`, `facts` and `near`, and runs the action named in `then` with `{says, sources}`: the
+model's words, empty when it fails, and the pages it read, `{title, url}`. Online it may search the
+web near the device's neighbourhood and city, else near `near` ([decision 0043](decisions/0043-a-question-searched-on-the-web.md)). The orders
 are the host's and the pack's facts go under them as data, never as part of them
 ([decision 0027](decisions/0027-the-assistant.md)). `assistant.change` takes `request`, `facts` and
 `actions`, a text naming the actions offered and their arguments, and runs `then` with

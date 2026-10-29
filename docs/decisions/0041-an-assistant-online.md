@@ -1,6 +1,6 @@
 # 0041: an assistant online
 
-Status: accepted, 2026-10-27. Amends 0027.
+Status: accepted, 2026-10-27. Amends 0027. Amended by [0043](0043-a-question-searched-on-the-web.md).
 
 ## Context
 

@@ -207,8 +207,8 @@ host's, the pack's words go under them as data, and a phone without a model sees
 false and is offered no box. The questions marked `shortcut` are published to the launcher and the
 system assistant, so one of them opens the app already at its answer. Nothing asked leaves the
 device, except on a phone with no model whose person picked Claude or OpenAI in Settings and gave a
-key. A change asked in words is only proposed: the host checks it with `would` and keeps it on a
-yes. See decisions [0027](decisions/0027-the-assistant.md) and [0041](decisions/0041-an-assistant-online.md).
+key; a question then may search the web near the neighbourhood and city. A change asked in words is only proposed: the host checks it with `would` and keeps it on a
+yes. See decisions [0027](decisions/0027-the-assistant.md), [0041](decisions/0041-an-assistant-online.md) and [0043](decisions/0043-a-question-searched-on-the-web.md).
 
 ## Offline first
 

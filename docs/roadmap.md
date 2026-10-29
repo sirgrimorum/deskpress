@@ -34,3 +34,4 @@ phase that is not.
 | 26 ✓ | a real treasure hunt (decision 0040): one clue at a time, the next only once this one is found, GPS with its accuracy as margin | a child plays a hunt with no spoilers |
 | 27 ✓ | an assistant online (decision 0041): where the phone has no model, Claude or OpenAI with the person's key; a change proposed in words, checked with `would` and kept as facts once a person confirms | a change is made from the phone with no access to the code |
 | 28 ✓ | the ticket outside the app (decision 0042): the next booking's paper as a notification on the lock screen and a shortcut on the launcher | a ticket shows with the phone locked |
+| 29 ✓ | a question searched on the web (decision 0043): online, near the area the phone is in, with the pages it read; "Thinking…" while waiting | "what is near" gets an answer with its sources |
