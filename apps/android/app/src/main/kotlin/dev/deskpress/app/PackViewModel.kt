@@ -253,9 +253,10 @@ class PackViewModel(
                         val ask = assistant
                         val then = cmd.args["then"].text()
                         if (ask != null && then.isNotEmpty()) {
-                            // The device's area when it has a position, else the one the pack names.
+                            // The device's area when it has a position, else the one the pack names; only
+                            // that one under a pretend clock, so the real place never mixes with the pretended day.
                             val area: suspend () -> String = {
-                                _position.value?.let { area(it.first, it.second) }.orEmpty().ifEmpty { cmd.args["near"].text() }
+                                _position.value?.takeIf { shift == 0L }?.let { area(it.first, it.second) }.orEmpty().ifEmpty { cmd.args["near"].text() }
                             }
                             val got = ask.search(cmd.args["question"].text(), cmd.args["facts"], area)
                             val sources = got.sources.map { Value.Fields(listOf(Field("title", Value.Text(it.title)), Field("url", Value.Text(it.url)))) }

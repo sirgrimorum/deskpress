@@ -453,6 +453,13 @@ class PackViewModelTest {
         model.act("page", Value.Text("javascript:alert(1)"))
         runCurrent()
         assertEquals(listOf("https://a.example"), opened)
+        // Under a pretend clock the real position is left out: only the pretended place goes.
+        model.shift = 3600
+        model.act("say", Value.Null)
+        runCurrent()
+        assertEquals("a bar?|try the old town|true", texts()[0])
+        assertEquals(1, looked)
+        model.shift = 0
         // With no position, the area is the one the pack names.
         model.unpinned()
         model.act("say", Value.Null)

@@ -281,7 +281,7 @@ an event id, a date, or the whole trip when left out, into a calendar the person
 pack, after showing what it would add, change and remove; decision 0021). `assistant.ask` takes
 `question`, `facts` and `near`, and runs the action named in `then` with `{says, sources}`: the
 model's words, empty when it fails, and the pages it read, `{title, url}`. Online it may search the
-web near the device's neighbourhood and city, else near `near` ([decision 0043](decisions/0043-a-question-searched-on-the-web.md)). The orders
+web near the device's neighbourhood and city, else, or under a pretend clock, near `near` ([decision 0043](decisions/0043-a-question-searched-on-the-web.md)). The orders
 are the host's and the pack's facts go under them as data, never as part of them
 ([decision 0027](decisions/0027-the-assistant.md)). `assistant.change` takes `request`, `facts` and
 `actions`, a text naming the actions offered and their arguments, and runs `then` with

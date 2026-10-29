@@ -14,7 +14,8 @@ search (Claude `web_search`, at most three searches; OpenAI `web_search`). The o
 from the facts first, and to search near the area given when the question is about places.
 
 **The area, not the position.** With a position, the host asks the phone's geocoder for the
-neighbourhood, city and country and sends that; with none, the place the pack names in `near`.
+neighbourhood, city and country and sends that; with none, or under a pretend clock, the place the
+pack names in `near`, so the real place never mixes with the pretended day.
 The geocoder is only asked for a search, so with the phone's own model nothing leaves the device.
 Settings says the area goes too.
 
