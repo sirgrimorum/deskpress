@@ -12,7 +12,7 @@ core = "1.19.1"
 fragment = "1.9.1"
 junit = "4.13.2"
 kover = "0.9.10"
-genai = "1.0.0-beta4"
+genai = "1.0.0-beta5"
 maplibre = "13.6.1"
 
 [libraries]
